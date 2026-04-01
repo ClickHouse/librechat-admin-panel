@@ -1,6 +1,7 @@
+import { fileURLToPath } from 'node:url';
 import { Glob } from 'bun';
 
-const CLIENT_DIR = new URL('./dist/client', import.meta.url).pathname;
+const CLIENT_DIR = fileURLToPath(new URL('./dist/client', import.meta.url));
 const SERVER_ENTRY = new URL('./dist/server/server.js', import.meta.url);
 
 type Handler = { default: { fetch: (req: Request) => Promise<Response> } };
