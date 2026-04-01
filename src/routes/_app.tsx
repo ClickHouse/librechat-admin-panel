@@ -6,9 +6,9 @@ import { useCapabilities, useCommandMenu, useLocalize } from '@/hooks';
 import { CommandMenu } from '@/components/CommandMenu';
 import { AccessDenied } from '@/components/shared';
 import { SystemCapabilities } from '@/constants';
-import { Sidebar } from '@/components/Sidebar';
 import { verifyAdminTokenFn } from '@/server';
-import Header from '@/components/Header';
+import { Sidebar } from '@/components/Sidebar';
+import { Header } from '@/components/Header';
 
 const ROUTE_TITLE_KEYS: Record<string, string> = {
   '/': 'com_dash_title',
@@ -19,14 +19,6 @@ const ROUTE_TITLE_KEYS: Record<string, string> = {
   '/help': 'com_help_title',
 };
 
-const ROUTE_DESCRIPTION_KEYS: Record<string, string> = {
-  '/': 'com_dash_subtitle',
-  '/configuration': 'com_config_subtitle',
-  '/users': 'com_users_subtitle',
-  '/access': 'com_access_subtitle',
-  '/grants': 'com_grants_subtitle',
-  '/help': 'com_help_subtitle',
-};
 
 export const Route = createFileRoute('/_app')({
   beforeLoad: async ({ location }) => {
@@ -66,10 +58,6 @@ function AppLayout() {
     route === '/' ? pathname === '/' : pathname.startsWith(route),
   );
   const title = matchedKey ? localize(ROUTE_TITLE_KEYS[matchedKey]) : undefined;
-  const description =
-    matchedKey && ROUTE_DESCRIPTION_KEYS[matchedKey]
-      ? localize(ROUTE_DESCRIPTION_KEYS[matchedKey])
-      : undefined;
 
   const toggleSidebar = () =>
     setSidebarCollapsed((prev) => {
@@ -93,7 +81,7 @@ function AppLayout() {
     <div className="flex h-screen overflow-hidden">
       <Sidebar user={user} collapsed={sidebarCollapsed} onToggle={toggleSidebar} />
       <div className="flex min-w-0 flex-1 flex-col">
-        <Header title={title} description={description} onSearchClick={() => setOpen(true)} />
+        <Header title={title} onSearchClick={() => setOpen(true)} />
         <main className="flex min-h-0 flex-1 flex-col overflow-auto">
           <Outlet />
         </main>

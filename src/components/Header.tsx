@@ -1,7 +1,7 @@
-import type * as t from '@/types';
 import { useLocalize } from '@/hooks';
+import type * as t from '@/types';
 
-export default function Header({ title, description, onSearchClick, children }: t.HeaderProps) {
+export function Header({ title, onSearchClick, children }: t.HeaderProps) {
   const localize = useLocalize();
   const isMac =
     typeof navigator !== 'undefined' && /Mac|iPod|iPhone|iPad/.test(navigator.userAgent);
