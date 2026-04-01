@@ -221,7 +221,7 @@ export function ImportYamlDialog({
                   <Tabs.Trigger value="paste">{localize('com_config_import_paste')}</Tabs.Trigger>
                 </Tabs.TriggersList>
 
-                <Tabs.Content value="upload">
+                <Tabs.Content value="upload" tabIndex={-1}>
                   <div className="flex flex-col gap-3 pt-3">
                     <input
                       ref={fileInputRef}
@@ -254,7 +254,7 @@ export function ImportYamlDialog({
                   </div>
                 </Tabs.Content>
 
-                <Tabs.Content value="paste">
+                <Tabs.Content value="paste" tabIndex={-1}>
                   <div className="pt-3">
                     <textarea
                       value={yamlText}
