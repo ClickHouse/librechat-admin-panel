@@ -16,9 +16,6 @@ export default function Header({ title, description, onSearchClick, children }: 
           ) : (
             <div />
           )}
-          {description && (
-            <p className="text-xs text-(--cui-color-text-muted)">{description}</p>
-          )}
         </div>
         <div className="flex min-w-0 flex-1 items-center justify-end gap-2">
           {children}

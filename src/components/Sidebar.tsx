@@ -3,11 +3,11 @@ import { Icon, Dropdown } from '@clickhouse/click-ui';
 import { Link, useRouter } from '@tanstack/react-router';
 import type * as t from '@/types';
 import { useStripAriaExpanded, useCapabilities, useLocalize } from '@/hooks';
-import { SidebarIcon } from '@/components/shared';
 import { SettingsDialog } from './SettingsDialog';
 import { SystemCapabilities } from '@/constants';
 import { getInitials, cn } from '@/utils';
 import { adminLogoutFn } from '@/server';
+import libreChatLogo from '@/assets/librechat.svg';
 
 const navItems: t.NavItem[] = [
   { labelKey: 'com_nav_dashboard', path: '/', icon: 'home' },
@@ -79,31 +79,25 @@ export function Sidebar({ user, collapsed, onToggle }: t.SidebarProps) {
         aria-label={localize('com_a11y_admin_panel')}
         className={cn(
           'sticky top-0 z-(--z-floating) flex h-screen shrink-0 flex-col overflow-hidden border-r border-(--cui-color-stroke-default) bg-(--cui-color-background-panel) transition-[width] duration-200',
-          collapsed ? 'w-14' : 'w-46',
+          collapsed ? 'w-14' : 'w-[252px]',
         )}
       >
-        <div className="shrink-0 px-2 py-2 pt-4">
-          <button
-            type="button"
-            onClick={onToggle}
-            aria-label={localize(collapsed ? 'com_nav_expand_sidebar' : 'com_nav_collapse_sidebar')}
-            title={localize(collapsed ? 'com_nav_expand_sidebar' : 'com_nav_collapse_sidebar')}
-            className={cn(
-              'flex h-9 cursor-pointer items-center rounded-lg border-none bg-transparent text-(--cui-color-text-muted) transition-colors hover:bg-(--cui-color-background-hover) hover:text-(--cui-color-text-default)',
-              collapsed ? 'w-9 justify-center' : 'gap-3 pr-2.5 pl-2',
-            )}
-          >
-            <span aria-hidden="true" className="shrink-0">
-              <SidebarIcon className="h-5 w-5" />
+        <div
+          className={cn(
+            'flex shrink-0 items-center',
+            collapsed ? 'h-14 justify-center px-2' : 'h-14 gap-2 px-3',
+          )}
+        >
+          <img src={libreChatLogo} alt="LibreChat" className="h-6 w-6 shrink-0" />
+          {!collapsed && (
+            <span className="flex-1 truncate text-sm font-semibold text-(--cui-color-text-default)">
+              Admin Panel
             </span>
-            {!collapsed && (
-              <span className="truncate text-sm">{localize('com_nav_collapse_sidebar')}</span>
-            )}
-          </button>
+          )}
         </div>
 
-        <nav className="flex-1 overflow-y-auto px-2 pt-2" role="navigation">
-          <div className="flex flex-col gap-1">
+        <nav className="flex-1 overflow-y-auto px-2 py-2" role="navigation">
+          <div className="flex flex-col gap-0.5">
             {visibleItems.map((item) => (
               <Link
                 key={item.path}
@@ -112,8 +106,8 @@ export function Sidebar({ user, collapsed, onToggle }: t.SidebarProps) {
                 aria-label={collapsed ? localize(item.labelKey) : undefined}
                 title={collapsed ? localize(item.labelKey) : undefined}
                 className={cn(
-                  'flex h-9 items-center rounded-lg text-sm no-underline transition-colors duration-100',
-                  collapsed ? 'w-9 justify-center' : 'gap-3 px-2.5',
+                  'flex h-8 items-center rounded-md text-sm no-underline transition-colors duration-100',
+                  collapsed ? 'w-9 justify-center' : 'gap-2.5 px-2.5',
                   isActive(item.path)
                     ? 'bg-(--cui-color-background-active) font-medium text-(--cui-color-text-default)'
                     : 'font-normal text-(--cui-color-text-muted) hover:bg-(--cui-color-background-hover) hover:text-(--cui-color-text-default)',
@@ -191,6 +185,16 @@ export function Sidebar({ user, collapsed, onToggle }: t.SidebarProps) {
             )}
           </div>
         )}
+
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-label={localize(collapsed ? 'com_nav_expand_sidebar' : 'com_nav_collapse_sidebar')}
+          title={localize(collapsed ? 'com_nav_expand_sidebar' : 'com_nav_collapse_sidebar')}
+          className="flex w-full shrink-0 cursor-pointer items-center justify-center border-t border-(--cui-color-stroke-default) bg-transparent py-3 text-(--cui-color-text-muted) transition-colors hover:bg-(--cui-color-background-hover) hover:text-(--cui-color-text-default)"
+        >
+          <Icon name={collapsed ? 'slide-in' : 'slide-out'} size="sm" />
+        </button>
       </aside>
 
       <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />

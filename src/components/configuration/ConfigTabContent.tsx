@@ -1,8 +1,9 @@
 import { useMemo } from 'react';
+import { MultiAccordion } from '@clickhouse/click-ui';
 import type * as t from '@/types';
 import { FieldRenderer, SingleFieldRenderer } from './FieldRenderer';
 import { ConfigSection } from './ConfigSection';
-import { SECTION_RENDERERS } from './sections';
+import { SECTION_RENDERERS, SELF_CONTAINED_SECTION_RENDERERS } from './sections';
 import { CodeField } from './fields/CodeField';
 import { isSectionDisabled } from '@/utils';
 import { InfoBanner } from './InfoBanner';
@@ -150,8 +151,6 @@ export function ConfigTabContent({
     );
   }
 
-  const isSoloTab = sections.length === 1;
-
   const renderSectionContent = (section: t.ConfigSectionConfig) => {
     const dataKey = section.schemaKey ?? section.id;
     const sectionValue = configValues?.[dataKey];
@@ -230,44 +229,88 @@ export function ConfigTabContent({
     );
   };
 
+  const isInlineSection = (section: t.ConfigSectionConfig): boolean =>
+    Boolean(
+      (section.sectionField && isSimpleScalar(section.sectionField)) ||
+        (section.fields.length === 1 && isSimpleScalar(section.fields[0])),
+    );
+
+  type SectionGroup =
+    | { kind: 'inline'; section: t.ConfigSectionConfig }
+    | { kind: 'accordion'; sections: t.ConfigSectionConfig[] }
+    | { kind: 'flat'; section: t.ConfigSectionConfig };
+
+  const groups = visibleSections.reduce<SectionGroup[]>((acc, section) => {
+    if (SELF_CONTAINED_SECTION_RENDERERS.has(section.id)) {
+      acc.push({ kind: 'flat', section });
+      return acc;
+    }
+    if (isInlineSection(section)) {
+      acc.push({ kind: 'inline', section });
+      return acc;
+    }
+    const last = acc[acc.length - 1];
+    if (last?.kind === 'accordion') {
+      last.sections.push(section);
+    } else {
+      acc.push({ kind: 'accordion', sections: [section] });
+    }
+    return acc;
+  }, []);
+
   return (
     <form
       aria-label={localize('com_nav_configuration')}
       onSubmit={(e) => e.preventDefault()}
       className="flex flex-col gap-6 py-4"
     >
-      {visibleSections.map((section) => {
-        if (isSoloTab) {
+      {groups.map((group) => {
+        if (group.kind === 'flat') {
           return (
-            <div
-              key={section.id}
-              id={`section-${section.id}`}
-              data-section-id={`section-${section.id}`}
-            >
-              {renderSectionContent(section)}
+            <div key={group.section.id} id={`section-${group.section.id}`}>
+              {renderSectionContent(group.section)}
             </div>
           );
         }
-
-        const counts = countsById[section.id];
-        const isInline =
-          (section.sectionField && isSimpleScalar(section.sectionField)) ||
-          (section.fields.length === 1 && isSimpleScalar(section.fields[0]));
-
+        if (group.kind === 'inline') {
+          const { section } = group;
+          const counts = countsById[section.id];
+          return (
+            <ConfigSection
+              key={section.id}
+              sectionId={section.id}
+              title={localize(section.titleKey)}
+              description={section.descriptionKey ? localize(section.descriptionKey) : undefined}
+              learnMoreUrl={section.learnMoreUrl}
+              configuredCount={counts?.configured ?? 0}
+              totalCount={counts?.total ?? 0}
+              inline
+              showConfiguredOnly={showConfiguredOnly}
+            >
+              {renderSectionContent(section)}
+            </ConfigSection>
+          );
+        }
         return (
-          <ConfigSection
-            key={section.id}
-            sectionId={section.id}
-            title={localize(section.titleKey)}
-            description={section.descriptionKey ? localize(section.descriptionKey) : undefined}
-            learnMoreUrl={section.learnMoreUrl}
-            configuredCount={counts?.configured ?? 0}
-            totalCount={counts?.total ?? 0}
-            inline={isInline}
-            showConfiguredOnly={showConfiguredOnly}
+          <MultiAccordion
+            key={group.sections[0].id}
+            type="multiple"
+            showBorder
+            showCheck={false}
+            fillWidth
+            defaultValue={group.sections.map((s) => s.id)}
+            data-top-level-accordion
           >
-            {renderSectionContent(section)}
-          </ConfigSection>
+            {group.sections.map((section) => (
+              <MultiAccordion.Item
+                key={section.id}
+                value={section.id}
+                title={localize(section.titleKey)}
+              >
+                {renderSectionContent(section)}
+              </MultiAccordion.Item>
+            ))}
+          </MultiAccordion>
         );
       })}
     </form>

@@ -41,7 +41,7 @@ export function HelpPage() {
         <h3 className="mb-3 text-sm font-medium text-(--cui-color-title-muted)">
           {localize('com_help_resources')}
         </h3>
-        <div className="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-3">
+        <div className="flex flex-col gap-3">
           {RESOURCES.map((resource) => (
             <a
               key={resource.titleKey}

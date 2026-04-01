@@ -52,7 +52,10 @@ function AppLayout() {
   const router = useRouter();
   const localize = useLocalize();
   const { open, setOpen } = useCommandMenu();
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    const stored = localStorage.getItem('admin-panel:sidebar-collapsed');
+    return stored !== null ? stored === 'true' : true;
+  });
   const pathname = router.state.location.pathname;
 
   if (!isLoading && !isError && !hasCapability(SystemCapabilities.ACCESS_ADMIN)) {
@@ -68,7 +71,12 @@ function AppLayout() {
       ? localize(ROUTE_DESCRIPTION_KEYS[matchedKey])
       : undefined;
 
-  const toggleSidebar = () => setSidebarCollapsed((prev) => !prev);
+  const toggleSidebar = () =>
+    setSidebarCollapsed((prev) => {
+      const next = !prev;
+      localStorage.setItem('admin-panel:sidebar-collapsed', String(next));
+      return next;
+    });
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {

@@ -1,27 +1,33 @@
 import { Icon } from '@clickhouse/click-ui';
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback } from 'react';
 import type * as t from '@/types';
 import { useLocalize } from '@/hooks';
 
 const BTN =
   'flex cursor-pointer items-center gap-1 rounded border-none bg-transparent px-1.5 py-0.5 text-xs text-(--cui-color-text-muted) transition-colors hover:bg-(--cui-color-background-hover) hover:text-(--cui-color-text-default)';
 
-function dispatchExpandAll(container: HTMLElement, abortRef: { current: boolean }, wave = 0) {
-  if (abortRef.current || wave > 5) return;
-  const closed = container.querySelectorAll('.config-section-grid-closed');
-  if (closed.length === 0) return;
-  for (const grid of closed) {
-    const section = grid.closest('section');
-    if (section) section.dispatchEvent(new Event('config:expand'));
+function clickAccordionTrigger(item: Element) {
+  const trigger = item.querySelector<HTMLButtonElement>(':scope > button');
+  if (trigger) {
+    trigger.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
   }
-  setTimeout(() => dispatchExpandAll(container, abortRef, wave + 1), 300);
 }
 
-function dispatchCollapseAll(container: HTMLElement) {
-  const open = container.querySelectorAll('.config-section-grid-open');
-  for (const grid of open) {
-    const section = grid.closest('section');
-    if (section) section.dispatchEvent(new Event('config:collapse'));
+function expandTopLevelAccordions(container: HTMLElement) {
+  const roots = container.querySelectorAll('[data-top-level-accordion]');
+  for (const root of roots) {
+    for (const item of root.querySelectorAll(':scope > [data-state="closed"]')) {
+      clickAccordionTrigger(item);
+    }
+  }
+}
+
+function collapseTopLevelAccordions(container: HTMLElement) {
+  const roots = container.querySelectorAll('[data-top-level-accordion]');
+  for (const root of roots) {
+    for (const item of root.querySelectorAll(':scope > [data-state="open"]')) {
+      clickAccordionTrigger(item);
+    }
   }
 }
 
@@ -33,18 +39,15 @@ export function ContentToolbar({
 }: t.ContentToolbarProps) {
   const localize = useLocalize();
   const [collapsed, setCollapsed] = useState(false);
-  const expandAbortRef = useRef(false);
 
   const handleExpandAll = useCallback(() => {
     if (!scrollContainer) return;
-    expandAbortRef.current = false;
-    dispatchExpandAll(scrollContainer, expandAbortRef);
+    expandTopLevelAccordions(scrollContainer);
   }, [scrollContainer]);
 
   const handleCollapseAll = useCallback(() => {
     if (!scrollContainer) return;
-    expandAbortRef.current = true;
-    dispatchCollapseAll(scrollContainer);
+    collapseTopLevelAccordions(scrollContainer);
     scrollContainer.scrollTo({ top: 0, behavior: 'smooth' });
   }, [scrollContainer]);
 

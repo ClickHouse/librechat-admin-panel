@@ -20,3 +20,7 @@ export const SECTION_RENDERERS: Partial<Record<string, React.ComponentType<t.Fie
     endpointsProviders: ProvidersRenderer,
     mcpServers: McpServersRenderer,
   };
+
+/** Sections whose custom renderer handles its own accordion — they are rendered
+ *  directly in ConfigTabContent without an outer MultiAccordion.Item wrapper. */
+export const SELF_CONTAINED_SECTION_RENDERERS = new Set(['endpointsProviders']);

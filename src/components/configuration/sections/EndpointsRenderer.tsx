@@ -15,7 +15,7 @@
  */
 
 import { useMemo, useState } from 'react';
-import { Icon } from '@clickhouse/click-ui';
+import { Icon, MultiAccordion } from '@clickhouse/click-ui';
 import type { ReactNode } from 'react';
 import type * as t from '@/types';
 import { FieldRenderer, NestedGroup, renderInlineField } from '../FieldRenderer';
@@ -105,86 +105,10 @@ function withRequired(field: t.SchemaField): t.SchemaField {
 }
 
 // ---------------------------------------------------------------------------
-// CollapsibleEndpointSection — shared header + collapsible wrapper
+// Shared props type
 // ---------------------------------------------------------------------------
 
 type SharedProps = Omit<t.FieldRendererProps, 'fields' | 'parentPath'>;
-
-function CollapsibleEndpointSection({
-  sectionId,
-  label,
-  total,
-  configured,
-  defaultExpanded,
-  onAdd,
-  addLabel,
-  children,
-}: {
-  sectionId: string;
-  label: string;
-  total: number;
-  configured: number;
-  defaultExpanded: boolean;
-  /** When provided, renders a "+ Add entry" button in the header. */
-  onAdd?: () => void;
-  addLabel?: string;
-  children: React.ReactNode;
-}) {
-  const localize = useLocalize();
-  const hasConfigured = configured > 0;
-
-  const { isExpanded, hasEverExpanded, sectionRef, toggle, handleAddClick } = useCollapsibleSection(
-    { defaultExpanded, onAdd },
-  );
-
-  return (
-    <section ref={sectionRef} id={sectionId} aria-label={label} className="flex w-full flex-col">
-      <div className="sticky top-0 z-(--z-sticky) flex w-full items-center gap-4 rounded-lg bg-(--cui-color-background-panel) px-0">
-        <button
-          type="button"
-          aria-expanded={isExpanded}
-          data-section-id={sectionId}
-          onClick={toggle}
-          className="flex flex-1 cursor-pointer items-center gap-2 rounded-lg border-none bg-transparent py-2.5 pr-0 pl-1 text-left transition-colors outline-none select-none hover:bg-(--cui-color-background-hover) focus-visible:bg-(--cui-color-background-hover)"
-        >
-          <span
-            className={cn(
-              'flex shrink-0 items-center justify-center transition-transform duration-200',
-              isExpanded && 'rotate-90',
-            )}
-          >
-            <Icon name="chevron-right" size="sm" />
-          </span>
-          <span className="text-sm font-semibold text-(--cui-color-text-default)">{label}</span>
-          {total > 0 && (
-            <span
-              className={cn(
-                'config-count-badge',
-                hasConfigured ? 'config-count-badge-active' : 'config-count-badge-muted',
-              )}
-            >
-              {configured}/{total}
-            </span>
-          )}
-        </button>
-        {onAdd && (
-          <button
-            type="button"
-            onClick={handleAddClick}
-            aria-label={addLabel ?? localize('com_a11y_add_item', { name: label })}
-            className="config-add-btn"
-          >
-            <Icon name="plus" size="sm" />
-            <span>
-              {addLabel ?? localize('com_ui_add_item', { item: localize('com_ui_entry') })}
-            </span>
-          </button>
-        )}
-      </div>
-      {renderCollapsible(isExpanded, hasEverExpanded, children)}
-    </section>
-  );
-}
 
 // ---------------------------------------------------------------------------
 // GroupedFieldRenderer — renders fields organized into collapsible groups
@@ -600,7 +524,6 @@ function ProviderSection({
   }, 0);
 
   const label = localize(`com_config_field_${field.key}`);
-  const sectionId = `section-${path}`;
 
   const rendererProps: Omit<t.FieldRendererProps, 'fields'> = {
     parentValue: providerValue,
@@ -624,43 +547,42 @@ function ProviderSection({
     showChangedOnly,
   };
 
-  if (!hasPrioritySplit) {
-    return (
-      <CollapsibleEndpointSection
-        sectionId={sectionId}
-        label={label}
-        total={total}
-        configured={configured}
-        defaultExpanded={configured > 0}
-      >
-        <FieldRenderer fields={children} {...rendererProps} />
-      </CollapsibleEndpointSection>
-    );
-  }
+  const title = (
+    <span className="flex items-center gap-2">
+      {label}
+      {total > 0 && (
+        <span
+          className={cn(
+            'config-count-badge',
+            configured > 0 ? 'config-count-badge-active' : 'config-count-badge-muted',
+          )}
+        >
+          {configured}/{total}
+        </span>
+      )}
+    </span>
+  );
 
   return (
-    <CollapsibleEndpointSection
-      sectionId={sectionId}
-      label={label}
-      total={total}
-      configured={configured}
-      defaultExpanded={configured > 0}
-    >
-      {/* Priority fields — always rendered at the top */}
-      <FieldRenderer fields={priorityChildren} {...rendererProps} alwaysShowLabels />
-
-      {/* Remaining fields — lazily revealed under "More settings" */}
-      {restChildren.length > 0 && (
-        <NestedGroup
-          label={localize('com_config_more_settings')}
-          totalCount={restChildren.length}
-          configuredCount={restConfigured}
-          depth={2}
-        >
-          <FieldRenderer fields={restChildren} {...rendererProps} />
-        </NestedGroup>
+    <MultiAccordion.Item id={`section-${path}`} value={path} title={title}>
+      {hasPrioritySplit ? (
+        <>
+          <FieldRenderer fields={priorityChildren} {...rendererProps} alwaysShowLabels />
+          {restChildren.length > 0 && (
+            <NestedGroup
+              label={localize('com_config_more_settings')}
+              totalCount={restChildren.length}
+              configuredCount={restConfigured}
+              depth={2}
+            >
+              <FieldRenderer fields={restChildren} {...rendererProps} />
+            </NestedGroup>
+          )}
+        </>
+      ) : (
+        <FieldRenderer fields={children} {...rendererProps} />
       )}
-    </CollapsibleEndpointSection>
+    </MultiAccordion.Item>
   );
 }
 
@@ -798,11 +720,31 @@ export function ProvidersRenderer(props: t.FieldRendererProps) {
       })
     : providerFields;
 
+  const defaultOpen = visibleProviders
+    .filter((f) => {
+      const { configured } = countConfigured(
+        f.children ?? [],
+        `${parentPath}.${f.key}`,
+        configuredPaths,
+      );
+      return configured > 0;
+    })
+    .map((f) => `${parentPath}.${f.key}`);
+
   return (
     <div className="flex flex-col gap-2">
-      {visibleProviders.map((field) => (
-        <ProviderSection key={field.key} field={field} {...sharedProps} />
-      ))}
+      <MultiAccordion
+        type="multiple"
+        showBorder
+        showCheck={false}
+        fillWidth
+        defaultValue={defaultOpen}
+        data-top-level-accordion
+      >
+        {visibleProviders.map((field) => (
+          <ProviderSection key={field.key} field={field} {...sharedProps} />
+        ))}
+      </MultiAccordion>
 
       {otherFields.length > 0 && <FieldRenderer fields={otherFields} {...sharedProps} />}
     </div>
