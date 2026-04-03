@@ -62,6 +62,7 @@ const profileMapOptions = (fieldPaths: string[]) =>
         (r: { profileMap: Record<string, string[]> }) => r.profileMap,
       ),
     enabled: fieldPaths.length > 0,
+    staleTime: 60_000,
   });
 
 function resolvedConfigOptions(scope: t.ScopeSelection) {
@@ -77,6 +78,7 @@ function resolvedConfigOptions(scope: t.ScopeSelection) {
         },
       }),
     enabled: principalType != null && principalId != null,
+    staleTime: 60_000,
   });
 }
 
