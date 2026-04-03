@@ -1,0 +1,31 @@
+{
+  "name": "eslint-plugin-click-ui",
+  "version": "1.1.1",
+  "description": "ESLint plugin for Click UI Design System - enforces best practices and catches common mistakes. Based on official Click UI documentation.",
+  "main": "index.js",
+  "keywords": [
+    "eslint",
+    "eslintplugin",
+    "eslint-plugin",
+    "click-ui",
+    "clickhouse",
+    "design-system",
+    "react",
+    "linter"
+  ],
+  "author": "ClickHouse",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ClickHouse/eslint-plugin-click-ui"
+  },
+  "peerDependencies": {
+    "eslint": ">=7.0.0"
+  },
+  "devDependencies": {
+    "eslint": "^8.0.0"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  }
+}

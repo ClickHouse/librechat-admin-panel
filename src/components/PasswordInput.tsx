@@ -41,6 +41,7 @@ export const PasswordInput = forwardRef<HTMLInputElement, PasswordInputProps>((p
 
   return (
     <div ref={wrapperRef} className="password-field-a11y w-full">
+      {/* eslint-disable-next-line click-ui/form-controlled-components -- value/onChange passed via ...props */}
       <PasswordField ref={ref} {...props} />
     </div>
   );

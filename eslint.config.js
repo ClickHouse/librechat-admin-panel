@@ -2,6 +2,7 @@ import tsParser from '@typescript-eslint/parser';
 import tsPlugin from '@typescript-eslint/eslint-plugin';
 import importPlugin from 'eslint-plugin-import-x';
 import tailwindCanonicalClasses from 'eslint-plugin-tailwind-canonical-classes';
+import clickUiPlugin from 'eslint-plugin-click-ui';
 
 export default [
   {
@@ -16,6 +17,7 @@ export default [
       '@typescript-eslint': tsPlugin,
       'import-x': importPlugin,
       'tailwind-canonical-classes': tailwindCanonicalClasses,
+      'click-ui': clickUiPlugin,
     },
     rules: {
       '@typescript-eslint/ban-ts-comment': ['error', { 'ts-ignore': false }],
@@ -48,6 +50,9 @@ export default [
         'warn',
         { cssPath: './src/styles.css' },
       ],
+      ...clickUiPlugin.configs.recommended.rules,
+      'click-ui/require-provider': 'off',
+      'click-ui/select-requires-options': 'off',
     },
   },
 ];

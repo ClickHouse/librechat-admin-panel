@@ -1,0 +1,45 @@
+{
+  "env": {
+    "browser": true,
+    "es2021": true
+  },
+  "extends": [
+    "eslint:recommended",
+    "plugin:react/recommended",
+    "plugin:@typescript-eslint/recommended",
+    "plugin:click-ui/recommended"
+  ],
+  "parser": "@typescript-eslint/parser",
+  "parserOptions": {
+    "ecmaFeatures": {
+      "jsx": true
+    },
+    "ecmaVersion": "latest",
+    "sourceType": "module"
+  },
+  "plugins": [
+    "react",
+    "@typescript-eslint",
+    "click-ui"
+  ],
+  "rules": {
+    "click-ui/require-provider": "error",
+    "click-ui/require-css-import": "error",
+    "click-ui/button-requires-label": "error",
+    "click-ui/icon-name-format": "error",
+    "click-ui/logo-name-format": "error",
+    "click-ui/valid-icon-name": "warn",
+    "click-ui/valid-logo-name": "warn",
+    "click-ui/container-requires-orientation": "error",
+    "click-ui/table-structure": "error",
+    "click-ui/dialog-controlled-state": "error",
+    "click-ui/form-controlled-components": "error",
+    "click-ui/prefer-named-imports": "warn",
+    "click-ui/valid-theme-name": "error",
+    "click-ui/valid-spacing-token": "warn",
+    "click-ui/valid-icon-size": "warn",
+    "click-ui/valid-button-type": "warn",
+    "click-ui/select-requires-options": "error",
+    "click-ui/datepicker-controlled": "error"
+  }
+}

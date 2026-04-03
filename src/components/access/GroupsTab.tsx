@@ -88,6 +88,7 @@ export function GroupsTab({ onCreateGroup }: t.GroupsTabProps) {
         <Button
           type="secondary"
           iconLeft="plus"
+          label={localize('com_access_create_group')}
           onClick={onCreateGroup}
           disabled={!canManage}
           aria-disabled={!canManage || undefined}
@@ -96,9 +97,7 @@ export function GroupsTab({ onCreateGroup }: t.GroupsTabProps) {
               ? localize('com_cap_no_permission', { cap: SystemCapabilities.MANAGE_GROUPS })
               : undefined
           }
-        >
-          {localize('com_access_create_group')}
-        </Button>
+        />
       </div>
 
       {groups.length === 0 ? (

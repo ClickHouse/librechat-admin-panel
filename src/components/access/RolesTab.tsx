@@ -77,6 +77,7 @@ export function RolesTab({ onCreateRole }: t.RolesTabProps) {
         <Button
           type="secondary"
           iconLeft="plus"
+          label={localize('com_access_create_role')}
           onClick={onCreateRole}
           disabled={!canManage}
           aria-disabled={!canManage || undefined}
@@ -85,9 +86,7 @@ export function RolesTab({ onCreateRole }: t.RolesTabProps) {
               ? localize('com_cap_no_permission', { cap: SystemCapabilities.MANAGE_ROLES })
               : undefined
           }
-        >
-          {localize('com_access_create_role')}
-        </Button>
+        />
       </div>
 
       {filtered.length === 0 ? (
