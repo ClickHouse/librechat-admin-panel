@@ -6,11 +6,11 @@ import { AddItemButton, TrashButton } from '@/components/shared';
 import { useLocalize } from '@/hooks';
 
 const DEFAULT_TYPES: t.KVValueType[] = ['string', 'number', 'boolean'];
-const TYPE_LABELS: Record<t.KVValueType, string> = {
-  string: 'abc',
-  number: '123',
-  boolean: 'T/F',
-  json: '{ }',
+const TYPE_LABEL_KEYS: Record<t.KVValueType, string> = {
+  string: 'com_kv_type_string',
+  number: 'com_kv_type_number',
+  boolean: 'com_kv_type_boolean',
+  json: 'com_kv_type_json',
 };
 
 function LocalInput({
@@ -171,8 +171,8 @@ export function KeyValueField({
               disabled={disabled}
               aria-label={valueLabel}
             >
-              <Select.Item value="true">true</Select.Item>
-              <Select.Item value="false">false</Select.Item>
+              <Select.Item value="true">{localize('com_ui_true')}</Select.Item>
+              <Select.Item value="false">{localize('com_ui_false')}</Select.Item>
             </Select>
           </div>
         ) : (
@@ -195,7 +195,7 @@ export function KeyValueField({
             >
               {availableTypes.map((vt) => (
                 <Select.Item key={vt} value={vt}>
-                  {TYPE_LABELS[vt]}
+                  {localize(TYPE_LABEL_KEYS[vt])}
                 </Select.Item>
               ))}
             </Select>
@@ -231,7 +231,7 @@ export function KeyValueField({
             >
               {availableTypes.map((vt) => (
                 <Select.Item key={vt} value={vt}>
-                  {TYPE_LABELS[vt]}
+                  {localize(TYPE_LABEL_KEYS[vt])}
                 </Select.Item>
               ))}
             </Select>

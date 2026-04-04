@@ -1016,5 +1016,16 @@
   "com_grants_assign_hint": "Roles and groups can be edited directly from the table above.",
   "com_grants_assign_no_users": "No eligible users found",
   "com_error_load_groups": "Failed to load groups. Please try again.",
-  "com_error_load_members": "Failed to load members. Please try again."
+  "com_error_load_members": "Failed to load members. Please try again.",
+  "com_perm_unavailable_title": "Could not verify permissions",
+  "com_perm_unavailable_desc": "The permissions service is temporarily unavailable. Please reload the page to try again.",
+  "com_ui_reload": "Reload",
+  "com_config_pending_reset": "Pending reset",
+  "com_config_validation_more": "...and {{count}} more",
+  "com_scope_delete_error": "Failed to delete configuration",
+  "com_kv_type_string": "abc",
+  "com_kv_type_number": "123",
+  "com_kv_type_boolean": "T/F",
+  "com_kv_type_json": "{ }",
+  "com_a11y_logo_alt": "LibreChat logo"
 }

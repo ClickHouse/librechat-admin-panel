@@ -123,10 +123,10 @@ export function ScopeSelector({
         resetState();
       } catch (err) {
         setCreating(false);
-        onError?.(err instanceof Error ? err.message : 'Failed to create scope');
+        onError?.(err instanceof Error ? err.message : localize('com_scope_create_error'));
       }
     },
-    [creating, queryClient, resetState, onError],
+    [creating, queryClient, resetState, onError, localize],
   );
 
   const handleCreateForGroup = useCallback(
@@ -146,10 +146,10 @@ export function ScopeSelector({
         resetState();
       } catch (err) {
         setCreating(false);
-        onError?.(err instanceof Error ? err.message : 'Failed to create scope');
+        onError?.(err instanceof Error ? err.message : localize('com_scope_create_error'));
       }
     },
-    [creating, queryClient, resetState, onError],
+    [creating, queryClient, resetState, onError, localize],
   );
 
   const handleDelete = useCallback(async () => {
@@ -174,9 +174,9 @@ export function ScopeSelector({
       setDeleting(false);
     } catch (err) {
       setDeleting(false);
-      onError?.(err instanceof Error ? err.message : 'Failed to delete scope');
+      onError?.(err instanceof Error ? err.message : localize('com_scope_delete_error'));
     }
-  }, [deleteTarget, deleting, queryClient, currentSelection, onSelect, onError]);
+  }, [deleteTarget, deleting, queryClient, currentSelection, onSelect, onError, localize]);
 
   const roleScopes = useMemo(
     () => scopes.filter((s) => s.principalType === PrincipalType.ROLE),

@@ -410,7 +410,9 @@ export function ImportYamlDialog({
                   ))}
                   {validationErrors.length > 10 && (
                     <li className="py-0.5 opacity-70">
-                      ...and {validationErrors.length - 10} more
+                      {localize('com_config_validation_more', {
+                        count: String(validationErrors.length - 10),
+                      })}
                     </li>
                   )}
                 </ul>

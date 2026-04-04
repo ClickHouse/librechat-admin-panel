@@ -53,7 +53,9 @@ export function ConfigRow({
   ) : null;
 
   const pendingResetHint = isPendingReset ? (
-    <span className="text-[11px] font-medium text-(--cui-color-accent-danger)">Pending reset</span>
+    <span className="text-[11px] font-medium text-(--cui-color-accent-danger)">
+      {localize('com_config_pending_reset')}
+    </span>
   ) : null;
 
   const configuredDot =

@@ -4,14 +4,14 @@ import { ObjectEntryCard } from './ObjectEntryCard';
 import { AddItemButton } from '@/components/shared';
 import { useLocalize } from '@/hooks';
 
-function getEntryLabel(item: t.ConfigValue, index: number): string {
+function getEntryLabel(item: t.ConfigValue): string | null {
   if (item && typeof item === 'object' && !Array.isArray(item)) {
     const obj = item as Record<string, t.ConfigValue>;
     if (typeof obj.name === 'string' && obj.name) return obj.name;
     if (typeof obj.label === 'string' && obj.label) return obj.label;
     if (typeof obj.group === 'string' && obj.group) return obj.group;
   }
-  return `Entry ${index + 1}`;
+  return null;
 }
 
 export function ArrayObjectField({
@@ -107,7 +107,7 @@ export function ArrayObjectField({
         <ObjectEntryCard
           key={keys[index] ?? index}
           id={entryIdPrefix ? `${entryIdPrefix}-${index}` : undefined}
-          entryKey={getEntryLabel(item, index)}
+          entryKey={getEntryLabel(item) ?? localize('com_config_entry_n', { n: String(index + 1) })}
           fields={fields}
           value={item}
           onValueChange={(v) => handleEntryChange(index, v)}
