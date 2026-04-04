@@ -83,15 +83,11 @@ export function Sidebar({ user, collapsed, onToggle }: t.SidebarProps) {
         )}
       >
         <div className="flex h-14 shrink-0 items-center px-2">
-          <div
-            className={cn('flex items-center', collapsed ? 'w-9 justify-center' : 'gap-2.5 px-1.5')}
-          >
+          <div className="flex items-center gap-2.5 overflow-hidden px-1.5">
             <img src={libreChatLogo} alt="LibreChat" className="h-6 w-6 shrink-0" />
-            {!collapsed && (
-              <span className="flex-1 truncate text-sm font-semibold text-(--cui-color-text-default)">
-                Admin Panel
-              </span>
-            )}
+            <span className="truncate text-sm font-semibold text-(--cui-color-text-default)">
+              Admin Panel
+            </span>
           </div>
         </div>
 
@@ -105,8 +101,7 @@ export function Sidebar({ user, collapsed, onToggle }: t.SidebarProps) {
                 aria-label={collapsed ? localize(item.labelKey) : undefined}
                 title={collapsed ? localize(item.labelKey) : undefined}
                 className={cn(
-                  'flex h-8 items-center rounded-md text-sm no-underline transition-colors duration-100',
-                  collapsed ? 'w-9 justify-center' : 'gap-2.5 px-2.5',
+                  'flex h-8 items-center gap-2.5 overflow-hidden rounded-md px-2.5 text-sm whitespace-nowrap no-underline transition-colors duration-100',
                   isActive(item.path)
                     ? 'bg-(--cui-color-background-active) font-medium text-(--cui-color-text-default)'
                     : 'font-normal text-(--cui-color-text-muted) hover:bg-(--cui-color-background-hover) hover:text-(--cui-color-text-default)',
@@ -115,7 +110,7 @@ export function Sidebar({ user, collapsed, onToggle }: t.SidebarProps) {
                 <span aria-hidden="true" className="shrink-0">
                   <Icon name={item.icon} size="sm" />
                 </span>
-                {!collapsed && <span className="truncate text-sm">{localize(item.labelKey)}</span>}
+                <span className="truncate text-sm">{localize(item.labelKey)}</span>
               </Link>
             ))}
           </div>
@@ -123,12 +118,7 @@ export function Sidebar({ user, collapsed, onToggle }: t.SidebarProps) {
 
         {initials && (
           <div className="flex shrink-0 items-center border-t border-(--cui-color-stroke-default) px-2 py-3">
-            <div
-              className={cn(
-                'flex items-center',
-                collapsed ? 'w-9 justify-center' : 'gap-2.5 px-0.5',
-              )}
-            >
+            <div className="flex items-center gap-2.5 overflow-hidden px-0.5">
               <Dropdown>
                 <Dropdown.Trigger>
                   <button
@@ -171,7 +161,7 @@ export function Sidebar({ user, collapsed, onToggle }: t.SidebarProps) {
                   </div>
                 </Dropdown.Content>
               </Dropdown>
-              {!collapsed && user && (
+              {user && (
                 <div className="min-w-0 flex-1">
                   <span className="block truncate text-sm leading-tight font-medium text-(--cui-color-text-default)">
                     {user.name || ''}
