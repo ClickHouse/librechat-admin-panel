@@ -101,6 +101,35 @@ function hasUnionObjectVariant(schema: t.ZodSchemaLike): boolean {
   return options.some((opt: t.ZodSchemaLike) => opt && typeof opt === 'object' && 'shape' in opt);
 }
 
+const ZOD_TO_KV: Record<string, t.KVValueType> = {
+  ZodString: 'string',
+  ZodNumber: 'number',
+  ZodBoolean: 'boolean',
+};
+
+function inferRecordKVTypes(schema: t.ZodSchemaLike): t.KVValueType[] | undefined {
+  if (!schema?._def) return undefined;
+  const tn = schema._def.typeName;
+  if (tn && tn in ZOD_TO_KV) return [ZOD_TO_KV[tn]];
+  if (tn !== 'ZodUnion') return undefined;
+  const types = new Set<t.KVValueType>();
+  for (const opt of schema._def.options ?? []) {
+    const optTn = opt?._def?.typeName;
+    if (optTn && optTn in ZOD_TO_KV) {
+      types.add(ZOD_TO_KV[optTn]);
+    } else if (
+      optTn === 'ZodRecord' ||
+      optTn === 'ZodArray' ||
+      optTn === 'ZodObject' ||
+      (opt && typeof opt === 'object' && 'shape' in opt)
+    ) {
+      types.add('json');
+    }
+  }
+  return types.size > 0 ? [...types] : undefined;
+}
+
+
 /** Merges fields from union object variants into a single list.
  *  When the same key appears in multiple variants with different literal
  *  types, the literals are combined into a union(literal(...) | literal(...))
@@ -272,6 +301,7 @@ export function extractSchemaTree(
           let children: t.SchemaField[] | undefined;
           let recordValueType: 'primitive' | 'complex' | undefined;
           let recordValueAllowsPrimitive: boolean | undefined;
+          let recordValueKVTypes: t.KVValueType[] | undefined;
 
           if (isArray && innerSchema?._def?.type) {
             let elementSchema: t.ZodSchemaLike = innerSchema._def.type;
@@ -301,6 +331,7 @@ export function extractSchemaTree(
                 recordValueAllowsPrimitive = true;
               } else {
                 recordValueType = 'primitive';
+                recordValueKVTypes = inferRecordKVTypes(unwrapped);
               }
             }
           }
@@ -318,6 +349,7 @@ export function extractSchemaTree(
             depth,
             recordValueType,
             recordValueAllowsPrimitive,
+            recordValueKVTypes,
           });
         }
       }

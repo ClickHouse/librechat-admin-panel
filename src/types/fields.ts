@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import type React from 'react';
-import type { ConfigValue, SchemaField, SelectOption, KeyValuePair } from './config';
+import type { ConfigValue, SchemaField, SelectOption, KeyValuePair, KVValueType } from './config';
 
 export interface SelectFieldProps {
   id: string;
@@ -17,6 +17,7 @@ export interface KeyValueFieldProps {
   pairs: KeyValuePair[];
   onChange: (pairs: KeyValuePair[]) => void;
   disabled?: boolean;
+  valueTypes?: KVValueType[];
   keyPlaceholder?: string;
   valuePlaceholder?: string;
   'aria-label'?: string;

@@ -11,7 +11,7 @@ export function serializeKVPairs(value: t.ConfigValue): t.ConfigValue {
     return value;
   const pairs = value as t.KeyValuePair[];
   const DANGEROUS_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
-  const record: Record<string, string | number | boolean> = Object.create(null);
+  const record: Record<string, t.ConfigValue> = Object.create(null);
   for (const pair of pairs) {
     if (!pair.key || DANGEROUS_KEYS.has(pair.key)) continue;
     record[pair.key] = coerceKVValue(pair.value, pair.valueType ?? 'string');
@@ -19,11 +19,18 @@ export function serializeKVPairs(value: t.ConfigValue): t.ConfigValue {
   return record;
 }
 
-function coerceKVValue(raw: string, type: t.KVValueType): string | number | boolean {
+function coerceKVValue(raw: string, type: t.KVValueType): t.ConfigValue {
   if (type === 'boolean') return raw === 'true';
   if (type === 'number') {
     const n = Number(raw);
     return Number.isFinite(n) ? n : raw;
+  }
+  if (type === 'json') {
+    try {
+      return JSON.parse(raw) as t.ConfigValue;
+    } catch {
+      return raw;
+    }
   }
   return raw;
 }

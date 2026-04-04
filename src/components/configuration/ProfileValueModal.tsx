@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { PrincipalType } from 'librechat-data-provider';
 import { Icon, Button, Dialog } from '@clickhouse/click-ui';
 import type * as t from '@/types';
-import { getEnumOptions, getArrayItemType, inferKVType } from './utils';
+import { getEnumOptions, getArrayItemType, toKVPair } from './utils';
 import { KeyValueField } from './fields/KeyValueField';
 import { TrashButton } from '@/components/shared';
 import { getScopeTypeConfig } from '@/constants';
@@ -202,11 +202,7 @@ function ModalValueControl({
           typeof value === 'object' && value !== null
             ? (value as Record<string, t.ConfigValue>)
             : {},
-        ).map(([k, v]) => ({
-          key: k,
-          value: typeof v === 'string' ? v : JSON.stringify(v ?? ''),
-          valueType: inferKVType(v),
-        }));
+        ).map(([k, v]) => toKVPair(k, v));
 
     return (
       <KeyValueField

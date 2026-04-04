@@ -39,6 +39,7 @@ export interface SchemaField {
   depth: number;
   recordValueType?: 'primitive' | 'complex';
   recordValueAllowsPrimitive?: boolean;
+  recordValueKVTypes?: KVValueType[];
 }
 
 export interface ZodDef {
@@ -71,7 +72,7 @@ export interface SelectOption {
   value: string;
 }
 
-export type KVValueType = 'string' | 'number' | 'boolean';
+export type KVValueType = 'string' | 'number' | 'boolean' | 'json';
 
 export interface KeyValuePair {
   [k: string]: string | KVValueType | undefined;

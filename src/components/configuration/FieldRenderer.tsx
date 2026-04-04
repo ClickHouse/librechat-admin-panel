@@ -10,7 +10,7 @@ import {
   getControlType,
   getEnumOptions,
   hasDescendant,
-  inferKVType,
+  toKVPair,
   isStringLikeItemType,
   splitUnionTypes,
 } from './utils';
@@ -413,11 +413,7 @@ export function SingleFieldRenderer({
           typeof currentValue === 'object' && currentValue !== null
             ? (currentValue as Record<string, t.ConfigValue>)
             : {},
-        ).map(([k, v]) => ({
-          key: k,
-          value: typeof v === 'string' ? v : JSON.stringify(v ?? ''),
-          valueType: inferKVType(v),
-        }));
+        ).map(([k, v]) => toKVPair(k, v));
 
     return (
       <ConfigRow
@@ -432,6 +428,7 @@ export function SingleFieldRenderer({
           pairs={pairs}
           onChange={(newPairs) => onChange(path, newPairs)}
           disabled={disabled}
+          valueTypes={field.recordValueKVTypes}
           aria-label={fieldLabel}
         />
       </ConfigRow>
@@ -1088,6 +1085,7 @@ export function renderInlineField(
           pairs={pairs}
           onChange={(p) => onChange(field.key, p)}
           disabled={disabled}
+          valueTypes={field.recordValueKVTypes}
           aria-label={fieldLabel}
         />
       </InlineRow>
