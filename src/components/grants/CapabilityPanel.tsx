@@ -73,17 +73,22 @@ export function CapabilityPanel({ capabilities, onChange, disabled }: t.Capabili
         return (
           <div key={category.key} className="rounded-lg border border-(--cui-color-stroke-default)">
             <div
+              role="button"
+              tabIndex={0}
+              aria-expanded={isOpen}
+              onClick={() => toggleCollapsed(category.key)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  toggleCollapsed(category.key);
+                }
+              }}
               className={cn(
-                'flex w-full items-center justify-between px-4 py-3 transition-colors',
+                'flex w-full cursor-pointer items-center justify-between px-4 py-3 transition-colors hover:bg-(--cui-color-background-hover) focus-visible:bg-(--cui-color-background-hover) focus-visible:outline-1 focus-visible:outline-(--cui-color-outline)',
                 isOpen ? 'rounded-t-lg' : 'rounded-lg',
               )}
             >
-              <button
-                type="button"
-                onClick={() => toggleCollapsed(category.key)}
-                aria-expanded={isOpen}
-                className="flex items-center gap-2 text-left hover:opacity-80"
-              >
+              <div className="flex flex-1 items-center gap-2">
                 <Icon
                   name="chevron-right"
                   size="sm"
@@ -95,8 +100,8 @@ export function CapabilityPanel({ capabilities, onChange, disabled }: t.Capabili
                 <span className="text-sm font-medium text-(--cui-color-text-default)">
                   {localize(category.labelKey)}
                 </span>
-              </button>
-              <div className="flex items-center gap-3">
+              </div>
+              <div className="flex items-center gap-3" onClick={(e) => e.stopPropagation()}>
                 <span className="text-xs text-(--cui-color-text-muted)">
                   {allEnabled ? localize('com_ui_all') : `${enabledCount}/${caps.length}`}
                 </span>
