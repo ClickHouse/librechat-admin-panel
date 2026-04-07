@@ -213,7 +213,8 @@ export function EditRoleDialog({ role, canManage, onClose }: t.EditRoleDialogPro
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     placeholder={localize('com_access_role_name_placeholder')}
-                    disabled={role?.isSystemRole}
+                    disabled={role?.isSystemRole || !canManage}
+                    readOnly={!canManage}
                     autoFocus
                     className="rounded-lg border border-(--cui-color-stroke-default) bg-(--cui-color-background-default) px-3 py-2 text-sm text-(--cui-color-text-default) placeholder:text-(--cui-color-text-disabled) disabled:cursor-not-allowed disabled:opacity-50"
                   />
@@ -231,7 +232,9 @@ export function EditRoleDialog({ role, canManage, onClose }: t.EditRoleDialogPro
                     value={description}
                     onChange={(e) => setDescription(e.target.value)}
                     placeholder={localize('com_access_role_desc_placeholder')}
-                    className="rounded-lg border border-(--cui-color-stroke-default) bg-(--cui-color-background-default) px-3 py-2 text-sm text-(--cui-color-text-default) placeholder:text-(--cui-color-text-disabled)"
+                    disabled={!canManage}
+                    readOnly={!canManage}
+                    className="rounded-lg border border-(--cui-color-stroke-default) bg-(--cui-color-background-default) px-3 py-2 text-sm text-(--cui-color-text-default) placeholder:text-(--cui-color-text-disabled) disabled:cursor-not-allowed disabled:opacity-50"
                   />
                 </div>
               </div>
@@ -260,7 +263,7 @@ export function EditRoleDialog({ role, canManage, onClose }: t.EditRoleDialogPro
                     <RolePermissionsPanel
                       permissions={permissions}
                       onChange={setPermissions}
-                      disabled={updateMutation.isPending}
+                      disabled={!canManage || updateMutation.isPending}
                     />
                   );
                 })()}
@@ -333,6 +336,7 @@ export function EditRoleDialog({ role, canManage, onClose }: t.EditRoleDialogPro
               type="primary"
               label={localize('com_ui_save')}
               disabled={
+                !canManage ||
                 !name.trim() ||
                 (permissionsDirty && permissions === null) ||
                 (!detailsDirty && !permissionsDirty && !membersDirty) ||

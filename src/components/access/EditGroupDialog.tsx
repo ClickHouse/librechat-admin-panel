@@ -162,8 +162,10 @@ export function EditGroupDialog({ group, canManage, onClose }: t.EditGroupDialog
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     placeholder={localize('com_access_group_name_placeholder')}
+                    disabled={!canManage}
+                    readOnly={!canManage}
                     autoFocus
-                    className="rounded-lg border border-(--cui-color-stroke-default) bg-(--cui-color-background-default) px-3 py-2 text-sm text-(--cui-color-text-default) placeholder:text-(--cui-color-text-disabled)"
+                    className="rounded-lg border border-(--cui-color-stroke-default) bg-(--cui-color-background-default) px-3 py-2 text-sm text-(--cui-color-text-default) placeholder:text-(--cui-color-text-disabled) disabled:cursor-not-allowed disabled:opacity-50"
                   />
                 </div>
                 <div className="flex flex-col gap-1.5">
@@ -179,7 +181,9 @@ export function EditGroupDialog({ group, canManage, onClose }: t.EditGroupDialog
                     value={description}
                     onChange={(e) => setDescription(e.target.value)}
                     placeholder={localize('com_access_group_desc_placeholder')}
-                    className="rounded-lg border border-(--cui-color-stroke-default) bg-(--cui-color-background-default) px-3 py-2 text-sm text-(--cui-color-text-default) placeholder:text-(--cui-color-text-disabled)"
+                    disabled={!canManage}
+                    readOnly={!canManage}
+                    className="rounded-lg border border-(--cui-color-stroke-default) bg-(--cui-color-background-default) px-3 py-2 text-sm text-(--cui-color-text-default) placeholder:text-(--cui-color-text-disabled) disabled:cursor-not-allowed disabled:opacity-50"
                   />
                 </div>
               </div>
@@ -250,7 +254,7 @@ export function EditGroupDialog({ group, canManage, onClose }: t.EditGroupDialog
             <Button
               type="primary"
               label={localize('com_ui_save')}
-              disabled={!name.trim() || (!detailsDirty && !membersDirty) || mutation.isPending}
+              disabled={!canManage || !name.trim() || (!detailsDirty && !membersDirty) || mutation.isPending}
             />
           </div>
         </form>
