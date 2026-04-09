@@ -6,9 +6,6 @@ services:
     restart: unless-stopped
     extra_hosts:
       - 'host.docker.internal:host-gateway'
+    env_file: .env
     environment:
       - PORT=${PORT:-3000}
-      - SESSION_SECRET=${SESSION_SECRET:?Set SESSION_SECRET in .env (min 32 chars)}
-      - VITE_API_BASE_URL=${VITE_API_BASE_URL:?Set VITE_API_BASE_URL in .env (e.g. http://host.docker.internal:3080)}
-      # - ADMIN_SSO_ONLY=false
-      # - ADMIN_SESSION_IDLE_TIMEOUT_MS=1800000
