@@ -11,6 +11,7 @@ on:
       - 'package.json'
       - 'bun.lock'
       - 'Dockerfile'
+      - '.github/workflows/docker-publish.yml'
 
 jobs:
   build:
@@ -43,6 +44,6 @@ jobs:
           file: Dockerfile
           push: true
           tags: |
-            ghcr.io/${{ github.repository_owner }}/librechat-admin-panel:${{ github.sha }}
-            ghcr.io/${{ github.repository_owner }}/librechat-admin-panel:latest
+            ghcr.io/clickhouse/librechat-admin-panel:${{ github.sha }}
+            ghcr.io/clickhouse/librechat-admin-panel:latest
           platforms: linux/amd64,linux/arm64
