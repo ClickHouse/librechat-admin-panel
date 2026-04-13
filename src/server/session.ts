@@ -10,6 +10,11 @@ const envIdleTimeout = Number(process.env.ADMIN_SESSION_IDLE_TIMEOUT_MS);
 const effectiveIdleTimeout =
   Number.isFinite(envIdleTimeout) && envIdleTimeout > 0 ? envIdleTimeout : DEFAULT_IDLE_TIMEOUT_MS;
 
+const sessionCookieSecure =
+  process.env.SESSION_COOKIE_SECURE !== undefined
+    ? process.env.SESSION_COOKIE_SECURE === 'true'
+    : process.env.NODE_ENV === 'production';
+
 export const SESSION_CONFIG = {
   revalidationInterval: REVALIDATION_INTERVAL_MS,
   idleTimeout: effectiveIdleTimeout,
@@ -33,7 +38,7 @@ export function useAppSession(): ReturnType<typeof useSession<t.SessionData>> {
     name: 'admin-session',
     password: sessionSecret || '',
     cookie: {
-      secure: process.env.NODE_ENV === 'production',
+      secure: sessionCookieSecure,
       sameSite: 'lax',
       httpOnly: true,
       maxAge: 60 * 60 * 24 * 7,
