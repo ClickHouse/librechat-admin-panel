@@ -5,3 +5,4 @@ export * from './groups';
 export * from './roles';
 export * from './scopes';
 export * from './users';
+export * from './orgs';

@@ -36,6 +36,8 @@
   "com_ui_false": "False",
   "com_ui_reset": "Reset",
   "com_nav_user_menu": "User menu",
+  "com_nav_switch_org": "Switch organization",
+  "com_nav_organizations": "Organizations",
   "com_nav_users": "Users",
   "com_nav_groups": "Groups",
   "com_nav_access": "Access",

@@ -5,6 +5,7 @@ import type * as t from '@/types';
 import { useStripAriaExpanded, useCapabilities, useLocalize } from '@/hooks';
 import libreChatLogo from '@/assets/librechat.svg';
 import { SettingsDialog } from './SettingsDialog';
+import { OrgSwitcher } from './OrgSwitcher';
 import { SystemCapabilities } from '@/constants';
 import { getInitials, cn } from '@/utils';
 import { adminLogoutFn } from '@/server';
@@ -117,7 +118,8 @@ export function Sidebar({ user, collapsed, onToggle }: t.SidebarProps) {
         </nav>
 
         {initials && (
-          <div className="flex shrink-0 items-center border-t border-(--cui-color-stroke-default) px-2 py-3">
+          <div className="flex shrink-0 flex-col gap-2 border-t border-(--cui-color-stroke-default) px-2 py-3">
+            <OrgSwitcher />
             <div className="flex items-center gap-2.5 overflow-hidden px-0.5">
               <Dropdown>
                 <Dropdown.Trigger>
