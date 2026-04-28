@@ -3,10 +3,11 @@ import type { Role, RolePermissions } from './role';
 
 
 export interface AccessPageProps {
-  activeTab: 'groups' | 'roles';
+  activeTab: 'groups' | 'roles' | 'users';
   onTabChange: (tab: string) => void;
   canReadRoles: boolean;
   canReadGroups: boolean;
+  canReadUsers: boolean;
 }
 
 

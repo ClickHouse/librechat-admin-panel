@@ -4,14 +4,14 @@ import { AccessPage } from '@/components/access';
 import { SystemCapabilities } from '@/constants';
 import { useCapabilities } from '@/hooks';
 
-type Tab = 'groups' | 'roles';
+type Tab = 'groups' | 'roles' | 'users';
 
 interface AccessSearch {
   tab?: string;
 }
 
 function isValidTab(value?: string): value is Tab {
-  return value === 'groups' || value === 'roles';
+  return value === 'groups' || value === 'roles' || value === 'users';
 }
 
 export const Route = createFileRoute('/_app/access')({
@@ -31,15 +31,18 @@ function AccessRoute() {
 
   const canReadRoles = hasCapability(SystemCapabilities.READ_ROLES);
   const canReadGroups = hasCapability(SystemCapabilities.READ_GROUPS);
+  const canReadUsers = hasCapability(SystemCapabilities.READ_USERS);
 
-  if (!canReadRoles && !canReadGroups) {
+  if (!canReadRoles && !canReadGroups && !canReadUsers) {
     return <AccessDenied />;
   }
 
-  const defaultTab: Tab = canReadRoles ? 'roles' : 'groups';
+  const defaultTab: Tab = canReadRoles ? 'roles' : canReadGroups ? 'groups' : 'users';
   const requestedTab: Tab = isValidTab(tab) ? tab : defaultTab;
   const activeTab: Tab =
-    (requestedTab === 'roles' && !canReadRoles) || (requestedTab === 'groups' && !canReadGroups)
+    (requestedTab === 'roles' && !canReadRoles) ||
+    (requestedTab === 'groups' && !canReadGroups) ||
+    (requestedTab === 'users' && !canReadUsers)
       ? defaultTab
       : requestedTab;
 
@@ -55,6 +58,7 @@ function AccessRoute() {
       onTabChange={handleTabChange}
       canReadRoles={canReadRoles}
       canReadGroups={canReadGroups}
+      canReadUsers={canReadUsers}
     />
   );
 }
