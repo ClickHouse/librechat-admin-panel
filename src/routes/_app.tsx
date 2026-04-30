@@ -50,15 +50,6 @@ function AppLayout() {
   });
   const pathname = router.state.location.pathname;
 
-  if (!isLoading && !isError && !hasCapability(SystemCapabilities.ACCESS_ADMIN)) {
-    return <AccessDenied />;
-  }
-
-  const matchedKey = Object.keys(ROUTE_TITLE_KEYS).find((route) =>
-    route === '/' ? pathname === '/' : pathname.startsWith(route),
-  );
-  const title = matchedKey ? localize(ROUTE_TITLE_KEYS[matchedKey]) : undefined;
-
   const toggleSidebar = () =>
     setSidebarCollapsed((prev) => {
       const next = !prev;
@@ -76,6 +67,15 @@ function AppLayout() {
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, []);
+
+  if (!isLoading && !isError && !hasCapability(SystemCapabilities.ACCESS_ADMIN)) {
+    return <AccessDenied />;
+  }
+
+  const matchedKey = Object.keys(ROUTE_TITLE_KEYS).find((route) =>
+    route === '/' ? pathname === '/' : pathname.startsWith(route),
+  );
+  const title = matchedKey ? localize(ROUTE_TITLE_KEYS[matchedKey]) : undefined;
 
   return (
     <div className="flex h-screen overflow-hidden">
