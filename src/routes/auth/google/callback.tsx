@@ -7,7 +7,7 @@ const searchSchema = z.object({
   code: z.string().optional(),
 });
 
-export const Route = createFileRoute('/auth/openid/callback')({
+export const Route = createFileRoute('/auth/google/callback')({
   validateSearch: searchSchema,
   loaderDeps: ({ search }) => ({ code: search.code }),
   loader: async ({ deps: { code } }) => {
@@ -16,7 +16,7 @@ export const Route = createFileRoute('/auth/openid/callback')({
     }
 
     try {
-      const result = await oauthExchangeFn({ data: { code, provider: 'openid' } });
+      const result = await oauthExchangeFn({ data: { code, provider: 'google' } });
       if (result.error) {
         return { error: 'exchange_failed' as const, message: result.message };
       }
@@ -26,10 +26,10 @@ export const Route = createFileRoute('/auth/openid/callback')({
       return { error: 'exchange_failed' as const };
     }
   },
-  component: OpenIdCallback,
+  component: GoogleCallback,
 });
 
-function OpenIdCallback() {
+function GoogleCallback() {
   const loaderData = Route.useLoaderData();
   const localize = useLocalize();
 

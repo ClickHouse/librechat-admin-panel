@@ -6,6 +6,7 @@ import { SystemRoles } from 'librechat-data-provider';
 import { createServerFn } from '@tanstack/react-start';
 import { getRequestHeader } from '@tanstack/react-start/server';
 import type * as t from '@/types';
+import { OAUTH_PROVIDERS } from '@/constants';
 import { useAppSession, SESSION_CONFIG } from './session';
 import { getApiBaseUrl, getServerApiUrl } from './utils/api';
 
@@ -331,47 +332,88 @@ export const getCurrentUserFn = createServerFn({ method: 'GET' }).handler(async 
   };
 });
 
-/** Shared queryOptions so consumers deduplicate the OpenID availability check. */
-export const openIdCheckOptions = queryOptions({
-  queryKey: ['openIdCheck'],
-  queryFn: () => checkOpenIdFn(),
+const oauthProviderSchema = z.enum(['openid', 'google']);
+
+/**
+ * Resolve which OAuth providers LibreChat has configured by reading the public
+ * /api/config startup payload — the same endpoint LibreChat's own client uses to
+ * decide which social-login buttons to render. Provider availability is derived
+ * from the boolean *LoginEnabled flags; deployer-supplied label/imageUrl
+ * overrides are forwarded for the providers that support them (openid, saml).
+ *
+ * ssoOnly is independent of LibreChat: it remains an admin-panel-side knob
+ * (`ADMIN_SSO_ONLY`) so admins can keep a password fallback even when chat
+ * users are auto-redirected.
+ */
+export const getStartupConfigFn = createServerFn({ method: 'GET' }).handler(
+  async (): Promise<t.AdminStartupConfig> => {
+    const ssoOnly = process.env.ADMIN_SSO_ONLY === 'true';
+    try {
+      const response = await fetch(`${getServerApiUrl()}/api/config`);
+      if (!response.ok) return { providers: [], ssoOnly };
+      const config = (await response.json()) as t.StartupConfigResponse;
+      const providers: t.ResolvedProvider[] = [];
+      for (const def of OAUTH_PROVIDERS) {
+        if (config[def.enabledKey as keyof t.StartupConfigResponse] !== true) continue;
+        providers.push({
+          id: def.id,
+          label: def.labelKey
+            ? (config[def.labelKey as keyof t.StartupConfigResponse] as string | undefined)
+            : undefined,
+          imageUrl: def.imageKey
+            ? (config[def.imageKey as keyof t.StartupConfigResponse] as string | undefined)
+            : undefined,
+        });
+      }
+      return { providers, ssoOnly };
+    } catch {
+      return { providers: [], ssoOnly };
+    }
+  },
+);
+
+/** Shared queryOptions so consumers deduplicate the startup-config fetch. */
+export const startupConfigOptions = queryOptions({
+  queryKey: ['adminStartupConfig'],
+  queryFn: () => getStartupConfigFn(),
   staleTime: 60_000,
 });
 
-export const checkOpenIdFn = createServerFn({ method: 'GET' }).handler(async () => {
-  try {
-    const response = await fetch(`${getServerApiUrl()}/api/admin/oauth/openid/check`);
-    if (!response.ok) return { available: false, ssoOnly: false };
-    const ssoOnly = process.env.ADMIN_SSO_ONLY === 'true';
-    return { available: true, ssoOnly };
-  } catch {
-    return { available: false, ssoOnly: false };
-  }
-});
+async function buildOAuthLoginUrl(provider: t.OAuthProvider): Promise<string> {
+  const def = OAUTH_PROVIDERS.find((p) => p.id === provider);
+  if (!def) throw new Error(`Unknown OAuth provider: ${provider}`);
 
-export const openidLoginFn = createServerFn({ method: 'GET' }).handler(async () => {
-  try {
-    const baseUrl = getApiBaseUrl();
-    const authUrl = new URL(`${baseUrl}/api/admin/oauth/openid`);
+  const authUrl = new URL(`${getApiBaseUrl()}${def.startPath}`);
 
-    /** Generate PKCE code_verifier and store in session */
-    const codeVerifier = crypto.randomBytes(32).toString('hex');
-    const codeChallenge = crypto.createHash('sha256').update(codeVerifier).digest('hex');
-    authUrl.searchParams.set('code_challenge', codeChallenge);
+  /** Generate PKCE code_verifier and store in admin session for the exchange step. */
+  const codeVerifier = crypto.randomBytes(32).toString('hex');
+  const codeChallenge = crypto.createHash('sha256').update(codeVerifier).digest('hex');
+  authUrl.searchParams.set('code_challenge', codeChallenge);
 
-    const session = await useAppSession();
-    await session.update({ codeVerifier });
+  const session = await useAppSession();
+  await session.update({ codeVerifier });
 
-    return { error: false, authUrl: authUrl.toString() };
-  } catch (error) {
-    console.error('OpenID login initiation error:', error);
-    return { error: true, message: 'Failed to initiate SSO login' };
-  }
-});
+  return authUrl.toString();
+}
+
+export const oauthLoginFn = createServerFn({ method: 'POST' })
+  .inputValidator(z.object({ provider: oauthProviderSchema }))
+  .handler(async ({ data }) => {
+    try {
+      const authUrl = await buildOAuthLoginUrl(data.provider);
+      return { error: false as const, authUrl };
+    } catch (error) {
+      console.error(`[oauthLoginFn] ${data.provider} initiation error:`, error);
+      return { error: true as const, message: 'Failed to initiate SSO login' };
+    }
+  });
 
 export const oauthExchangeFn = createServerFn({ method: 'POST' })
   .inputValidator(
-    z.object({ code: z.string().regex(/^[a-f0-9]{64}$/, 'Invalid exchange code format') }),
+    z.object({
+      code: z.string().regex(/^[a-f0-9]{64}$/, 'Invalid exchange code format'),
+      provider: oauthProviderSchema,
+    }),
   )
   .handler(async ({ data }) => {
     try {
@@ -385,7 +427,7 @@ export const oauthExchangeFn = createServerFn({ method: 'POST' })
         }
       }
 
-      /** Read PKCE code_verifier from session (stored during openidLoginFn) */
+      /** Read PKCE code_verifier from session (stored during oauthLoginFn). */
       const session = await useAppSession();
       const { codeVerifier } = session.data;
 
@@ -421,7 +463,7 @@ export const oauthExchangeFn = createServerFn({ method: 'POST' })
         user: exchangeData.user,
         token: exchangeData.token,
         refreshToken: exchangeData.refreshToken ?? extractCookieValue(response, 'refreshToken'),
-        tokenProvider: 'openid',
+        tokenProvider: data.provider,
         lastVerified: now,
         lastActivity: now,
         codeVerifier: undefined,

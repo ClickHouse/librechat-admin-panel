@@ -651,6 +651,8 @@
   "com_auth_sso_back_to_login": "Back to login",
   "com_auth_sso_redirecting_auto": "Redirecting to your identity provider...",
   "com_auth_sso_redirect_failed": "SSO redirect failed. You can sign in manually below.",
+  "com_auth_provider_openid": "Continue with OpenID",
+  "com_auth_provider_google": "Continue with Google",
   "com_error_page_title": "Something went wrong",
   "com_error_page_desc": "An unexpected error occurred. Please try again or return to the home page.",
   "com_error_not_found_title": "Page not found",

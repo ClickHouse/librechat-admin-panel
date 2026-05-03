@@ -80,6 +80,29 @@ const handlers = {
     200,
     { message: 'OpenID check successful' },
   ],
+  /**
+   * Mirrors LibreChat's public /api/config payload — the same endpoint the
+   * admin panel uses to discover which OAuth providers are enabled. Only the
+   * auth-relevant flags are enumerated. Both openid and google are enabled by
+   * default so the e2e suite can exercise the multi-provider UI path.
+   */
+  'GET /api/config': () => [
+    200,
+    {
+      appTitle: 'LibreChat',
+      openidLoginEnabled: true,
+      googleLoginEnabled: true,
+      githubLoginEnabled: false,
+      discordLoginEnabled: false,
+      facebookLoginEnabled: false,
+      appleLoginEnabled: false,
+      samlLoginEnabled: false,
+      socialLoginEnabled: true,
+      openidLabel: 'Continue with OpenID',
+      openidAutoRedirect: false,
+      emailLoginEnabled: true,
+    },
+  ],
 };
 
 const server = createServer(async (req, res) => {
