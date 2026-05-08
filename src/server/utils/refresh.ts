@@ -99,6 +99,23 @@ export async function refreshAdminToken(
 const inFlight = new Map<string, Promise<RefreshedTokenset | undefined>>();
 
 /**
+ * Build the dedupe key from every discriminator that the upstream refresh
+ * actually depends on: token provider, user identity, tenant header, and the
+ * refresh token itself. Keying on `refreshToken` alone would conflate two
+ * concurrent calls that happen to share a token string but differ by user or
+ * tenant — the second caller would receive the first caller's bearer and
+ * persist it into the wrong session.
+ */
+function buildDedupeKey(
+  refreshToken: string,
+  tokenProvider: t.SessionData['tokenProvider'],
+  userId: string | undefined,
+  tenantId: string | undefined,
+): string {
+  return [tokenProvider ?? '', userId ?? '', tenantId ?? '', refreshToken].join('\u0000');
+}
+
+/**
  * Module-scoped dedupe so two concurrent React Query subscribers in a single
  * BFF process don't both consume a rotating refresh token (which would
  * invalidate one of them).
@@ -108,12 +125,13 @@ export function refreshAdminTokenDeduped(
   tokenProvider: t.SessionData['tokenProvider'],
   userId: string | undefined,
 ): Promise<RefreshedTokenset | undefined> {
-  const existing = inFlight.get(refreshToken);
+  const key = buildDedupeKey(refreshToken, tokenProvider, userId, readTenantHeader());
+  const existing = inFlight.get(key);
   if (existing) return existing;
   const pending = refreshAdminToken(refreshToken, tokenProvider, userId).finally(() => {
-    inFlight.delete(refreshToken);
+    inFlight.delete(key);
   });
-  inFlight.set(refreshToken, pending);
+  inFlight.set(key, pending);
   return pending;
 }
 

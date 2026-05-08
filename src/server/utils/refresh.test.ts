@@ -114,6 +114,53 @@ describe('refreshAdminTokenDeduped', () => {
     expect(resA).toEqual(resB);
     expect(resA?.token).toBe('new-jwt');
   });
+
+  it('does not coalesce when userId differs even with the same refresh token', async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(200, { token: 'jwt-user-1' }))
+      .mockResolvedValueOnce(jsonResponse(200, { token: 'jwt-user-2' }));
+
+    const a = refreshAdminTokenDeduped('rt-shared', 'openid', 'user-1');
+    const b = refreshAdminTokenDeduped('rt-shared', 'openid', 'user-2');
+
+    const [resA, resB] = await Promise.all([a, b]);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(resA?.token).toBe('jwt-user-1');
+    expect(resB?.token).toBe('jwt-user-2');
+  });
+
+  it('does not coalesce when tokenProvider differs', async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(200, { token: 'jwt-openid' }))
+      .mockResolvedValueOnce(jsonResponse(200, { token: 'jwt-librechat' }));
+
+    const a = refreshAdminTokenDeduped('rt-shared', 'openid', 'user-1');
+    const b = refreshAdminTokenDeduped('rt-shared', 'librechat', 'user-1');
+
+    const [resA, resB] = await Promise.all([a, b]);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(resA?.token).toBe('jwt-openid');
+    expect(resB?.token).toBe('jwt-librechat');
+  });
+
+  it('does not coalesce when tenant header differs between concurrent calls', async () => {
+    fetchMock
+      .mockImplementationOnce(async () => jsonResponse(200, { token: 'jwt-tenant-a' }))
+      .mockImplementationOnce(async () => jsonResponse(200, { token: 'jwt-tenant-b' }));
+
+    tenantHeader.value = 'tenant-a';
+    const a = refreshAdminTokenDeduped('rt-shared', 'openid', 'user-1');
+    tenantHeader.value = 'tenant-b';
+    const b = refreshAdminTokenDeduped('rt-shared', 'openid', 'user-1');
+
+    const [resA, resB] = await Promise.all([a, b]);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(resA?.token).toBe('jwt-tenant-a');
+    expect(resB?.token).toBe('jwt-tenant-b');
+  });
 });
 
 describe('ensureFreshBearer', () => {
