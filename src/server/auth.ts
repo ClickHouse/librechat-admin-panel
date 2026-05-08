@@ -6,8 +6,9 @@ import { SystemRoles } from 'librechat-data-provider';
 import { createServerFn } from '@tanstack/react-start';
 import { getRequestHeader } from '@tanstack/react-start/server';
 import type * as t from '@/types';
+import { getApiBaseUrl, getServerApiUrl } from './utils/url';
+import { refreshAdminTokenDeduped } from './utils/refresh';
 import { useAppSession, SESSION_CONFIG } from './session';
-import { getApiBaseUrl, getServerApiUrl } from './utils/api';
 
 /** Extract a named cookie value from `set-cookie` response headers. */
 function extractCookieValue(response: Response, name: string): string | undefined {
@@ -146,49 +147,11 @@ const clearSession = async (session: Awaited<ReturnType<typeof useAppSession>>) 
     user: undefined,
     refreshToken: undefined,
     tokenProvider: undefined,
+    expiresAt: undefined,
     lastVerified: undefined,
     lastActivity: undefined,
   });
 };
-
-/**
- * Attempt to refresh the JWT using the stored refresh token.
- * Returns the new token and refreshToken on success, or undefined on failure.
- *
- * Note: concurrent callers sharing a rotating refresh token may race; the
- * current call pattern (single React Query with 60s interval) is sequential.
- */
-const refreshResponseSchema = z.object({ token: z.string() });
-
-async function refreshAdminToken(
-  refreshToken: string,
-  tokenProvider: t.SessionData['tokenProvider'],
-): Promise<{ token: string; refreshToken?: string } | undefined> {
-  try {
-    const cookieParts = [`refreshToken=${refreshToken}`];
-    if (tokenProvider === 'openid') {
-      cookieParts.push('token_provider=openid');
-    }
-
-    const response = await fetch(`${getServerApiUrl()}/api/auth/refresh`, {
-      method: 'POST',
-      headers: { Cookie: cookieParts.join('; ') },
-    });
-
-    if (!response.ok) return undefined;
-
-    const parsed = refreshResponseSchema.safeParse(await response.json());
-    if (!parsed.success) return undefined;
-
-    return {
-      token: parsed.data.token,
-      refreshToken: extractCookieValue(response, 'refreshToken'),
-    };
-  } catch (error) {
-    console.warn('[refreshAdminToken] Token refresh request failed:', error);
-    return undefined;
-  }
-}
 
 export const verifyAdminTokenFn = createServerFn({ method: 'GET' }).handler(async () => {
   try {
@@ -227,11 +190,12 @@ export const verifyAdminTokenFn = createServerFn({ method: 'GET' }).handler(asyn
           }
           if (response.status === 401) {
             if (refreshToken) {
-              const refreshed = await refreshAdminToken(refreshToken, tokenProvider);
+              const refreshed = await refreshAdminTokenDeduped(refreshToken, tokenProvider, user.id);
               if (refreshed) {
                 const refreshedSession = {
                   token: refreshed.token,
                   refreshToken: refreshed.refreshToken ?? refreshToken,
+                  expiresAt: refreshed.expiresAt,
                   lastVerified: now,
                   lastActivity: now,
                 };
@@ -422,6 +386,7 @@ export const oauthExchangeFn = createServerFn({ method: 'POST' })
         token: exchangeData.token,
         refreshToken: exchangeData.refreshToken ?? extractCookieValue(response, 'refreshToken'),
         tokenProvider: 'openid',
+        expiresAt: exchangeData.expiresAt,
         lastVerified: now,
         lastActivity: now,
         codeVerifier: undefined,

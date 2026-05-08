@@ -7,6 +7,8 @@ export interface SessionData {
   token?: string;
   refreshToken?: string;
   tokenProvider?: 'librechat' | 'openid';
+  /** Absolute expiry of `token` (ms epoch). Drives proactive refresh. */
+  expiresAt?: number;
   lastVerified?: number;
   lastActivity?: number;
   codeVerifier?: string;
@@ -28,4 +30,5 @@ export interface OAuthExchangeResponse {
   token: string;
   refreshToken?: string;
   user: SerializableUser;
+  expiresAt?: number;
 }
