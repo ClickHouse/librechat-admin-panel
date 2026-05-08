@@ -8,6 +8,7 @@ import { getRequestHeader } from '@tanstack/react-start/server';
 import type * as t from '@/types';
 import { useAppSession, SESSION_CONFIG } from './session';
 import { getApiBaseUrl, getServerApiUrl } from './utils/api';
+import { refreshAdminTokenDeduped } from './utils/refresh';
 
 /** Extract a named cookie value from `set-cookie` response headers. */
 function extractCookieValue(response: Response, name: string): string | undefined {
@@ -152,74 +153,6 @@ const clearSession = async (session: Awaited<ReturnType<typeof useAppSession>>) 
   });
 };
 
-/**
- * Attempt to refresh the JWT using the stored refresh token.
- * Returns the new token, refreshToken, and expiresAt on success, or undefined on failure.
- *
- * For `openid` sessions, the cookie-based `/api/auth/refresh` controller can't
- * be reached cross-origin (the refresh-token cookie doesn't ship). Use the
- * dedicated `/api/admin/oauth/refresh` endpoint that accepts the refresh
- * token in the body and returns the new tokenset.
- *
- * Note: concurrent callers sharing a rotating refresh token may race; the
- * current call pattern (single React Query with 60s interval) is sequential.
- */
-const refreshResponseSchema = z.object({
-  token: z.string(),
-  refreshToken: z.string().optional(),
-  expiresAt: z.number().optional(),
-});
-
-async function refreshAdminToken(
-  refreshToken: string,
-  tokenProvider: t.SessionData['tokenProvider'],
-  userId: string | undefined,
-): Promise<{ token: string; refreshToken?: string; expiresAt?: number } | undefined> {
-  try {
-    if (tokenProvider === 'openid') {
-      if (!userId) {
-        console.warn('[refreshAdminToken] openid refresh requires user id; aborting');
-        return undefined;
-      }
-      const response = await fetch(`${getServerApiUrl()}/api/admin/oauth/refresh`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ refresh_token: refreshToken, user_id: userId }),
-      });
-
-      if (!response.ok) return undefined;
-
-      const parsed = refreshResponseSchema.safeParse(await response.json());
-      if (!parsed.success) return undefined;
-
-      return {
-        token: parsed.data.token,
-        refreshToken: parsed.data.refreshToken,
-        expiresAt: parsed.data.expiresAt,
-      };
-    }
-
-    const cookieParts = [`refreshToken=${refreshToken}`];
-    const response = await fetch(`${getServerApiUrl()}/api/auth/refresh`, {
-      method: 'POST',
-      headers: { Cookie: cookieParts.join('; ') },
-    });
-
-    if (!response.ok) return undefined;
-
-    const parsed = refreshResponseSchema.safeParse(await response.json());
-    if (!parsed.success) return undefined;
-
-    return {
-      token: parsed.data.token,
-      refreshToken: extractCookieValue(response, 'refreshToken'),
-    };
-  } catch (error) {
-    console.warn('[refreshAdminToken] Token refresh request failed:', error);
-    return undefined;
-  }
-}
-
 export const verifyAdminTokenFn = createServerFn({ method: 'GET' }).handler(async () => {
   try {
     const session = await useAppSession();
@@ -257,7 +190,7 @@ export const verifyAdminTokenFn = createServerFn({ method: 'GET' }).handler(asyn
           }
           if (response.status === 401) {
             if (refreshToken) {
-              const refreshed = await refreshAdminToken(refreshToken, tokenProvider, user.id);
+              const refreshed = await refreshAdminTokenDeduped(refreshToken, tokenProvider, user.id);
               if (refreshed) {
                 const refreshedSession = {
                   token: refreshed.token,
