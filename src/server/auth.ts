@@ -21,6 +21,26 @@ function extractCookieValue(response: Response, name: string): string | undefine
   return undefined;
 }
 
+function getRequestOrigin(): string | undefined {
+  const origin = getRequestHeader('origin');
+  if (origin) return origin;
+
+  const referer = getRequestHeader('referer');
+  if (referer) {
+    try {
+      return new URL(referer).origin;
+    } catch {
+      return undefined;
+    }
+  }
+
+  const host = getRequestHeader('host');
+  if (!host) return undefined;
+
+  const proto = getRequestHeader('x-forwarded-proto') ?? 'http';
+  return `${proto}://${host}`;
+}
+
 export const adminLoginFn = createServerFn({ method: 'POST' })
   .inputValidator(
     z.object({
@@ -322,11 +342,12 @@ export const openidLoginFn = createServerFn({ method: 'GET' }).handler(async () 
   try {
     const baseUrl = getApiBaseUrl();
     const authUrl = new URL(`${baseUrl}/api/admin/oauth/openid`);
+    const requestOrigin = getRequestOrigin();
 
-    /** Generate PKCE code_verifier and store in session */
     const codeVerifier = crypto.randomBytes(32).toString('hex');
     const codeChallenge = crypto.createHash('sha256').update(codeVerifier).digest('hex');
     authUrl.searchParams.set('code_challenge', codeChallenge);
+    if (requestOrigin) authUrl.searchParams.set('redirect_uri', `${requestOrigin}/auth/openid/callback`);
 
     const session = await useAppSession();
     await session.update({ codeVerifier });
@@ -345,16 +366,9 @@ export const oauthExchangeFn = createServerFn({ method: 'POST' })
   .handler(async ({ data }) => {
     try {
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      const rawOrigin = getRequestHeader('origin') || getRequestHeader('referer');
-      if (rawOrigin) {
-        try {
-          headers['Origin'] = new URL(rawOrigin).origin;
-        } catch {
-          // malformed URL – skip forwarding
-        }
-      }
+      const requestOrigin = getRequestOrigin();
+      if (requestOrigin) headers['Origin'] = requestOrigin;
 
-      /** Read PKCE code_verifier from session (stored during openidLoginFn) */
       const session = await useAppSession();
       const { codeVerifier } = session.data;
 
