@@ -303,12 +303,17 @@ export const openIdCheckOptions = queryOptions({
 });
 
 export const checkOpenIdFn = createServerFn({ method: 'GET' }).handler(async () => {
+  const checkUrl = `${getServerApiUrl()}/api/admin/oauth/openid/check`;
   try {
-    const response = await fetch(`${getServerApiUrl()}/api/admin/oauth/openid/check`);
-    if (!response.ok) return { available: false, ssoOnly: false };
+    const response = await fetch(checkUrl);
+    if (!response.ok) {
+      console.warn('[checkOpenIdFn] OpenID check failed:', response.status, checkUrl);
+      return { available: false, ssoOnly: false };
+    }
     const ssoOnly = process.env.ADMIN_SSO_ONLY === 'true';
     return { available: true, ssoOnly };
-  } catch {
+  } catch (error) {
+    console.warn('[checkOpenIdFn] OpenID check request failed:', checkUrl, error);
     return { available: false, ssoOnly: false };
   }
 });

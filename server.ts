@@ -36,10 +36,6 @@ type Handler = { default: { fetch: (req: Request) => Promise<Response> } };
 
 const { default: handler } = (await import(SERVER_ENTRY.href)) as Handler;
 
-if (!process.env.ADMIN_PANEL_METRICS_SECRET) {
-  console.warn('[metrics] ADMIN_PANEL_METRICS_SECRET is not set — /metrics will return 401 for all requests');
-}
-
 async function buildStaticRoutes(): Promise<Record<string, () => Response>> {
   const routes: Record<string, () => Response> = {};
   for await (const path of new Glob('**/*').scan(CLIENT_DIR)) {
@@ -51,7 +47,7 @@ async function buildStaticRoutes(): Promise<Record<string, () => Response>> {
   return routes;
 }
 
-Bun.serve({
+const server = Bun.serve({
   port: Number(process.env.PORT ?? 3000),
   routes: {
     ...(await buildStaticRoutes()),
@@ -72,4 +68,8 @@ Bun.serve({
   },
 });
 
-console.log(`Admin panel listening on http://localhost:${process.env.PORT ?? 3000}`);
+console.log(`Admin panel listening on http://localhost:${server.port}`);
+
+if (!process.env.ADMIN_PANEL_METRICS_SECRET) {
+  console.warn('[metrics] ADMIN_PANEL_METRICS_SECRET is not set — /metrics will return 401 for all requests');
+}
