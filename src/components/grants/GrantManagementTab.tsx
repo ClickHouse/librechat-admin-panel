@@ -75,6 +75,9 @@ export function GrantManagementTab() {
         />
       </div>
 
+      {/* Raw <table> kept (not click-ui Table): rows act as buttons with tabIndex,
+          role, aria-label, onKeyDown, and a ref for focus restoration — semantics
+          the click-ui Table API does not expose. Matches AuditLogTab's choice. */}
       <div className="overflow-x-auto rounded-lg border border-(--cui-color-stroke-default)">
         <table className="w-full text-left text-sm">
           <caption className="sr-only">{localize('com_grants_title')}</caption>

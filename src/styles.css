@@ -923,12 +923,3 @@ body > div:has(+ .modal-frost) {
   color: var(--cui-color-feedback-user-fg);
 }
 
-.badge-success {
-  background-color: var(--cui-color-feedback-success-bg);
-  color: var(--cui-color-feedback-success-fg);
-}
-
-.badge-danger {
-  background-color: var(--cui-color-feedback-danger-bg);
-  color: var(--cui-color-feedback-danger-fg);
-}

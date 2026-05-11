@@ -18,6 +18,11 @@ export const ACTION_BADGE_STATE: Record<AuditAction, 'success' | 'danger'> = {
   grant_removed: 'danger',
 };
 
+export const ACTION_LABEL_KEY: Record<AuditAction, string> = {
+  grant_assigned: 'com_audit_action_assigned',
+  grant_removed: 'com_audit_action_removed',
+};
+
 const CSV_COLUMNS = [
   { key: 'timestamp', labelKey: 'com_audit_csv_col_timestamp' },
   { key: 'action', labelKey: 'com_audit_csv_col_action' },
@@ -79,4 +84,94 @@ export function auditLogToCsv(
     CSV_COLUMNS.map((col) => escapeCsvCell(String(entry[col.key] ?? ''))).join(','),
   );
   return UTF8_BOM + [header, ...rows].join('\r\n') + '\r\n';
+}
+
+const QUALIFIER_KEYS = new Set(['actor', 'target', 'capability', 'created']);
+const TOKEN_RE = /(\w+):(>?<?=?)?(?:"([^"]*)"|(\S+))|"([^"]*)"|(\S+)/g;
+
+function assignQualifier(
+  qualifiers: t.AuditSearchQualifiers,
+  key: string,
+  op: string | undefined,
+  value: string,
+): void {
+  if (key === 'created') {
+    if (op === '>' || op === '>=') {
+      qualifiers.createdAfter = value;
+      return;
+    }
+    if (op === '<' || op === '<=') {
+      qualifiers.createdBefore = value;
+      return;
+    }
+    qualifiers.createdAfter = value;
+    qualifiers.createdBefore = value;
+    return;
+  }
+  if (key === 'actor') {
+    qualifiers.actor = value;
+    return;
+  }
+  if (key === 'target') {
+    qualifiers.target = value;
+    return;
+  }
+  if (key === 'capability') {
+    qualifiers.capability = value;
+  }
+}
+
+export function parseAuditSearch(input: string): t.ParsedAuditSearch {
+  const qualifiers: t.AuditSearchQualifiers = {};
+  const freeTextParts: string[] = [];
+  if (!input) {
+    return { freeText: '', qualifiers };
+  }
+
+  for (const match of input.matchAll(TOKEN_RE)) {
+    const [raw, key, op, quotedValue, bareValue, quotedFree, bareFree] = match;
+    const normalizedKey = key?.toLowerCase();
+    if (normalizedKey && QUALIFIER_KEYS.has(normalizedKey)) {
+      const value = quotedValue ?? bareValue ?? '';
+      if (!value) {
+        continue;
+      }
+      assignQualifier(qualifiers, normalizedKey, op, value);
+      continue;
+    }
+    if (key) {
+      freeTextParts.push(raw);
+      continue;
+    }
+    const free = quotedFree ?? bareFree ?? '';
+    if (free) {
+      freeTextParts.push(free);
+    }
+  }
+
+  return { freeText: freeTextParts.join(' '), qualifiers };
+}
+
+export function diffGrantState(
+  before: readonly string[] | undefined,
+  after: readonly string[] | undefined,
+): t.GrantDiff {
+  const beforeSet = new Set(before ?? []);
+  const afterSet = new Set(after ?? []);
+  const added: string[] = [];
+  const removed: string[] = [];
+  const unchanged: string[] = [];
+  for (const cap of afterSet) {
+    if (beforeSet.has(cap)) {
+      unchanged.push(cap);
+    } else {
+      added.push(cap);
+    }
+  }
+  for (const cap of beforeSet) {
+    if (!afterSet.has(cap)) {
+      removed.push(cap);
+    }
+  }
+  return { added, removed, unchanged };
 }

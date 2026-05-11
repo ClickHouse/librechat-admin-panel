@@ -7,7 +7,7 @@
  */
 
 import { z } from 'zod';
-import { keepPreviousData, queryOptions } from '@tanstack/react-query';
+import { infiniteQueryOptions, keepPreviousData, queryOptions } from '@tanstack/react-query';
 import { createServerFn } from '@tanstack/react-start';
 import { PrincipalType } from 'librechat-data-provider';
 import { hasImpliedCapability, SystemCapabilities } from '@librechat/data-schemas/capabilities';
@@ -230,9 +230,15 @@ const isoDate = z
 
 const auditFilterSchema = z.object({
   search: z.string().max(200).optional(),
-  action: z.enum(['grant_assigned', 'grant_removed']).optional(),
+  action: z.array(z.enum(['grant_assigned', 'grant_removed'])).optional(),
   from: isoDate.optional(),
   to: isoDate.optional(),
+  actorId: z.string().max(128).optional(),
+  targetPrincipalType: z.nativeEnum(PrincipalType).optional(),
+  targetPrincipalId: z.string().max(128).optional(),
+  capability: z.string().max(128).optional(),
+  cursor: z.string().max(256).optional(),
+  limit: z.number().int().min(1).max(500).optional(),
 });
 
 export type AuditFilters = z.infer<typeof auditFilterSchema>;
@@ -247,35 +253,65 @@ const adminAuditLogEntrySchema = z.object({
   targetName: z.string(),
   capability: z.string(),
   timestamp: z.string(),
+  before: z.array(z.string()).optional(),
+  after: z.array(z.string()).optional(),
 });
 
-const auditLogResponseSchema = z.object({
+const auditLogPageResponseSchema = z.object({
   entries: z.array(adminAuditLogEntrySchema),
+  nextCursor: z.string().nullable(),
 });
+
+export type AuditLogPage = z.infer<typeof auditLogPageResponseSchema>;
 
 function buildAuditLogQuery(filters: AuditFilters): string {
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(filters)) {
-    if (value) params.set(key, value);
+    if (value === undefined || value === null || value === '') continue;
+    if (Array.isArray(value)) {
+      for (const v of value) params.append(key, String(v));
+    } else {
+      params.set(key, String(value));
+    }
   }
   const qs = params.toString();
   return qs ? `?${qs}` : '';
 }
 
+export const getAuditLogPageFn = createServerFn({ method: 'GET' })
+  .inputValidator(auditFilterSchema)
+  .handler(async ({ data }: { data: AuditFilters }): Promise<AuditLogPage> => {
+    await requireAnyCapability([
+      SystemCapabilities.MANAGE_ROLES,
+      SystemCapabilities.MANAGE_USERS,
+      SystemCapabilities.MANAGE_GROUPS,
+    ]);
+    const withDefaults: AuditFilters = { limit: 100, ...data };
+    const response = await apiFetch(`/api/admin/audit-log${buildAuditLogQuery(withDefaults)}`);
+    if (!response.ok) {
+      await extractApiError(response, 'Failed to fetch audit log');
+    }
+    return auditLogPageResponseSchema.parse(await response.json());
+  });
+
+export const auditLogInfiniteQueryOptions = (
+  filters: Omit<AuditFilters, 'cursor'> = {},
+) =>
+  infiniteQueryOptions({
+    queryKey: ['auditLog', 'infinite', filters],
+    queryFn: ({ pageParam }) =>
+      getAuditLogPageFn({ data: { ...filters, cursor: pageParam } }),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+    staleTime: 60_000,
+  });
+
 export const getAuditLogFn = createServerFn({ method: 'GET' })
   .inputValidator(auditFilterSchema)
   .handler(
     async ({ data }: { data: AuditFilters }): Promise<{ entries: AdminAuditLogEntry[] }> => {
-      await requireAnyCapability([
-        SystemCapabilities.MANAGE_ROLES,
-        SystemCapabilities.MANAGE_USERS,
-        SystemCapabilities.MANAGE_GROUPS,
-      ]);
-      const response = await apiFetch(`/api/admin/audit-log${buildAuditLogQuery(data)}`);
-      if (!response.ok) {
-        await extractApiError(response, 'Failed to fetch audit log');
-      }
-      return auditLogResponseSchema.parse(await response.json());
+      const page = await getAuditLogPageFn({ data: { ...data, limit: 500 } });
+      return { entries: page.entries };
     },
   );
 
@@ -285,4 +321,23 @@ export const auditLogQueryOptions = (filters: AuditFilters = {}) =>
     queryFn: () => getAuditLogFn({ data: filters }).then((r) => r.entries),
     staleTime: 60_000,
     placeholderData: keepPreviousData,
+  });
+
+export const exportAuditLogServerFn = createServerFn({ method: 'POST' })
+  .inputValidator(auditFilterSchema)
+  .handler(async ({ data }: { data: AuditFilters }): Promise<{ csv: string }> => {
+    await requireAnyCapability([
+      SystemCapabilities.MANAGE_ROLES,
+      SystemCapabilities.MANAGE_USERS,
+      SystemCapabilities.MANAGE_GROUPS,
+    ]);
+    const response = await apiFetch(
+      `/api/admin/audit-log/export.csv${buildAuditLogQuery(data)}`,
+      { method: 'GET', headers: { Accept: 'text/csv' } },
+    );
+    if (!response.ok) {
+      await extractApiError(response, 'Failed to export audit log');
+    }
+    const csv = await response.text();
+    return { csv };
   });
