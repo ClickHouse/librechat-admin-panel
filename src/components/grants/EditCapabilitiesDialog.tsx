@@ -1,6 +1,6 @@
 import { PrincipalType } from 'librechat-data-provider';
 import { useCallback, useEffect, useState } from 'react';
-import { Button, Dialog, Icon } from '@clickhouse/click-ui';
+import { Badge, Button, Dialog, Icon } from '@clickhouse/click-ui';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { AdminSystemGrant } from '@librechat/data-schemas';
 import type * as t from '@/types';
@@ -9,7 +9,6 @@ import { getScopeTypeConfig, SystemCapabilities } from '@/constants';
 import { CapabilityPanel } from './CapabilityPanel';
 import { LoadingState } from '@/components/shared';
 import { useLocalize } from '@/hooks';
-import { cn } from '@/utils';
 
 function grantsToRecord(grants: AdminSystemGrant[]): Record<string, boolean> {
   const record: Record<string, boolean> = {};
@@ -107,15 +106,16 @@ export function EditCapabilitiesDialog({
           <div className="flex flex-col gap-4">
             {principalConfig && (
               <div className="flex items-center gap-2">
-                <span
-                  className={cn(
-                    'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium',
-                    principalConfig.badgeClass,
-                  )}
-                >
-                  <Icon name={principalConfig.icon} size="xs" />
-                  {localize(principalConfig.labelKey)}
-                </span>
+                <Badge
+                  size="sm"
+                  state="neutral"
+                  text={
+                    <span className="inline-flex items-center gap-1">
+                      <Icon name={principalConfig.icon} size="xs" />
+                      {localize(principalConfig.labelKey)}
+                    </span>
+                  }
+                />
                 <span className="text-sm font-medium text-(--cui-color-text-default)">
                   {principalName}
                 </span>

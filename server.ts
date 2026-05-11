@@ -32,6 +32,32 @@ function getCacheHeaders(filePath: string): Record<string, string> {
   return {};
 }
 
+// 'unsafe-inline' in style-src is required because Tailwind 4 + click-ui inject inline styles at runtime.
+const CSP_VALUE = [
+  "default-src 'self'",
+  "script-src 'self'",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob:",
+  "font-src 'self' data:",
+  "connect-src 'self'",
+  "object-src 'none'",
+  "frame-ancestors 'none'",
+  "base-uri 'self'",
+  "form-action 'self'",
+].join('; ');
+
+function applySecurityHeaders(headers: Headers): void {
+  const contentType = headers.get('Content-Type') ?? '';
+  if (!contentType.toLowerCase().startsWith('text/html')) return;
+  headers.set('Content-Security-Policy', CSP_VALUE);
+  headers.set('X-Content-Type-Options', 'nosniff');
+  headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
+  headers.set('X-Frame-Options', 'DENY');
+  if (process.env.NODE_ENV === 'production') {
+    headers.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  }
+}
+
 type Handler = { default: { fetch: (req: Request) => Promise<Response> } };
 
 const { default: handler } = (await import(SERVER_ENTRY.href)) as Handler;
@@ -41,8 +67,11 @@ async function buildStaticRoutes(): Promise<Record<string, () => Response>> {
   for await (const path of new Glob('**/*').scan(CLIENT_DIR)) {
     const file = Bun.file(`${CLIENT_DIR}/${path}`);
     const cache = getCacheHeaders(path);
-    routes[`/${path}`] = () =>
-      new Response(file, { headers: { 'Content-Type': file.type, ...cache } });
+    routes[`/${path}`] = () => {
+      const res = new Response(file, { headers: { 'Content-Type': file.type, ...cache } });
+      applySecurityHeaders(res.headers);
+      return res;
+    };
   }
   return routes;
 }
@@ -63,6 +92,7 @@ const server = Bun.serve({
       for (const [k, v] of Object.entries(NO_CACHE)) {
         patched.headers.set(k, v);
       }
+      applySecurityHeaders(patched.headers);
       return patched;
     },
   },

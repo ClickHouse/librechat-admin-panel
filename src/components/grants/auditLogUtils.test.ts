@@ -7,7 +7,9 @@ import {
   AUDIT_ACTION_FILTERS,
   auditLogToCsv,
   capabilityLabel,
+  diffGrantState,
   formatTimestamp,
+  parseAuditSearch,
 } from './auditLogUtils';
 
 const UTF8_BOM = '﻿';
@@ -167,5 +169,146 @@ describe('auditLogToCsv', () => {
         expect(csv).not.toContain(`,${payload},`);
       });
     }
+  });
+});
+
+describe('parseAuditSearch', () => {
+  it('returns an empty result for empty input', () => {
+    expect(parseAuditSearch('')).toEqual({ freeText: '', qualifiers: {} });
+  });
+
+  it('places plain text into freeText', () => {
+    const result = parseAuditSearch('hello world');
+    expect(result.qualifiers).toEqual({});
+    expect(result.freeText).toBe('hello world');
+  });
+
+  it('extracts a single actor qualifier', () => {
+    const result = parseAuditSearch('actor:alice');
+    expect(result.qualifiers.actor).toBe('alice');
+    expect(result.freeText).toBe('');
+  });
+
+  it('extracts multiple qualifiers', () => {
+    const result = parseAuditSearch('actor:alice capability:manage:configs');
+    expect(result.qualifiers.actor).toBe('alice');
+    expect(result.qualifiers.capability).toBe('manage:configs');
+  });
+
+  it('supports a target qualifier', () => {
+    const result = parseAuditSearch('target:bob');
+    expect(result.qualifiers.target).toBe('bob');
+  });
+
+  it('handles quoted multi-word qualifier values', () => {
+    const result = parseAuditSearch('actor:"Alice Admin"');
+    expect(result.qualifiers.actor).toBe('Alice Admin');
+    expect(result.freeText).toBe('');
+  });
+
+  it('maps created:> to createdAfter', () => {
+    const result = parseAuditSearch('created:>2026-05-01');
+    expect(result.qualifiers.createdAfter).toBe('2026-05-01');
+    expect(result.qualifiers.createdBefore).toBeUndefined();
+  });
+
+  it('maps created:>= to createdAfter', () => {
+    const result = parseAuditSearch('created:>=2026-05-01');
+    expect(result.qualifiers.createdAfter).toBe('2026-05-01');
+  });
+
+  it('maps created:< to createdBefore', () => {
+    const result = parseAuditSearch('created:<2026-05-31');
+    expect(result.qualifiers.createdBefore).toBe('2026-05-31');
+    expect(result.qualifiers.createdAfter).toBeUndefined();
+  });
+
+  it('maps created:<= to createdBefore', () => {
+    const result = parseAuditSearch('created:<=2026-05-31');
+    expect(result.qualifiers.createdBefore).toBe('2026-05-31');
+  });
+
+  it('treats created without an operator as an exact day window', () => {
+    const result = parseAuditSearch('created:2026-05-01');
+    expect(result.qualifiers.createdAfter).toBe('2026-05-01');
+    expect(result.qualifiers.createdBefore).toBe('2026-05-01');
+  });
+
+  it('keeps free text alongside qualifiers', () => {
+    const result = parseAuditSearch('login actor:alice from prod');
+    expect(result.qualifiers.actor).toBe('alice');
+    expect(result.freeText).toBe('login from prod');
+  });
+
+  it('accepts qualifier keys case-insensitively', () => {
+    expect(parseAuditSearch('Actor:alice').qualifiers.actor).toBe('alice');
+    expect(parseAuditSearch('ACTOR:alice').qualifiers.actor).toBe('alice');
+  });
+
+  it('treats unknown qualifier keys as free text', () => {
+    const result = parseAuditSearch('foo:bar actor:alice');
+    expect(result.qualifiers.actor).toBe('alice');
+    expect(result.freeText).toBe('foo:bar');
+  });
+
+  it('combines actor + created range + free text', () => {
+    const result = parseAuditSearch(
+      'actor:alice created:>2026-05-01 created:<2026-05-31 audit',
+    );
+    expect(result.qualifiers).toEqual({
+      actor: 'alice',
+      createdAfter: '2026-05-01',
+      createdBefore: '2026-05-31',
+    });
+    expect(result.freeText).toBe('audit');
+  });
+});
+
+describe('diffGrantState', () => {
+  it('returns an empty diff when both sides are undefined', () => {
+    expect(diffGrantState(undefined, undefined)).toEqual({
+      added: [],
+      removed: [],
+      unchanged: [],
+    });
+  });
+
+  it('returns an empty diff when both sides are empty arrays', () => {
+    expect(diffGrantState([], [])).toEqual({ added: [], removed: [], unchanged: [] });
+  });
+
+  it('treats every capability as added when before is missing', () => {
+    const diff = diffGrantState(undefined, ['a', 'b']);
+    expect(new Set(diff.added)).toEqual(new Set(['a', 'b']));
+    expect(diff.removed).toEqual([]);
+    expect(diff.unchanged).toEqual([]);
+  });
+
+  it('treats every capability as removed when after is missing', () => {
+    const diff = diffGrantState(['a', 'b'], undefined);
+    expect(new Set(diff.removed)).toEqual(new Set(['a', 'b']));
+    expect(diff.added).toEqual([]);
+    expect(diff.unchanged).toEqual([]);
+  });
+
+  it('classifies added, removed, and unchanged capabilities', () => {
+    const diff = diffGrantState(['a', 'b', 'c'], ['b', 'c', 'd']);
+    expect(new Set(diff.added)).toEqual(new Set(['d']));
+    expect(new Set(diff.removed)).toEqual(new Set(['a']));
+    expect(new Set(diff.unchanged)).toEqual(new Set(['b', 'c']));
+  });
+
+  it('returns identical input as fully unchanged', () => {
+    const diff = diffGrantState(['a', 'b'], ['a', 'b']);
+    expect(new Set(diff.unchanged)).toEqual(new Set(['a', 'b']));
+    expect(diff.added).toEqual([]);
+    expect(diff.removed).toEqual([]);
+  });
+
+  it('deduplicates repeated capabilities via Set semantics', () => {
+    const diff = diffGrantState(['a', 'a', 'b'], ['a', 'a', 'c']);
+    expect(diff.unchanged).toEqual(['a']);
+    expect(diff.added).toEqual(['c']);
+    expect(diff.removed).toEqual(['b']);
   });
 });

@@ -49,7 +49,7 @@ export function AuditLogTab() {
     // UTC-inclusive: dateFrom -> 00:00:00Z, dateTo -> 23:59:59.999Z
     () => ({
       search: debouncedSearch || undefined,
-      action: actionFilter !== 'all' ? actionFilter : undefined,
+      action: actionFilter !== 'all' ? [actionFilter] : undefined,
       from: dateFrom ? new Date(`${dateFrom}T00:00:00Z`).toISOString() : undefined,
       to: dateTo ? new Date(`${dateTo}T23:59:59.999Z`).toISOString() : undefined,
     }),
