@@ -5,6 +5,7 @@ type Tab = 'management' | 'audit-log';
 
 interface GrantsSearch {
   tab?: string;
+  entryId?: string;
 }
 
 function isValidTab(value?: string): value is Tab {
@@ -14,6 +15,7 @@ function isValidTab(value?: string): value is Tab {
 export const Route = createFileRoute('/_app/grants')({
   validateSearch: (search: Record<string, unknown>): GrantsSearch => ({
     tab: typeof search.tab === 'string' ? search.tab : undefined,
+    entryId: typeof search.entryId === 'string' ? search.entryId : undefined,
   }),
   component: GrantsRoute,
 });
@@ -25,7 +27,7 @@ function GrantsRoute() {
 
   const handleTabChange = (value: string) => {
     if (isValidTab(value)) {
-      navigate({ search: { tab: value } });
+      navigate({ search: (prev: Record<string, unknown>) => ({ ...prev, tab: value }) });
     }
   };
 

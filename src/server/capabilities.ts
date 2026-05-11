@@ -7,11 +7,11 @@
  */
 
 import { z } from 'zod';
-import { infiniteQueryOptions, keepPreviousData, queryOptions } from '@tanstack/react-query';
+import { infiniteQueryOptions, queryOptions } from '@tanstack/react-query';
 import { createServerFn } from '@tanstack/react-start';
 import { PrincipalType } from 'librechat-data-provider';
 import { hasImpliedCapability, SystemCapabilities } from '@librechat/data-schemas/capabilities';
-import type { AdminAuditLogEntry, AdminSystemGrant } from '@librechat/data-schemas';
+import type { AdminSystemGrant } from '@librechat/data-schemas';
 import { apiFetch, extractApiError } from './utils/api';
 
 // ── Helpers ──────────────────────────────────────────────────────────
@@ -304,23 +304,6 @@ export const auditLogInfiniteQueryOptions = (
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
     staleTime: 60_000,
-  });
-
-export const getAuditLogFn = createServerFn({ method: 'GET' })
-  .inputValidator(auditFilterSchema)
-  .handler(
-    async ({ data }: { data: AuditFilters }): Promise<{ entries: AdminAuditLogEntry[] }> => {
-      const page = await getAuditLogPageFn({ data: { ...data, limit: 500 } });
-      return { entries: page.entries };
-    },
-  );
-
-export const auditLogQueryOptions = (filters: AuditFilters = {}) =>
-  queryOptions<AdminAuditLogEntry[]>({
-    queryKey: ['auditLog', filters],
-    queryFn: () => getAuditLogFn({ data: filters }).then((r) => r.entries),
-    staleTime: 60_000,
-    placeholderData: keepPreviousData,
   });
 
 export const exportAuditLogServerFn = createServerFn({ method: 'POST' })
