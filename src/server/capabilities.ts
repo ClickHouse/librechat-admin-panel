@@ -219,7 +219,7 @@ export const revokeCapabilityFn = createServerFn({ method: 'POST' })
     },
   );
 
-// ── Audit Log (stubbed -- no backend endpoint yet) ───────────────────
+// ── Audit Log ────────────────────────────────────────────────────────
 
 const auditFilterSchema = z.object({
   search: z.string().optional(),
@@ -230,9 +230,28 @@ const auditFilterSchema = z.object({
 
 type AuditFilters = z.infer<typeof auditFilterSchema>;
 
+function buildAuditLogQuery(filters: AuditFilters): string {
+  const params = new URLSearchParams();
+  if (filters.search) params.set('search', filters.search);
+  if (filters.action) params.set('action', filters.action);
+  if (filters.from) params.set('from', filters.from);
+  if (filters.to) params.set('to', filters.to);
+  const qs = params.toString();
+  return qs ? `?${qs}` : '';
+}
+
 export const getAuditLogFn = createServerFn({ method: 'GET' })
   .inputValidator(auditFilterSchema)
-  .handler(async (): Promise<{ entries: AdminAuditLogEntry[] }> => ({ entries: [] }));
+  .handler(
+    async ({ data }: { data: AuditFilters }): Promise<{ entries: AdminAuditLogEntry[] }> => {
+      const response = await apiFetch(`/api/admin/audit-log${buildAuditLogQuery(data)}`);
+      if (!response.ok) {
+        await extractApiError(response, 'Failed to fetch audit log');
+      }
+      const json = (await response.json()) as { entries: AdminAuditLogEntry[] };
+      return { entries: json.entries };
+    },
+  );
 
 export const auditLogQueryOptions = (filters: AuditFilters = {}) =>
   queryOptions<AdminAuditLogEntry[]>({
@@ -240,7 +259,3 @@ export const auditLogQueryOptions = (filters: AuditFilters = {}) =>
     queryFn: () => getAuditLogFn({ data: filters }).then((r) => r.entries),
     staleTime: 30_000,
   });
-
-export const exportAuditLogCsvFn = createServerFn({ method: 'POST' })
-  .inputValidator(auditFilterSchema)
-  .handler(async () => ({ csv: '' }));

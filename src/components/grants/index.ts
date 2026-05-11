@@ -1,4 +1,4 @@
-export { ACTION_FILTER_LABELS, capabilityLabel, formatTimestamp } from './auditLogUtils';
+export { ACTION_FILTER_LABELS, auditLogToCsv, capabilityLabel, formatTimestamp } from './auditLogUtils';
 export { aggregatePrincipals, buildRoleNames, filterPrincipals } from './utils';
 export { EditCapabilitiesDialog } from './EditCapabilitiesDialog';
 export { GrantManagementTab } from './GrantManagementTab';

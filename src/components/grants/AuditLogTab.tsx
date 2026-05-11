@@ -3,8 +3,8 @@ import { useQuery } from '@tanstack/react-query';
 import { useState, useMemo, useCallback } from 'react';
 import type * as t from '@/types';
 import { EmptyState, LoadingState, SearchInput } from '@/components/shared';
-import { auditLogQueryOptions, exportAuditLogCsvFn } from '@/server';
-import { ACTION_FILTER_LABELS } from './auditLogUtils';
+import { ACTION_FILTER_LABELS, auditLogToCsv } from './auditLogUtils';
+import { auditLogQueryOptions } from '@/server';
 import { AuditLogRow } from './AuditLogRow';
 import { useLocalize } from '@/hooks';
 import { cn } from '@/utils';
@@ -15,7 +15,6 @@ export function AuditLogTab() {
   const [actionFilter, setActionFilter] = useState<t.ActionFilter>('all');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
-  const [exporting, setExporting] = useState(false);
   const filters = useMemo(
     () => ({
       search: search || undefined,
@@ -36,21 +35,16 @@ export function AuditLogTab() {
     setActionFilter(filter);
   }, []);
 
-  const handleExport = useCallback(async () => {
-    setExporting(true);
-    try {
-      const { csv } = await exportAuditLogCsvFn({ data: filters });
-      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `audit-log-${new Date().toISOString().slice(0, 10)}.csv`;
-      a.click();
-      URL.revokeObjectURL(url);
-    } finally {
-      setExporting(false);
-    }
-  }, [filters]);
+  const handleExport = useCallback(() => {
+    const csv = auditLogToCsv(entries);
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `audit-log-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [entries]);
 
   if (isLoading) {
     return <LoadingState />;
@@ -119,7 +113,7 @@ export function AuditLogTab() {
         <button
           type="button"
           onClick={handleExport}
-          disabled={exporting || entries.length === 0}
+          disabled={entries.length === 0}
           aria-label={localize('com_audit_export_csv')}
           className="flex shrink-0 items-center gap-1.5 rounded-lg border border-(--cui-color-stroke-default) bg-transparent px-3 py-1.5 text-sm text-(--cui-color-text-default) transition-colors hover:bg-(--cui-color-background-hover) disabled:cursor-not-allowed disabled:opacity-50"
         >
