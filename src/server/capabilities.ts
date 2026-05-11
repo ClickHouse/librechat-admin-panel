@@ -7,7 +7,7 @@
  */
 
 import { z } from 'zod';
-import { queryOptions } from '@tanstack/react-query';
+import { keepPreviousData, queryOptions } from '@tanstack/react-query';
 import { createServerFn } from '@tanstack/react-start';
 import { PrincipalType } from 'librechat-data-provider';
 import { hasImpliedCapability, SystemCapabilities } from '@librechat/data-schemas/capabilities';
@@ -221,21 +221,43 @@ export const revokeCapabilityFn = createServerFn({ method: 'POST' })
 
 // ── Audit Log ────────────────────────────────────────────────────────
 
+const isoDate = z
+  .string()
+  .regex(
+    /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d{1,3})?)?Z?)?$/,
+    'Expected ISO 8601 date',
+  );
+
 const auditFilterSchema = z.object({
-  search: z.string().optional(),
+  search: z.string().max(200).optional(),
   action: z.enum(['grant_assigned', 'grant_removed']).optional(),
-  from: z.string().optional(),
-  to: z.string().optional(),
+  from: isoDate.optional(),
+  to: isoDate.optional(),
 });
 
-type AuditFilters = z.infer<typeof auditFilterSchema>;
+export type AuditFilters = z.infer<typeof auditFilterSchema>;
+
+const adminAuditLogEntrySchema = z.object({
+  id: z.string(),
+  action: z.enum(['grant_assigned', 'grant_removed']),
+  actorId: z.string(),
+  actorName: z.string(),
+  targetPrincipalType: z.nativeEnum(PrincipalType),
+  targetPrincipalId: z.string(),
+  targetName: z.string(),
+  capability: z.string(),
+  timestamp: z.string(),
+});
+
+const auditLogResponseSchema = z.object({
+  entries: z.array(adminAuditLogEntrySchema),
+});
 
 function buildAuditLogQuery(filters: AuditFilters): string {
   const params = new URLSearchParams();
-  if (filters.search) params.set('search', filters.search);
-  if (filters.action) params.set('action', filters.action);
-  if (filters.from) params.set('from', filters.from);
-  if (filters.to) params.set('to', filters.to);
+  for (const [key, value] of Object.entries(filters)) {
+    if (value) params.set(key, value);
+  }
   const qs = params.toString();
   return qs ? `?${qs}` : '';
 }
@@ -244,12 +266,16 @@ export const getAuditLogFn = createServerFn({ method: 'GET' })
   .inputValidator(auditFilterSchema)
   .handler(
     async ({ data }: { data: AuditFilters }): Promise<{ entries: AdminAuditLogEntry[] }> => {
+      await requireAnyCapability([
+        SystemCapabilities.MANAGE_ROLES,
+        SystemCapabilities.MANAGE_USERS,
+        SystemCapabilities.MANAGE_GROUPS,
+      ]);
       const response = await apiFetch(`/api/admin/audit-log${buildAuditLogQuery(data)}`);
       if (!response.ok) {
         await extractApiError(response, 'Failed to fetch audit log');
       }
-      const json = (await response.json()) as { entries: AdminAuditLogEntry[] };
-      return { entries: json.entries };
+      return auditLogResponseSchema.parse(await response.json());
     },
   );
 
@@ -257,5 +283,6 @@ export const auditLogQueryOptions = (filters: AuditFilters = {}) =>
   queryOptions<AdminAuditLogEntry[]>({
     queryKey: ['auditLog', filters],
     queryFn: () => getAuditLogFn({ data: filters }).then((r) => r.entries),
-    staleTime: 30_000,
+    staleTime: 60_000,
+    placeholderData: keepPreviousData,
   });

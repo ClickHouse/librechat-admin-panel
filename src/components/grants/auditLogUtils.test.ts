@@ -1,7 +1,16 @@
 import { describe, it, expect } from 'vitest';
 import { PrincipalType } from 'librechat-data-provider';
 import type { AdminAuditLogEntry } from '@librechat/data-schemas';
-import { ACTION_FILTER_LABELS, auditLogToCsv, capabilityLabel, formatTimestamp } from './auditLogUtils';
+import {
+  ACTION_BADGE_STATE,
+  ACTION_FILTER_LABELS,
+  AUDIT_ACTION_FILTERS,
+  auditLogToCsv,
+  capabilityLabel,
+  formatTimestamp,
+} from './auditLogUtils';
+
+const UTF8_BOM = '﻿';
 
 const sampleEntry: AdminAuditLogEntry = {
   id: 'a1',
@@ -15,11 +24,29 @@ const sampleEntry: AdminAuditLogEntry = {
   timestamp: '2026-05-10T14:30:00.000Z',
 };
 
+const identityLocalize = (k: string) => k;
+
+const expectedHeader =
+  'com_audit_csv_col_timestamp,com_audit_csv_col_action,com_audit_csv_col_actor,com_audit_csv_col_actor_id,com_audit_csv_col_target_type,com_audit_csv_col_target_id,com_audit_csv_col_target_name,com_audit_csv_col_capability';
+
 describe('ACTION_FILTER_LABELS', () => {
   it('maps every filter value to a locale key', () => {
     expect(ACTION_FILTER_LABELS.all).toBe('com_audit_filter_all');
     expect(ACTION_FILTER_LABELS.grant_assigned).toBe('com_audit_filter_assigned');
     expect(ACTION_FILTER_LABELS.grant_removed).toBe('com_audit_filter_removed');
+  });
+});
+
+describe('AUDIT_ACTION_FILTERS', () => {
+  it('exposes the ordered filter list', () => {
+    expect(AUDIT_ACTION_FILTERS).toEqual(['all', 'grant_assigned', 'grant_removed']);
+  });
+});
+
+describe('ACTION_BADGE_STATE', () => {
+  it('maps each audit action to a badge state', () => {
+    expect(ACTION_BADGE_STATE.grant_assigned).toBe('success');
+    expect(ACTION_BADGE_STATE.grant_removed).toBe('danger');
   });
 });
 
@@ -33,6 +60,11 @@ describe('formatTimestamp', () => {
   it('falls back to the input string when the date is invalid', () => {
     expect(formatTimestamp('not-a-date')).toBe('not-a-date');
   });
+
+  it('accepts a locale override', () => {
+    const out = formatTimestamp('2026-05-10T14:30:00.000Z', 'en-US');
+    expect(out.length).toBeGreaterThan(0);
+  });
 });
 
 describe('capabilityLabel', () => {
@@ -42,8 +74,7 @@ describe('capabilityLabel', () => {
   });
 
   it('returns the raw capability when no locale match is found', () => {
-    const localize = (key: string) => key;
-    expect(capabilityLabel('custom:unknown', localize)).toBe('custom:unknown');
+    expect(capabilityLabel('custom:unknown', identityLocalize)).toBe('custom:unknown');
   });
 
   it('converts all colons in the capability to underscores in the lookup key', () => {
@@ -59,21 +90,20 @@ describe('capabilityLabel', () => {
 
 describe('auditLogToCsv', () => {
   it('emits a header row and one row per entry', () => {
-    const csv = auditLogToCsv([sampleEntry]);
-    const lines = csv.split('\n');
+    const csv = auditLogToCsv([sampleEntry], identityLocalize);
+    expect(csv.startsWith(UTF8_BOM)).toBe(true);
+    const body = csv.slice(UTF8_BOM.length);
+    expect(body.endsWith('\r\n')).toBe(true);
+    const lines = body.replace(/\r\n$/, '').split('\r\n');
     expect(lines.length).toBe(2);
-    expect(lines[0]).toBe(
-      'timestamp,action,actorId,actorName,targetPrincipalType,targetPrincipalId,targetName,capability',
-    );
+    expect(lines[0]).toBe(expectedHeader);
     expect(lines[1]).toContain('Alice Admin');
     expect(lines[1]).toContain('manage:configs');
     expect(lines[1]).toContain('grant_assigned');
   });
 
   it('returns only the header for an empty entry list', () => {
-    expect(auditLogToCsv([])).toBe(
-      'timestamp,action,actorId,actorName,targetPrincipalType,targetPrincipalId,targetName,capability',
-    );
+    expect(auditLogToCsv([], identityLocalize)).toBe(UTF8_BOM + expectedHeader + '\r\n');
   });
 
   it('quotes and escapes cells containing commas, quotes, or newlines', () => {
@@ -82,8 +112,60 @@ describe('auditLogToCsv', () => {
       actorName: 'Alice, "the admin"',
       targetName: 'Line1\nLine2',
     };
-    const csv = auditLogToCsv([tricky]);
+    const csv = auditLogToCsv([tricky], identityLocalize);
     expect(csv).toContain('"Alice, ""the admin"""');
     expect(csv).toContain('"Line1\nLine2"');
+  });
+
+  it('starts with a UTF-8 BOM', () => {
+    const csv = auditLogToCsv([sampleEntry], identityLocalize);
+    expect(csv.charCodeAt(0)).toBe(0xfeff);
+  });
+
+  it('uses CRLF line endings with a trailing CRLF', () => {
+    const csv = auditLogToCsv([sampleEntry, sampleEntry], identityLocalize);
+    const body = csv.slice(UTF8_BOM.length);
+    expect(body.endsWith('\r\n')).toBe(true);
+    const lines = body.slice(0, -2).split('\r\n');
+    expect(lines.length).toBe(3);
+  });
+
+  it('preserves non-ASCII content through a CSV round trip', () => {
+    const entry: AdminAuditLogEntry = {
+      ...sampleEntry,
+      actorName: 'Müller',
+      targetName: '日本語',
+    };
+    const csv = auditLogToCsv([entry], identityLocalize);
+    expect(csv).toContain('Müller');
+    expect(csv).toContain('日本語');
+  });
+
+  describe('CSV formula-injection defanging', () => {
+    const prefixes: Array<{ name: string; char: string }> = [
+      { name: 'equals', char: '=' },
+      { name: 'plus', char: '+' },
+      { name: 'minus', char: '-' },
+      { name: 'at', char: '@' },
+      { name: 'tab', char: '\t' },
+      { name: 'carriage-return', char: '\r' },
+    ];
+
+    for (const { name, char } of prefixes) {
+      it(`prepends a single quote to actorName starting with ${name}`, () => {
+        const payload = `${char}HYPERLINK("evil")`;
+        const malicious: AdminAuditLogEntry = {
+          ...sampleEntry,
+          actorName: payload,
+        };
+        const csv = auditLogToCsv([malicious], identityLocalize);
+        const guarded = `'${payload}`;
+        const expectedCell = /[",\n\r]/.test(guarded)
+          ? `"${guarded.replace(/"/g, '""')}"`
+          : guarded;
+        expect(csv).toContain(expectedCell);
+        expect(csv).not.toContain(`,${payload},`);
+      });
+    }
   });
 });
