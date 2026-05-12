@@ -1,9 +1,14 @@
-export { ACTION_BADGE_STATE, ACTION_FILTER_LABELS, AUDIT_ACTION_FILTERS, auditLogToCsv, capabilityLabel, diffGrantState, formatTimestamp, parseAuditSearch } from './auditLogUtils';
+export {
+  ACTION_BADGE_STATE,
+  ACTION_LABEL_KEY,
+  auditLogToCsv,
+  capabilityLabel,
+  formatTimestamp,
+} from './auditLogUtils';
 export { aggregatePrincipals, buildRoleNames, filterPrincipals } from './utils';
 export { EditCapabilitiesDialog } from './EditCapabilitiesDialog';
 export { GrantManagementTab } from './GrantManagementTab';
 export { CapabilityPanel } from './CapabilityPanel';
-export { AuditLogRow } from './AuditLogRow';
 export { AuditLogDetailDrawer } from './AuditLogDetailDrawer';
 export { AuditLogTab } from './AuditLogTab';
 export { GrantTableRow } from './GrantTableRow';

@@ -1,4 +1,4 @@
-import type { AdminAuditLogEntry, AuditAction } from '@librechat/data-schemas';
+import type { AdminAuditLogEntry } from '@librechat/data-schemas';
 import type { PrincipalType } from 'librechat-data-provider';
 import type { KeyboardEvent } from 'react';
 
@@ -7,38 +7,12 @@ export interface AuditLogEntryWithDiff extends AdminAuditLogEntry {
   after?: readonly string[];
 }
 
-export interface AuditSearchQualifiers {
-  actor?: string;
-  target?: string;
-  capability?: string;
-  createdAfter?: string;
-  createdBefore?: string;
-}
-
-export interface ParsedAuditSearch {
-  freeText: string;
-  qualifiers: AuditSearchQualifiers;
-}
-
-export interface GrantDiff {
-  added: readonly string[];
-  removed: readonly string[];
-  unchanged: readonly string[];
-}
-
 export interface PrincipalRow {
   principalType: PrincipalType;
   principalId: string;
   name: string;
   grantCount: number;
   isActive: boolean;
-}
-
-export type ActionFilter = 'all' | AuditAction;
-
-export interface AuditLogRowProps {
-  entry: AdminAuditLogEntry;
-  isLast: boolean;
 }
 
 export interface CapabilityPanelProps {

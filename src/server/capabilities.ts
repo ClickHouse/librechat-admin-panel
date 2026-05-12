@@ -7,7 +7,7 @@
  */
 
 import { z } from 'zod';
-import { infiniteQueryOptions, queryOptions } from '@tanstack/react-query';
+import { queryOptions } from '@tanstack/react-query';
 import { createServerFn } from '@tanstack/react-start';
 import { PrincipalType } from 'librechat-data-provider';
 import { hasImpliedCapability, SystemCapabilities } from '@librechat/data-schemas/capabilities';
@@ -223,10 +223,7 @@ export const revokeCapabilityFn = createServerFn({ method: 'POST' })
 
 const isoDate = z
   .string()
-  .regex(
-    /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d{1,3})?)?Z?)?$/,
-    'Expected ISO 8601 date',
-  );
+  .regex(/^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d{1,3})?)?Z?)?$/, 'Expected ISO 8601 date');
 
 const auditFilterSchema = z.object({
   search: z.string().max(200).optional(),
@@ -237,7 +234,7 @@ const auditFilterSchema = z.object({
   targetPrincipalType: z.nativeEnum(PrincipalType).optional(),
   targetPrincipalId: z.string().max(128).optional(),
   capability: z.string().max(128).optional(),
-  cursor: z.string().max(256).optional(),
+  offset: z.number().int().min(0).optional(),
   limit: z.number().int().min(1).max(500).optional(),
 });
 
@@ -259,10 +256,12 @@ const adminAuditLogEntrySchema = z.object({
 
 const auditLogPageResponseSchema = z.object({
   entries: z.array(adminAuditLogEntrySchema),
-  nextCursor: z.string().nullable(),
+  total: z.number().int().min(0),
 });
 
 export type AuditLogPage = z.infer<typeof auditLogPageResponseSchema>;
+
+export const AUDIT_LOG_PAGE_SIZE = 50;
 
 function buildAuditLogQuery(filters: AuditFilters): string {
   const params = new URLSearchParams();
@@ -286,7 +285,7 @@ export const getAuditLogPageFn = createServerFn({ method: 'GET' })
       SystemCapabilities.MANAGE_USERS,
       SystemCapabilities.MANAGE_GROUPS,
     ]);
-    const withDefaults: AuditFilters = { limit: 100, ...data };
+    const withDefaults: AuditFilters = { limit: AUDIT_LOG_PAGE_SIZE, ...data };
     const response = await apiFetch(`/api/admin/audit-log${buildAuditLogQuery(withDefaults)}`);
     if (!response.ok) {
       await extractApiError(response, 'Failed to fetch audit log');
@@ -294,15 +293,20 @@ export const getAuditLogPageFn = createServerFn({ method: 'GET' })
     return auditLogPageResponseSchema.parse(await response.json());
   });
 
-export const auditLogInfiniteQueryOptions = (
-  filters: Omit<AuditFilters, 'cursor'> = {},
+export const auditLogQueryOptions = (
+  page: number,
+  filters: Omit<AuditFilters, 'offset' | 'limit'> = {},
 ) =>
-  infiniteQueryOptions({
-    queryKey: ['auditLog', 'infinite', filters],
-    queryFn: ({ pageParam }) =>
-      getAuditLogPageFn({ data: { ...filters, cursor: pageParam } }),
-    initialPageParam: undefined as string | undefined,
-    getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+  queryOptions({
+    queryKey: ['auditLog', page, filters] as const,
+    queryFn: () =>
+      getAuditLogPageFn({
+        data: {
+          ...filters,
+          offset: (Math.max(1, page) - 1) * AUDIT_LOG_PAGE_SIZE,
+          limit: AUDIT_LOG_PAGE_SIZE,
+        },
+      }),
     staleTime: 60_000,
   });
 
@@ -314,10 +318,10 @@ export const exportAuditLogServerFn = createServerFn({ method: 'POST' })
       SystemCapabilities.MANAGE_USERS,
       SystemCapabilities.MANAGE_GROUPS,
     ]);
-    const response = await apiFetch(
-      `/api/admin/audit-log/export.csv${buildAuditLogQuery(data)}`,
-      { method: 'GET', headers: { Accept: 'text/csv' } },
-    );
+    const response = await apiFetch(`/api/admin/audit-log/export.csv${buildAuditLogQuery(data)}`, {
+      method: 'GET',
+      headers: { Accept: 'text/csv' },
+    });
     if (!response.ok) {
       await extractApiError(response, 'Failed to export audit log');
     }

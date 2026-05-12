@@ -29,15 +29,9 @@ export function GrantManagementTab() {
 
   const roleNames = useMemo(() => buildRoleNames(roles), [roles]);
 
-  const principals = useMemo(
-    () => aggregatePrincipals(grants, roleNames),
-    [grants, roleNames],
-  );
+  const principals = useMemo(() => aggregatePrincipals(grants, roleNames), [grants, roleNames]);
 
-  const filtered = useMemo(
-    () => filterPrincipals(principals, search),
-    [principals, search],
-  );
+  const filtered = useMemo(() => filterPrincipals(principals, search), [principals, search]);
 
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
   const paged = useMemo(

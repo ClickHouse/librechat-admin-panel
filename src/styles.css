@@ -3,9 +3,51 @@
 @theme {
   --z-sticky: 10; /* sticky table/section headers (in-tree) */
   --z-floating: 20; /* sidebar, content toolbars (in-tree) */
+  --z-overlay: 60; /* drawer / modal overlay + content */
   --z-command-overlay: 69; /* command menu backdrop */
   --z-command: 70; /* command menu panel */
   --z-toast: 80; /* toasts */
+
+  --animate-drawer-in: drawer-slide-in 240ms cubic-bezier(0.32, 0.72, 0, 1);
+  --animate-drawer-out: drawer-slide-out 200ms cubic-bezier(0.32, 0.72, 0, 1);
+  --animate-overlay-in: overlay-fade-in 240ms ease-out;
+  --animate-overlay-out: overlay-fade-out 200ms ease-out;
+}
+
+@keyframes drawer-slide-in {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+@keyframes drawer-slide-out {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes overlay-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes overlay-fade-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
 }
 
 @custom-variant dark {
@@ -325,6 +367,12 @@ summary:focus-visible {
 .select-field-a11y button:focus-visible {
   outline: none !important;
   border-color: var(--cui-color-outline) !important;
+}
+
+/* click-ui DatePicker: round the PopoverTrigger button so the global
+   focus-visible outline matches the input wrapper's border-radius. */
+.audit-date-cell button {
+  border-radius: 4px;
 }
 
 input:not([cmdk-input]):focus-visible,
@@ -922,4 +970,3 @@ body > div:has(+ .modal-frost) {
   background-color: var(--cui-color-feedback-user-bg);
   color: var(--cui-color-feedback-user-fg);
 }
-

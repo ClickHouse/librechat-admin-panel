@@ -1,33 +1,29 @@
-import { useInfiniteQuery } from '@tanstack/react-query';
-import { useNavigate, useSearch } from '@tanstack/react-router';
-import {
-  Badge,
-  Button,
-  CheckboxMultiSelect,
-  DatePicker,
-  Icon,
-  IconButton,
-  Select,
-  TextField,
-} from '@clickhouse/click-ui';
-import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { PrincipalType } from 'librechat-data-provider';
+import { useNavigate, useSearch } from '@tanstack/react-router';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
+import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
+import { Badge, Button, DatePicker, Icon, Select, TextField } from '@clickhouse/click-ui';
 import type { AuditAction } from '@librechat/data-schemas';
+import type { AuditFilters } from '@/server';
 import type * as t from '@/types';
-import { EmptyState, LoadingState, ScreenReaderAnnouncer, SearchInput } from '@/components/shared';
 import {
   ACTION_BADGE_STATE,
   ACTION_LABEL_KEY,
   auditLogToCsv,
   capabilityLabel,
   formatTimestamp,
-  parseAuditSearch,
 } from './auditLogUtils';
-import { getScopeTypeConfig } from '@/constants';
-import { useAnnouncement, useLocalize } from '@/hooks';
-import { auditLogInfiniteQueryOptions, exportAuditLogServerFn } from '@/server';
-import type { AuditFilters } from '@/server/capabilities';
+import {
+  EmptyState,
+  LoadingState,
+  Pagination,
+  ScreenReaderAnnouncer,
+  SearchInput,
+} from '@/components/shared';
+import { AUDIT_LOG_PAGE_SIZE, auditLogQueryOptions, exportAuditLogServerFn } from '@/server';
 import { AuditLogDetailDrawer } from './AuditLogDetailDrawer';
+import { useAnnouncement, useLocalize } from '@/hooks';
+import { getScopeTypeConfig } from '@/constants';
 import { cn } from '@/utils';
 
 const CLIENT_EXPORT_THRESHOLD = 500;
@@ -37,12 +33,9 @@ const TARGET_TYPE_OPTIONS: readonly PrincipalType[] = [
   PrincipalType.GROUP,
   PrincipalType.ROLE,
 ] as const;
-
-interface QualifierChip {
-  key: keyof t.AuditSearchQualifiers;
-  display: string;
-  removalToken: RegExp;
-}
+/** Radix `Select.Item` cannot use `value=""` (Radix reserves empty string for
+ * "no selection"). Use a non-empty sentinel and translate to `''` in state. */
+const TARGET_TYPE_ALL = '__all__';
 
 function isoDateToDate(iso: string): Date | undefined {
   if (!iso) return undefined;
@@ -57,57 +50,26 @@ function dateToIsoDate(date: Date): string {
   return `${yyyy}-${mm}-${dd}`;
 }
 
-function buildQualifierChips(
-  parsed: t.ParsedAuditSearch,
-  raw: string,
-): QualifierChip[] {
-  const chips: QualifierChip[] = [];
-  const q = parsed.qualifiers;
-  if (q.actor) {
-    chips.push({
-      key: 'actor',
-      display: `actor:${q.actor}`,
-      removalToken: /\bactor:(?:"[^"]*"|\S+)\s*/gi,
-    });
-  }
-  if (q.target) {
-    chips.push({
-      key: 'target',
-      display: `target:${q.target}`,
-      removalToken: /\btarget:(?:"[^"]*"|\S+)\s*/gi,
-    });
-  }
-  if (q.capability) {
-    chips.push({
-      key: 'capability',
-      display: `capability:${q.capability}`,
-      removalToken: /\bcapability:(?:"[^"]*"|\S+)\s*/gi,
-    });
-  }
-  if (q.createdAfter && q.createdAfter === q.createdBefore) {
-    chips.push({
-      key: 'createdAfter',
-      display: `created:${q.createdAfter}`,
-      removalToken: /\bcreated:(?!>|<)(?:"[^"]*"|\S+)\s*/gi,
-    });
-  } else {
-    if (q.createdAfter) {
-      chips.push({
-        key: 'createdAfter',
-        display: `created:>${q.createdAfter}`,
-        removalToken: /\bcreated:>=?(?:"[^"]*"|\S+)\s*/gi,
-      });
-    }
-    if (q.createdBefore) {
-      chips.push({
-        key: 'createdBefore',
-        display: `created:<${q.createdBefore}`,
-        removalToken: /\bcreated:<=?(?:"[^"]*"|\S+)\s*/gi,
-      });
-    }
-  }
-  void raw;
-  return chips;
+/**
+ * Wraps a click-ui DatePicker so only the trigger button is tab-focusable.
+ * click-ui renders both a PopoverTrigger button AND an inner readonly input,
+ * which produces two stops in the tab order. The effect un-tabs the input on
+ * every render (in case click-ui re-mounts it) and the class hooks the CSS
+ * rule that rounds the trigger's focus outline to match the wrapper border.
+ */
+function DatePickerCell({ children }: { children: React.ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const node = ref.current;
+    if (!node) return;
+    const input = node.querySelector('input');
+    if (input) input.tabIndex = -1;
+  });
+  return (
+    <div ref={ref} className="audit-date-cell contents">
+      {children}
+    </div>
+  );
 }
 
 function downloadCsv(csv: string): void {
@@ -132,6 +94,8 @@ export function AuditLogTab() {
   const [actionFilter, setActionFilter] = useState<AuditAction[]>([]);
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
+  /** Bumped each clear so DatePicker remounts and drops its internal selection state. */
+  const [dateResetNonce, setDateResetNonce] = useState(0);
   const [actorIdFilter, setActorIdFilter] = useState('');
   const [debouncedActorId, setDebouncedActorId] = useState('');
   const [targetIdFilter, setTargetIdFilter] = useState('');
@@ -139,15 +103,13 @@ export function AuditLogTab() {
   const [capabilityFilter, setCapabilityFilter] = useState('');
   const [debouncedCapability, setDebouncedCapability] = useState('');
   const [targetTypeFilter, setTargetTypeFilter] = useState<PrincipalType | ''>('');
-  const [moreOpen, setMoreOpen] = useState(false);
 
+  const [currentPage, setCurrentPage] = useState(1);
   const { message: announcement, announce } = useAnnouncement();
   const searchDebounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const actorDebounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const targetDebounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const capabilityDebounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
-  const sentinelRef = useRef<HTMLTableRowElement | null>(null);
-  const previousPageCountRef = useRef(0);
 
   useEffect(() => {
     return () => {
@@ -161,51 +123,53 @@ export function AuditLogTab() {
   const handleSearchChange = (value: string) => {
     setSearch(value);
     clearTimeout(searchDebounceRef.current);
-    searchDebounceRef.current = setTimeout(() => setDebouncedSearch(value), 300);
+    searchDebounceRef.current = setTimeout(() => {
+      setDebouncedSearch(value);
+      setCurrentPage(1);
+    }, 300);
   };
 
   const handleActorIdChange = (value: string) => {
     setActorIdFilter(value);
     clearTimeout(actorDebounceRef.current);
-    actorDebounceRef.current = setTimeout(() => setDebouncedActorId(value), 300);
+    actorDebounceRef.current = setTimeout(() => {
+      setDebouncedActorId(value);
+      setCurrentPage(1);
+    }, 300);
   };
 
   const handleTargetIdChange = (value: string) => {
     setTargetIdFilter(value);
     clearTimeout(targetDebounceRef.current);
-    targetDebounceRef.current = setTimeout(() => setDebouncedTargetId(value), 300);
+    targetDebounceRef.current = setTimeout(() => {
+      setDebouncedTargetId(value);
+      setCurrentPage(1);
+    }, 300);
   };
 
   const handleCapabilityChange = (value: string) => {
     setCapabilityFilter(value);
     clearTimeout(capabilityDebounceRef.current);
-    capabilityDebounceRef.current = setTimeout(() => setDebouncedCapability(value), 300);
+    capabilityDebounceRef.current = setTimeout(() => {
+      setDebouncedCapability(value);
+      setCurrentPage(1);
+    }, 300);
   };
 
-  const parsed = useMemo(() => parseAuditSearch(debouncedSearch), [debouncedSearch]);
-  const qualifierChips = useMemo(
-    () => buildQualifierChips(parsed, debouncedSearch),
-    [parsed, debouncedSearch],
-  );
-
-  const filters = useMemo<Omit<AuditFilters, 'cursor'>>(() => {
-    const q = parsed.qualifiers;
-    const fromIso =
-      q.createdAfter || (dateFrom ? new Date(`${dateFrom}T00:00:00Z`).toISOString() : undefined);
-    const toIso =
-      q.createdBefore || (dateTo ? new Date(`${dateTo}T23:59:59.999Z`).toISOString() : undefined);
+  const filters = useMemo<Omit<AuditFilters, 'offset' | 'limit'>>(() => {
+    const trimmed = debouncedSearch.trim();
     return {
-      search: parsed.freeText.trim() ? parsed.freeText.trim() : undefined,
+      search: trimmed ? trimmed : undefined,
       action: actionFilter.length ? actionFilter : undefined,
-      from: fromIso ? new Date(fromIso).toISOString() : undefined,
-      to: toIso ? new Date(toIso).toISOString() : undefined,
-      actorId: (q.actor || debouncedActorId || undefined) ?? undefined,
-      targetPrincipalId: (q.target || debouncedTargetId || undefined) ?? undefined,
+      from: dateFrom ? new Date(`${dateFrom}T00:00:00Z`).toISOString() : undefined,
+      to: dateTo ? new Date(`${dateTo}T23:59:59.999Z`).toISOString() : undefined,
+      actorId: debouncedActorId || undefined,
+      targetPrincipalId: debouncedTargetId || undefined,
       targetPrincipalType: targetTypeFilter ? targetTypeFilter : undefined,
-      capability: (q.capability || debouncedCapability || undefined) ?? undefined,
+      capability: debouncedCapability || undefined,
     };
   }, [
-    parsed,
+    debouncedSearch,
     actionFilter,
     dateFrom,
     dateTo,
@@ -215,26 +179,31 @@ export function AuditLogTab() {
     targetTypeFilter,
   ]);
 
-  const {
-    data,
-    isPending,
-    isPlaceholderData,
-    isFetching,
-    isFetchingNextPage,
-    isError,
-    hasNextPage,
-    fetchNextPage,
-  } = useInfiniteQuery(auditLogInfiniteQueryOptions(filters));
+  const { data, isPending, isFetching, isError } = useQuery({
+    ...auditLogQueryOptions(currentPage, filters),
+    placeholderData: keepPreviousData,
+  });
 
-  const entries: t.AuditLogEntryWithDiff[] = useMemo(
-    () => (data?.pages ?? []).flatMap((page) => page.entries),
-    [data],
-  );
+  const pageEntries: t.AuditLogEntryWithDiff[] = data?.entries ?? [];
+  const total = data?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / AUDIT_LOG_PAGE_SIZE));
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
+
+  // Reset to page 1 whenever non-debounced filters change. Debounced filter
+  // handlers (search, actor id, target id, capability) reset inline within
+  // the same setTimeout so the page change lands with the new query key.
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [actionFilter, dateFrom, dateTo, targetTypeFilter]);
 
   useEffect(() => {
     if (isFetching) return;
-    announce(localize('com_a11y_audit_filter_changed', { count: entries.length }));
-    previousPageCountRef.current = data?.pages.length ?? 0;
+    announce(localize('com_a11y_audit_filter_changed', { count: pageEntries.length }));
   }, [
     debouncedSearch,
     actionFilter,
@@ -245,45 +214,14 @@ export function AuditLogTab() {
     debouncedCapability,
     targetTypeFilter,
     isFetching,
-    entries.length,
+    pageEntries.length,
     announce,
     localize,
-    data?.pages.length,
   ]);
 
-  useEffect(() => {
-    if (!data?.pages) return;
-    const newPages = data.pages.length;
-    const prev = previousPageCountRef.current;
-    if (newPages > prev && prev > 0) {
-      const lastPage = data.pages[newPages - 1];
-      announce(
-        localize('com_a11y_audit_page_loaded', { count: lastPage.entries.length }),
-      );
-    }
-    previousPageCountRef.current = newPages;
-  }, [data?.pages, announce, localize]);
-
-  useEffect(() => {
-    const node = sentinelRef.current;
-    if (!node) return;
-    if (!hasNextPage || isFetchingNextPage) return;
-    if (typeof IntersectionObserver === 'undefined') return;
-    const observer = new IntersectionObserver(
-      (entriesList) => {
-        if (entriesList.some((e) => e.isIntersecting)) {
-          void fetchNextPage();
-        }
-      },
-      { rootMargin: '200px 0px' },
-    );
-    observer.observe(node);
-    return () => observer.disconnect();
-  }, [hasNextPage, isFetchingNextPage, fetchNextPage, entries.length]);
-
   const selectedEntry = useMemo(
-    () => (entryId ? entries.find((e) => e.id === entryId) ?? null : null),
-    [entries, entryId],
+    () => (entryId ? (pageEntries.find((e) => e.id === entryId) ?? null) : null),
+    [pageEntries, entryId],
   );
 
   const openEntry = useCallback(
@@ -318,16 +256,7 @@ export function AuditLogTab() {
     [openEntry],
   );
 
-  const removeQualifier = useCallback((token: RegExp) => {
-    setSearch((current) => {
-      const next = current.replace(token, '').trim().replace(/\s+/g, ' ');
-      clearTimeout(searchDebounceRef.current);
-      setDebouncedSearch(next);
-      return next;
-    });
-  }, []);
-
-  const usingServerExport = entries.length > CLIENT_EXPORT_THRESHOLD || hasNextPage;
+  const usingServerExport = total > CLIENT_EXPORT_THRESHOLD;
   const [exporting, setExporting] = useState(false);
 
   const handleExport = useCallback(async () => {
@@ -341,26 +270,17 @@ export function AuditLogTab() {
       }
       return;
     }
-    const csv = auditLogToCsv(entries, localize);
+    const csv = auditLogToCsv(pageEntries, localize);
     downloadCsv(csv);
-  }, [entries, localize, filters, usingServerExport]);
+  }, [pageEntries, localize, filters, usingServerExport]);
 
-  const actionOptions = useMemo(
-    () =>
-      AUDIT_ACTIONS.map((act) => ({
-        value: act,
-        label: localize(ACTION_LABEL_KEY[act]),
-      })),
-    [localize],
-  );
-
-  const showLoading = isPending && !isPlaceholderData;
+  const showLoading = isPending && !data;
   const exportLabel = usingServerExport
     ? localize('com_audit_export_server')
     : localize('com_audit_export_client');
 
   return (
-    <div className="flex flex-1 flex-col gap-4 overflow-auto">
+    <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pt-4 pr-1 pl-1">
       <div className="flex items-center justify-between gap-3">
         <div
           className="flex flex-1 flex-wrap items-center gap-3"
@@ -370,41 +290,73 @@ export function AuditLogTab() {
           <SearchInput
             value={search}
             onChange={handleSearchChange}
-            placeholder={localize('com_audit_search_placeholder_qualifiers')}
+            placeholder={localize('com_ui_search')}
             ariaLabel={localize('com_audit_search_label')}
             className="relative min-w-50 flex-1"
           />
 
-          <div aria-label={localize('com_audit_filter_action_label')} role="group" className="min-w-40">
-            <CheckboxMultiSelect
-              options={actionOptions}
-              value={actionFilter}
-              onSelect={(values) => setActionFilter(values as AuditAction[])}
-              selectLabel={localize('com_audit_filter_action_label')}
-              placeholder={localize('com_audit_filter_all')}
-            />
+          <div
+            aria-label={localize('com_audit_filter_action_label')}
+            role="group"
+            className="flex items-center gap-1.5"
+          >
+            {AUDIT_ACTIONS.map((act) => {
+              const selected = actionFilter.includes(act);
+              return (
+                <Button
+                  key={act}
+                  type={selected ? 'primary' : 'secondary'}
+                  label={localize(ACTION_LABEL_KEY[act])}
+                  aria-pressed={selected}
+                  onClick={() => {
+                    setActionFilter((prev) =>
+                      prev.includes(act) ? prev.filter((a) => a !== act) : [...prev, act],
+                    );
+                  }}
+                />
+              );
+            })}
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5">
             <span className="text-xs text-(--cui-color-text-muted)">
               {localize('com_audit_date_from')}
             </span>
-            <DatePicker
-              date={isoDateToDate(dateFrom)}
-              onSelectDate={(d) => setDateFrom(d ? dateToIsoDate(d) : '')}
-              placeholder={localize('com_audit_date_from')}
-            />
+            <DatePickerCell>
+              <DatePicker
+                key={`from-${dateResetNonce}`}
+                date={isoDateToDate(dateFrom)}
+                onSelectDate={(d) => setDateFrom(d ? dateToIsoDate(d) : '')}
+                placeholder={localize('com_audit_date_from')}
+              />
+            </DatePickerCell>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5">
             <span className="text-xs text-(--cui-color-text-muted)">
               {localize('com_audit_date_to')}
             </span>
-            <DatePicker
-              date={isoDateToDate(dateTo)}
-              onSelectDate={(d) => setDateTo(d ? dateToIsoDate(d) : '')}
-              placeholder={localize('com_audit_date_to')}
-            />
+            <DatePickerCell>
+              <DatePicker
+                key={`to-${dateResetNonce}`}
+                date={isoDateToDate(dateTo)}
+                onSelectDate={(d) => setDateTo(d ? dateToIsoDate(d) : '')}
+                placeholder={localize('com_audit_date_to')}
+              />
+            </DatePickerCell>
           </div>
+          {(dateFrom || dateTo) && (
+            <Button
+              type="danger"
+              iconLeft="cross"
+              label={localize('com_ui_clear')}
+              aria-label={localize('com_a11y_clear_dates')}
+              onClick={() => {
+                setDateFrom('');
+                setDateTo('');
+                setDateResetNonce((n) => n + 1);
+              }}
+            />
+          )}
         </div>
 
         <div className="flex flex-col items-end gap-1">
@@ -412,98 +364,51 @@ export function AuditLogTab() {
             type="secondary"
             iconLeft="download"
             onClick={() => void handleExport()}
-            disabled={entries.length === 0 || exporting}
+            disabled={total === 0 || exporting}
             loading={exporting}
             label={exportLabel}
           />
         </div>
       </div>
 
-      {qualifierChips.length > 0 && (
-        <div className="flex flex-wrap gap-1.5" aria-label={localize('com_a11y_filters')}>
-          {qualifierChips.map((chip) => (
-            <Badge
-              key={`${chip.key}:${chip.display}`}
-              size="sm"
-              state="info"
-              text={chip.display}
-              dismissible
-              onClose={() => removeQualifier(chip.removalToken)}
-              aria-label={localize('com_audit_qualifier_remove', { qualifier: chip.display })}
-            />
-          ))}
-        </div>
-      )}
-
-      <div className="flex flex-col gap-2">
-        <div className="flex items-center gap-1">
-          <IconButton
-            icon={moreOpen ? 'chevron-down' : 'chevron-right'}
-            type="ghost"
-            size="sm"
-            aria-expanded={moreOpen}
-            aria-controls="audit-more-filters"
-            aria-label={localize('com_audit_filter_more')}
-            onClick={() => setMoreOpen((v) => !v)}
-          />
-          <button
-            type="button"
-            onClick={() => setMoreOpen((v) => !v)}
-            className="text-xs font-medium text-(--cui-color-text-muted) outline-none focus-visible:outline-1 focus-visible:outline-(--cui-color-outline)"
-            aria-expanded={moreOpen}
-            aria-controls="audit-more-filters"
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <TextField
+          label={localize('com_audit_filter_actor_id')}
+          value={actorIdFilter}
+          onChange={handleActorIdChange}
+          placeholder={localize('com_audit_filter_actor_id')}
+        />
+        <TextField
+          label={localize('com_audit_filter_target_id')}
+          value={targetIdFilter}
+          onChange={handleTargetIdChange}
+          placeholder={localize('com_audit_filter_target_id')}
+        />
+        <div className="select-field-a11y">
+          <Select
+            label={localize('com_audit_filter_target_type')}
+            value={targetTypeFilter === '' ? TARGET_TYPE_ALL : targetTypeFilter}
+            onSelect={(v) => setTargetTypeFilter(v === TARGET_TYPE_ALL ? '' : (v as PrincipalType))}
+            placeholder={localize('com_ui_all')}
           >
-            {localize('com_audit_filter_more')}
-          </button>
+            <Select.Item value={TARGET_TYPE_ALL}>{localize('com_ui_all')}</Select.Item>
+            {TARGET_TYPE_OPTIONS.map((pt) => (
+              <Select.Item key={pt} value={pt}>
+                {pt}
+              </Select.Item>
+            ))}
+          </Select>
         </div>
-        {moreOpen && (
-          <div
-            id="audit-more-filters"
-            className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4"
-          >
-            <TextField
-              label={localize('com_audit_filter_actor_id')}
-              value={actorIdFilter}
-              onChange={handleActorIdChange}
-              placeholder={localize('com_audit_filter_actor_id')}
-            />
-            <TextField
-              label={localize('com_audit_filter_target_id')}
-              value={targetIdFilter}
-              onChange={handleTargetIdChange}
-              placeholder={localize('com_audit_filter_target_id')}
-            />
-            <div className="select-field-a11y flex flex-col gap-1">
-              <span className="text-xs font-medium text-(--cui-color-text-default)">
-                {localize('com_audit_filter_target_type')}
-              </span>
-              <Select
-                value={targetTypeFilter}
-                onSelect={(v) => setTargetTypeFilter(v === '' ? '' : (v as PrincipalType))}
-                placeholder={localize('com_ui_all')}
-                aria-label={localize('com_audit_filter_target_type')}
-              >
-                <Select.Item value="">{localize('com_ui_all')}</Select.Item>
-                {TARGET_TYPE_OPTIONS.map((pt) => (
-                  <Select.Item key={pt} value={pt}>
-                    {pt}
-                  </Select.Item>
-                ))}
-              </Select>
-            </div>
-            <TextField
-              label={localize('com_audit_filter_capability')}
-              value={capabilityFilter}
-              onChange={handleCapabilityChange}
-              placeholder={localize('com_audit_filter_capability')}
-            />
-          </div>
-        )}
+        <TextField
+          label={localize('com_audit_filter_capability')}
+          value={capabilityFilter}
+          onChange={handleCapabilityChange}
+          placeholder={localize('com_audit_filter_capability')}
+        />
       </div>
 
       <div
-        className="min-h-0 flex-1 overflow-auto rounded-lg border border-(--cui-color-stroke-default)"
-        tabIndex={0}
+        className="overflow-x-auto rounded-lg border border-(--cui-color-stroke-default)"
         role="region"
         aria-label={localize('com_audit_title')}
       >
@@ -551,67 +456,43 @@ export function AuditLogTab() {
             )}
             {!showLoading &&
               !isError &&
-              entries.map((entry, i) => (
+              pageEntries.map((entry, i) => (
                 <AuditLogTableRow
                   key={entry.id}
                   entry={entry}
-                  isLast={i === entries.length - 1}
+                  isLast={i === pageEntries.length - 1}
                   onActivate={() => openEntry(entry.id)}
                   onKeyDown={(e) => handleRowKeyDown(e, entry.id)}
                   localize={localize}
                 />
               ))}
-            {!showLoading && !isError && entries.length === 0 && (
+            {!showLoading && !isError && pageEntries.length === 0 && (
               <tr>
                 <td colSpan={5}>
                   <EmptyState message={localize('com_audit_empty')} />
                 </td>
               </tr>
             )}
-            {!showLoading && !isError && entries.length > 0 && (
-              <tr ref={sentinelRef} aria-hidden="true">
-                <td colSpan={5} className="h-1 p-0" />
-              </tr>
-            )}
           </tbody>
         </table>
       </div>
 
-      <div className="flex items-center justify-between gap-3">
+      <Pagination currentPage={currentPage} totalPages={totalPages} onPageChange={setCurrentPage} />
+
+      <div className="flex items-center justify-between gap-3 pb-4">
         <p className="text-xs text-(--cui-color-text-muted)" aria-live="polite" aria-atomic="true">
-          {localize('com_audit_entry_count', { count: entries.length })}
+          {localize('com_audit_entry_count', { count: total })}
         </p>
-        {hasNextPage ? (
-          <Button
-            type="secondary"
-            label={
-              isFetchingNextPage
-                ? localize('com_audit_loading_more')
-                : localize('com_audit_load_more')
-            }
-            disabled={isFetchingNextPage}
-            loading={isFetchingNextPage}
-            onClick={() => void fetchNextPage()}
-          />
-        ) : (
-          entries.length > 0 && (
-            <span className="text-xs text-(--cui-color-text-muted)">
-              {localize('com_audit_no_more')}
-            </span>
-          )
-        )}
       </div>
 
       <ScreenReaderAnnouncer message={announcement} />
 
-      {selectedEntry && (
-        <AuditLogDetailDrawer
-          entry={selectedEntry}
-          open={true}
-          onClose={closeEntry}
-          onCopyPermalink={handleCopyPermalink}
-        />
-      )}
+      <AuditLogDetailDrawer
+        entry={selectedEntry}
+        open={selectedEntry !== null}
+        onClose={closeEntry}
+        onCopyPermalink={handleCopyPermalink}
+      />
     </div>
   );
 }
@@ -638,7 +519,7 @@ function AuditLogTableRow({
       onClick={onActivate}
       onKeyDown={onKeyDown}
       className={cn(
-        'cursor-pointer bg-(--cui-color-background-panel) outline-none hover:bg-(--cui-color-background-hover) focus-visible:outline-1 focus-visible:-outline-offset-1 focus-visible:outline-(--cui-color-outline)',
+        'cursor-pointer bg-(--cui-color-background-panel) outline-none hover:bg-(--cui-color-background-hover) focus-visible:bg-(--cui-color-background-hover) focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-(--cui-color-outline)',
         !isLast && 'border-b border-(--cui-color-stroke-default)',
       )}
     >
