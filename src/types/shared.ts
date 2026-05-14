@@ -79,6 +79,7 @@ export interface SearchInputProps {
   onChange: (value: string) => void;
   placeholder: string;
   className?: string;
+  ariaLabel?: string;
 }
 
 export interface SelectedMemberListProps {
