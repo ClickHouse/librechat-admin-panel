@@ -1,14 +1,14 @@
 import { Tabs } from '@clickhouse/click-ui';
 import type * as t from '@/types';
 import { GrantManagementTab } from './GrantManagementTab';
-import { READ_AUDIT_LOG_CAPABILITY } from '@/constants';
 import { useCapabilities, useLocalize } from '@/hooks';
+import { SystemCapabilities } from '@/constants';
 import { AuditLogTab } from './AuditLogTab';
 
 export function GrantsPage({ activeTab, onTabChange }: t.GrantsPageProps) {
   const localize = useLocalize();
   const { hasCapability } = useCapabilities();
-  const canReadAuditLog = hasCapability(READ_AUDIT_LOG_CAPABILITY);
+  const canReadAuditLog = hasCapability(SystemCapabilities.READ_AUDIT_LOG);
   /** A stale `?tab=audit-log` URL from a previous session shouldn't strand a user
    * with revoked audit access on an empty page — silently render management
    * until they pick a tab themselves. */
