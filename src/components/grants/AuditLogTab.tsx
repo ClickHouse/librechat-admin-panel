@@ -1,7 +1,7 @@
 import { PrincipalType } from 'librechat-data-provider';
 import { useNavigate, useSearch } from '@tanstack/react-router';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
-import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Badge, Button, DatePicker, Icon, Select, TextField } from '@clickhouse/click-ui';
 import type { AuditAction } from '@librechat/data-schemas';
 import type { AuditFilters } from '@/server';
@@ -9,10 +9,18 @@ import type * as t from '@/types';
 import {
   ACTION_BADGE_STATE,
   ACTION_LABEL_KEY,
-  auditLogToCsv,
   capabilityLabel,
+  dateToIsoDate,
   formatTimestamp,
+  isoDateToDate,
+  localDayBoundaryIso,
 } from './auditLogUtils';
+import {
+  AUDIT_LOG_PAGE_SIZE,
+  auditLogEntryQueryOptions,
+  auditLogQueryOptions,
+  exportAuditLogServerFn,
+} from '@/server';
 import {
   EmptyState,
   LoadingState,
@@ -20,13 +28,11 @@ import {
   ScreenReaderAnnouncer,
   SearchInput,
 } from '@/components/shared';
-import { AUDIT_LOG_PAGE_SIZE, auditLogQueryOptions, exportAuditLogServerFn } from '@/server';
+import { useAnnouncement, useDebouncedFilter, useLocalize } from '@/hooks';
 import { AuditLogDetailDrawer } from './AuditLogDetailDrawer';
-import { useAnnouncement, useLocalize } from '@/hooks';
 import { getScopeTypeConfig } from '@/constants';
 import { cn } from '@/utils';
 
-const CLIENT_EXPORT_THRESHOLD = 500;
 const AUDIT_ACTIONS: readonly AuditAction[] = ['grant_assigned', 'grant_removed'] as const;
 const TARGET_TYPE_OPTIONS: readonly PrincipalType[] = [
   PrincipalType.USER,
@@ -37,25 +43,13 @@ const TARGET_TYPE_OPTIONS: readonly PrincipalType[] = [
  * "no selection"). Use a non-empty sentinel and translate to `''` in state. */
 const TARGET_TYPE_ALL = '__all__';
 
-function isoDateToDate(iso: string): Date | undefined {
-  if (!iso) return undefined;
-  const d = new Date(`${iso}T00:00:00Z`);
-  return Number.isNaN(d.getTime()) ? undefined : d;
-}
-
-function dateToIsoDate(date: Date): string {
-  const yyyy = date.getFullYear();
-  const mm = String(date.getMonth() + 1).padStart(2, '0');
-  const dd = String(date.getDate()).padStart(2, '0');
-  return `${yyyy}-${mm}-${dd}`;
-}
-
 /**
  * Wraps a click-ui DatePicker so only the trigger button is tab-focusable.
  * click-ui renders both a PopoverTrigger button AND an inner readonly input,
- * which produces two stops in the tab order. The effect un-tabs the input on
- * every render (in case click-ui re-mounts it) and the class hooks the CSS
- * rule that rounds the trigger's focus outline to match the wrapper border.
+ * which produces two stops in the tab order. The input has no exposed `tabIndex`
+ * prop, so we reach for the DOM node once after mount and set it to -1. The
+ * class hooks the CSS rule that rounds the trigger's focus outline to match
+ * the wrapper border.
  */
 function DatePickerCell({ children }: { children: React.ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -64,7 +58,7 @@ function DatePickerCell({ children }: { children: React.ReactNode }) {
     if (!node) return;
     const input = node.querySelector('input');
     if (input) input.tabIndex = -1;
-  });
+  }, []);
   return (
     <div ref={ref} className="audit-date-cell contents">
       {children}
@@ -89,93 +83,42 @@ export function AuditLogTab() {
   const navigate = useNavigate({ from: '/grants' });
   const { entryId } = useSearch({ from: '/_app/grants' });
 
-  const [search, setSearch] = useState('');
-  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [actionFilter, setActionFilter] = useState<AuditAction[]>([]);
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   /** Bumped each clear so DatePicker remounts and drops its internal selection state. */
   const [dateResetNonce, setDateResetNonce] = useState(0);
-  const [actorIdFilter, setActorIdFilter] = useState('');
-  const [debouncedActorId, setDebouncedActorId] = useState('');
-  const [targetIdFilter, setTargetIdFilter] = useState('');
-  const [debouncedTargetId, setDebouncedTargetId] = useState('');
-  const [capabilityFilter, setCapabilityFilter] = useState('');
-  const [debouncedCapability, setDebouncedCapability] = useState('');
   const [targetTypeFilter, setTargetTypeFilter] = useState<PrincipalType | ''>('');
 
   const [currentPage, setCurrentPage] = useState(1);
   const { message: announcement, announce } = useAnnouncement();
-  const searchDebounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
-  const actorDebounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
-  const targetDebounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
-  const capabilityDebounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
-  useEffect(() => {
-    return () => {
-      clearTimeout(searchDebounceRef.current);
-      clearTimeout(actorDebounceRef.current);
-      clearTimeout(targetDebounceRef.current);
-      clearTimeout(capabilityDebounceRef.current);
-    };
-  }, []);
-
-  const handleSearchChange = (value: string) => {
-    setSearch(value);
-    clearTimeout(searchDebounceRef.current);
-    searchDebounceRef.current = setTimeout(() => {
-      setDebouncedSearch(value);
-      setCurrentPage(1);
-    }, 300);
-  };
-
-  const handleActorIdChange = (value: string) => {
-    setActorIdFilter(value);
-    clearTimeout(actorDebounceRef.current);
-    actorDebounceRef.current = setTimeout(() => {
-      setDebouncedActorId(value);
-      setCurrentPage(1);
-    }, 300);
-  };
-
-  const handleTargetIdChange = (value: string) => {
-    setTargetIdFilter(value);
-    clearTimeout(targetDebounceRef.current);
-    targetDebounceRef.current = setTimeout(() => {
-      setDebouncedTargetId(value);
-      setCurrentPage(1);
-    }, 300);
-  };
-
-  const handleCapabilityChange = (value: string) => {
-    setCapabilityFilter(value);
-    clearTimeout(capabilityDebounceRef.current);
-    capabilityDebounceRef.current = setTimeout(() => {
-      setDebouncedCapability(value);
-      setCurrentPage(1);
-    }, 300);
-  };
+  const resetToFirstPage = useCallback(() => setCurrentPage(1), []);
+  const searchFilter = useDebouncedFilter('', resetToFirstPage);
+  const actorIdFilter = useDebouncedFilter('', resetToFirstPage);
+  const targetIdFilter = useDebouncedFilter('', resetToFirstPage);
+  const capabilityFilter = useDebouncedFilter('', resetToFirstPage);
 
   const filters = useMemo<Omit<AuditFilters, 'offset' | 'limit'>>(() => {
-    const trimmed = debouncedSearch.trim();
+    const trimmed = searchFilter.debouncedValue.trim();
     return {
       search: trimmed ? trimmed : undefined,
       action: actionFilter.length ? actionFilter : undefined,
-      from: dateFrom ? new Date(`${dateFrom}T00:00:00Z`).toISOString() : undefined,
-      to: dateTo ? new Date(`${dateTo}T23:59:59.999Z`).toISOString() : undefined,
-      actorId: debouncedActorId || undefined,
-      targetPrincipalId: debouncedTargetId || undefined,
+      from: localDayBoundaryIso(dateFrom, 'start'),
+      to: localDayBoundaryIso(dateTo, 'end'),
+      actorId: actorIdFilter.debouncedValue || undefined,
+      targetPrincipalId: targetIdFilter.debouncedValue || undefined,
       targetPrincipalType: targetTypeFilter ? targetTypeFilter : undefined,
-      capability: debouncedCapability || undefined,
+      capability: capabilityFilter.debouncedValue || undefined,
     };
   }, [
-    debouncedSearch,
+    searchFilter.debouncedValue,
     actionFilter,
     dateFrom,
     dateTo,
-    debouncedActorId,
-    debouncedTargetId,
-    debouncedCapability,
+    actorIdFilter.debouncedValue,
+    targetIdFilter.debouncedValue,
+    capabilityFilter.debouncedValue,
     targetTypeFilter,
   ]);
 
@@ -184,7 +127,7 @@ export function AuditLogTab() {
     placeholderData: keepPreviousData,
   });
 
-  const pageEntries: t.AuditLogEntryWithDiff[] = data?.entries ?? [];
+  const pageEntries = useMemo<t.AuditLogEntryWithDiff[]>(() => data?.entries ?? [], [data]);
   const total = data?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / AUDIT_LOG_PAGE_SIZE));
 
@@ -205,13 +148,13 @@ export function AuditLogTab() {
     if (isFetching) return;
     announce(localize('com_a11y_audit_filter_changed', { count: pageEntries.length }));
   }, [
-    debouncedSearch,
+    searchFilter.debouncedValue,
     actionFilter,
     dateFrom,
     dateTo,
-    debouncedActorId,
-    debouncedTargetId,
-    debouncedCapability,
+    actorIdFilter.debouncedValue,
+    targetIdFilter.debouncedValue,
+    capabilityFilter.debouncedValue,
     targetTypeFilter,
     isFetching,
     pageEntries.length,
@@ -219,10 +162,23 @@ export function AuditLogTab() {
     localize,
   ]);
 
-  const selectedEntry = useMemo(
+  const entryOnPage = useMemo(
     () => (entryId ? (pageEntries.find((e) => e.id === entryId) ?? null) : null),
     [pageEntries, entryId],
   );
+
+  // Fall back to a direct single-entry fetch when the deep-linked id isn't on
+  // the current page (older entries, or arriving via permalink with no filters
+  // loaded yet). Skip the round-trip whenever the row is already in `pageEntries`.
+  const entryFetch = useQuery({
+    ...auditLogEntryQueryOptions(entryId),
+    enabled: !!entryId && !entryOnPage,
+  });
+
+  const selectedEntry: t.AuditLogEntryWithDiff | null =
+    entryOnPage ?? entryFetch.data?.entry ?? null;
+  const entryNotFound =
+    !!entryId && !entryOnPage && entryFetch.isSuccess && entryFetch.data?.entry === null;
 
   const openEntry = useCallback(
     (id: string) => {
@@ -241,10 +197,24 @@ export function AuditLogTab() {
     });
   }, [navigate]);
 
-  const handleCopyPermalink = useCallback(() => {
-    if (typeof window === 'undefined' || !navigator.clipboard) return;
-    void navigator.clipboard.writeText(window.location.href);
-  }, []);
+  const handleCopyPermalink = useCallback(
+    async (id: string): Promise<boolean> => {
+      if (typeof window === 'undefined') return false;
+      if (typeof navigator === 'undefined' || !navigator.clipboard) {
+        announce(localize('com_a11y_copy_failed'));
+        return false;
+      }
+      const url = `${window.location.origin}/grants?tab=audit-log&entryId=${encodeURIComponent(id)}`;
+      try {
+        await navigator.clipboard.writeText(url);
+        return true;
+      } catch {
+        announce(localize('com_a11y_copy_failed'));
+        return false;
+      }
+    },
+    [announce, localize],
+  );
 
   const handleRowKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTableRowElement>, id: string) => {
@@ -256,28 +226,24 @@ export function AuditLogTab() {
     [openEntry],
   );
 
-  const usingServerExport = total > CLIENT_EXPORT_THRESHOLD;
   const [exporting, setExporting] = useState(false);
 
+  // Always export via the backend: the client only holds the current page (≤50
+  // rows) of a filter that may match thousands. The previous two-path approach
+  // silently truncated CSVs whenever the result set fell between the page size
+  // and the old `CLIENT_EXPORT_THRESHOLD`.
   const handleExport = useCallback(async () => {
-    if (usingServerExport) {
-      setExporting(true);
-      try {
-        const { csv } = await exportAuditLogServerFn({ data: filters });
-        downloadCsv(csv);
-      } finally {
-        setExporting(false);
-      }
-      return;
+    setExporting(true);
+    try {
+      const { csv } = await exportAuditLogServerFn({ data: filters });
+      downloadCsv(csv);
+    } finally {
+      setExporting(false);
     }
-    const csv = auditLogToCsv(pageEntries, localize);
-    downloadCsv(csv);
-  }, [pageEntries, localize, filters, usingServerExport]);
+  }, [filters]);
 
   const showLoading = isPending && !data;
-  const exportLabel = usingServerExport
-    ? localize('com_audit_export_server')
-    : localize('com_audit_export_client');
+  const exportLabel = localize('com_audit_export_server');
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pt-4 pr-1 pl-1">
@@ -288,8 +254,8 @@ export function AuditLogTab() {
           aria-label={localize('com_a11y_filters')}
         >
           <SearchInput
-            value={search}
-            onChange={handleSearchChange}
+            value={searchFilter.value}
+            onChange={searchFilter.onChange}
             placeholder={localize('com_ui_search')}
             ariaLabel={localize('com_audit_search_label')}
             className="relative min-w-50 flex-1"
@@ -374,14 +340,14 @@ export function AuditLogTab() {
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <TextField
           label={localize('com_audit_filter_actor_id')}
-          value={actorIdFilter}
-          onChange={handleActorIdChange}
+          value={actorIdFilter.value}
+          onChange={actorIdFilter.onChange}
           placeholder={localize('com_audit_filter_actor_id')}
         />
         <TextField
           label={localize('com_audit_filter_target_id')}
-          value={targetIdFilter}
-          onChange={handleTargetIdChange}
+          value={targetIdFilter.value}
+          onChange={targetIdFilter.onChange}
           placeholder={localize('com_audit_filter_target_id')}
         />
         <div className="select-field-a11y">
@@ -401,8 +367,8 @@ export function AuditLogTab() {
         </div>
         <TextField
           label={localize('com_audit_filter_capability')}
-          value={capabilityFilter}
-          onChange={handleCapabilityChange}
+          value={capabilityFilter.value}
+          onChange={capabilityFilter.onChange}
           placeholder={localize('com_audit_filter_capability')}
         />
       </div>
@@ -489,7 +455,8 @@ export function AuditLogTab() {
 
       <AuditLogDetailDrawer
         entry={selectedEntry}
-        open={selectedEntry !== null}
+        open={selectedEntry !== null || entryNotFound}
+        notFound={entryNotFound}
         onClose={closeEntry}
         onCopyPermalink={handleCopyPermalink}
       />

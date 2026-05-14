@@ -17,10 +17,23 @@ interface AuditLogDetailDrawerProps {
   entry: t.AuditLogEntryWithDiff | null;
   open: boolean;
   onClose: () => void;
-  onCopyPermalink: () => void;
+  /** Resolves to `true` when the clipboard write succeeded so the drawer only
+   * flips to its "Copied!" affordance after a real success. */
+  onCopyPermalink: (entryId: string) => Promise<boolean>;
+  /** Render a "no entry found" message instead of the detail body when the
+   * deep-linked id couldn't be located (e.g. the entry was purged). */
+  notFound?: boolean;
 }
 
-function CopyableMono({ value, ariaLabel }: { value: string; ariaLabel: string }): ReactElement {
+function CopyableMono({
+  value,
+  ariaLabel,
+  onCopyFailed,
+}: {
+  value: string;
+  ariaLabel: string;
+  onCopyFailed?: () => void;
+}): ReactElement {
   const [copied, setCopied] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => {
@@ -29,19 +42,26 @@ function CopyableMono({ value, ariaLabel }: { value: string; ariaLabel: string }
     };
   }, []);
 
-  const handleCopy = useCallback(() => {
-    if (typeof navigator !== 'undefined' && navigator.clipboard) {
-      void navigator.clipboard.writeText(value);
+  const handleCopy = useCallback(async () => {
+    if (typeof navigator === 'undefined' || !navigator.clipboard) {
+      onCopyFailed?.();
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(value);
+    } catch {
+      onCopyFailed?.();
+      return;
     }
     setCopied(true);
     if (timerRef.current) clearTimeout(timerRef.current);
     timerRef.current = setTimeout(() => setCopied(false), 1500);
-  }, [value]);
+  }, [value, onCopyFailed]);
 
   return (
     <button
       type="button"
-      onClick={handleCopy}
+      onClick={() => void handleCopy()}
       aria-label={ariaLabel}
       aria-live="polite"
       className={cn(
@@ -91,6 +111,7 @@ export function AuditLogDetailDrawer({
   open,
   onClose,
   onCopyPermalink,
+  notFound = false,
 }: AuditLogDetailDrawerProps): ReactElement | null {
   const localize = useLocalize();
 
@@ -110,12 +131,70 @@ export function AuditLogDetailDrawer({
       if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
     };
   }, []);
-  const handleCopyPermalinkClick = useCallback(() => {
-    onCopyPermalink();
+  const handleCopyPermalinkClick = useCallback(async () => {
+    if (!entry) return;
+    const ok = await onCopyPermalink(entry.id);
+    if (!ok) return;
     setCopied(true);
     if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
     copiedTimerRef.current = setTimeout(() => setCopied(false), 1500);
-  }, [onCopyPermalink]);
+  }, [entry, onCopyPermalink]);
+
+  if (notFound) {
+    return (
+      <Dialog.Root
+        open={open}
+        onOpenChange={(isOpen) => {
+          if (!isOpen) onClose();
+        }}
+      >
+        <Dialog.Portal>
+          <Dialog.Overlay
+            className={cn(
+              'fixed inset-0 z-(--z-overlay) bg-black/30 backdrop-blur-[1px]',
+              'data-[state=closed]:animate-overlay-out data-[state=open]:animate-overlay-in',
+            )}
+          />
+          <Dialog.Content
+            aria-label={localize('com_audit_detail_title')}
+            onEscapeKeyDown={() => onClose()}
+            className={cn(
+              'fixed top-0 right-0 z-(--z-overlay) flex h-full w-full flex-col bg-(--cui-color-background-panel) shadow-xl sm:w-120',
+              'border-l border-(--cui-color-stroke-default)',
+              'will-change-transform',
+              'data-[state=closed]:animate-drawer-out data-[state=open]:animate-drawer-in',
+            )}
+          >
+            <Dialog.Title className="sr-only">{localize('com_audit_detail_title')}</Dialog.Title>
+            <header className="flex items-center justify-between gap-3 border-b border-(--cui-color-stroke-default) px-4 py-3">
+              <span className="text-sm font-semibold text-(--cui-color-text-default)">
+                {localize('com_audit_detail_title')}
+              </span>
+              <IconButton
+                icon="cross"
+                type="ghost"
+                size="sm"
+                aria-label={localize('com_audit_detail_close')}
+                onClick={onClose}
+              />
+            </header>
+            <div className="flex flex-1 items-center justify-center px-4 py-8 text-center">
+              <p className="text-sm text-(--cui-color-text-muted)">
+                {localize('com_audit_detail_not_found')}
+              </p>
+            </div>
+            <footer className="flex items-center justify-end gap-2 border-t border-(--cui-color-stroke-default) px-4 py-3">
+              <Button
+                type="primary"
+                label={localize('com_audit_detail_close')}
+                onClick={onClose}
+              />
+            </footer>
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
+    );
+  }
 
   if (!latestEntry) return null;
 
@@ -283,7 +362,7 @@ export function AuditLogDetailDrawer({
                   ? localize('com_audit_detail_copied')
                   : localize('com_audit_detail_copy_permalink')
               }
-              onClick={handleCopyPermalinkClick}
+              onClick={() => void handleCopyPermalinkClick()}
             />
             <Button type="primary" label={localize('com_audit_detail_close')} onClick={onClose} />
           </footer>
