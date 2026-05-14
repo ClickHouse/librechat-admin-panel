@@ -5,7 +5,10 @@ import {
   ACTION_BADGE_STATE,
   auditLogToCsv,
   capabilityLabel,
+  dateToIsoDate,
   formatTimestamp,
+  isoDateToDate,
+  localDayBoundaryIso,
 } from './auditLogUtils';
 
 const UTF8_BOM = '﻿';
@@ -151,5 +154,106 @@ describe('auditLogToCsv', () => {
         expect(csv).not.toContain(`,${payload},`);
       });
     }
+
+    const obscured: Array<{ name: string; prefix: string }> = [
+      { name: 'leading-space', prefix: ' ' },
+      { name: 'leading-tab', prefix: '\t' },
+      { name: 'leading-newline', prefix: '\n' },
+      { name: 'NBSP', prefix: ' ' },
+      { name: 'BOM', prefix: '﻿' },
+    ];
+
+    for (const { name, prefix } of obscured) {
+      it(`defangs payloads obscured by a ${name} before an equals sign`, () => {
+        const payload = `${prefix}=SUM(A1)`;
+        const malicious: AdminAuditLogEntry = {
+          ...sampleEntry,
+          actorName: payload,
+        };
+        const csv = auditLogToCsv([malicious], identityLocalize);
+        const guarded = `'${payload}`;
+        const expectedCell = /[",\n\r]/.test(guarded)
+          ? `"${guarded.replace(/"/g, '""')}"`
+          : guarded;
+        expect(csv).toContain(expectedCell);
+      });
+    }
+
+    const lineFeedTriggers: Array<{ name: string; char: string }> = [
+      { name: 'line-feed', char: '\n' },
+      { name: 'pipe', char: '|' },
+    ];
+
+    for (const { name, char } of lineFeedTriggers) {
+      it(`defangs payloads starting with ${name}`, () => {
+        const payload = `${char}cmd|'/C calc'!A0`;
+        const malicious: AdminAuditLogEntry = {
+          ...sampleEntry,
+          actorName: payload,
+        };
+        const csv = auditLogToCsv([malicious], identityLocalize);
+        const guarded = `'${payload}`;
+        const expectedCell = /[",\n\r]/.test(guarded)
+          ? `"${guarded.replace(/"/g, '""')}"`
+          : guarded;
+        expect(csv).toContain(expectedCell);
+      });
+    }
+  });
+});
+
+describe('isoDateToDate / dateToIsoDate', () => {
+  it('round-trips a YYYY-MM-DD value in local time', () => {
+    const date = isoDateToDate('2026-05-14');
+    expect(date).toBeInstanceOf(Date);
+    if (!date) return;
+    expect(date.getFullYear()).toBe(2026);
+    expect(date.getMonth()).toBe(4);
+    expect(date.getDate()).toBe(14);
+    expect(dateToIsoDate(date)).toBe('2026-05-14');
+  });
+
+  it('returns undefined for empty input', () => {
+    expect(isoDateToDate('')).toBeUndefined();
+  });
+
+  it('returns undefined for malformed input', () => {
+    expect(isoDateToDate('not-a-date')).toBeUndefined();
+    expect(isoDateToDate('2026-13-01')).toBeUndefined();
+  });
+});
+
+describe('localDayBoundaryIso', () => {
+  it('returns undefined for empty input', () => {
+    expect(localDayBoundaryIso('', 'start')).toBeUndefined();
+    expect(localDayBoundaryIso('', 'end')).toBeUndefined();
+  });
+
+  it('produces start-of-day in local time for the start boundary', () => {
+    const out = localDayBoundaryIso('2026-05-14', 'start');
+    expect(out).toBeTruthy();
+    if (!out) return;
+    const parsed = new Date(out);
+    expect(parsed.getFullYear()).toBe(2026);
+    expect(parsed.getMonth()).toBe(4);
+    expect(parsed.getDate()).toBe(14);
+    expect(parsed.getHours()).toBe(0);
+    expect(parsed.getMinutes()).toBe(0);
+    expect(parsed.getSeconds()).toBe(0);
+    expect(parsed.getMilliseconds()).toBe(0);
+  });
+
+  it('produces end-of-day (23:59:59.999) in local time for the end boundary', () => {
+    const out = localDayBoundaryIso('2026-05-14', 'end');
+    expect(out).toBeTruthy();
+    if (!out) return;
+    const parsed = new Date(out);
+    expect(parsed.getFullYear()).toBe(2026);
+    expect(parsed.getMonth()).toBe(4);
+    expect(parsed.getDate()).toBe(14);
+    expect(parsed.getHours()).toBe(23);
+    expect(parsed.getMinutes()).toBe(59);
+    expect(parsed.getSeconds()).toBe(59);
+    expect(parsed.getMilliseconds()).toBe(999);
   });
 });

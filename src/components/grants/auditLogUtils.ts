@@ -28,8 +28,60 @@ type _CsvColumnsExhaustive =
 const _csvColumnsExhaustive: _CsvColumnsExhaustive = true;
 void _csvColumnsExhaustive;
 
-const FORMULA_PREFIX = /^[=+\-@\t\r]/;
+// Strip leading characters spreadsheets render as visual whitespace but that
+// are NOT themselves formula triggers (space, NBSP  , BOM ﻿). This
+// is the "decoy" sneak path — a payload like " =SUM(...)" would otherwise pass
+// the raw-prefix check yet still execute when Excel renders it.
+const NON_TRIGGER_LEADING = /^[  ﻿]+/;
+// Cover spreadsheet-formula triggers (`=` `+` `-` `@`) and Excel-only command
+// vectors (`\t` `\r` `\n` `|`). The vertical bar is part of DDE invocation
+// (e.g. `|cmd|`), and `\n` matches what spreadsheets accept as a new line.
+const FORMULA_PREFIX = /^[=+\-@\t\r\n|]/;
 const UTF8_BOM = '﻿';
+
+/** Parse a `YYYY-MM-DD` filter value as a local-time date so the DatePicker
+ * round-trips the same calendar day the user picked, regardless of TZ.
+ * Rejects rolled-over inputs like `2026-13-01` (which `Date` would silently
+ * coerce to January 2027) by re-checking the parsed components. */
+export function isoDateToDate(iso: string): Date | undefined {
+  if (!iso) return undefined;
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+  if (!match) return undefined;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date = new Date(year, month - 1, day);
+  if (Number.isNaN(date.getTime())) return undefined;
+  if (
+    date.getFullYear() !== year ||
+    date.getMonth() !== month - 1 ||
+    date.getDate() !== day
+  ) {
+    return undefined;
+  }
+  return date;
+}
+
+export function dateToIsoDate(date: Date): string {
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, '0');
+  const dd = String(date.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+/** Convert a `YYYY-MM-DD` filter value into the ISO timestamp for the start
+ * (inclusive) or end (inclusive, millisecond-precise) of that local-time day.
+ * Mixing local-day pick-list values with UTC midnight (the prior behaviour)
+ * caused off-by-one filtering for any non-UTC user. */
+export function localDayBoundaryIso(
+  iso: string,
+  boundary: 'start' | 'end',
+): string | undefined {
+  const date = isoDateToDate(iso);
+  if (!date) return undefined;
+  if (boundary === 'end') date.setHours(23, 59, 59, 999);
+  return date.toISOString();
+}
 
 export function formatTimestamp(iso: string, locale: string | undefined = undefined): string {
   try {
@@ -51,9 +103,18 @@ export function capabilityLabel(cap: string, localize: (key: string) => string):
   return label !== key ? label : cap;
 }
 
+/** Treat a cell as a formula-injection vector if its first character is a
+ * formula trigger, or if removing leading non-trigger whitespace (space, NBSP,
+ * BOM) reveals one. Trimming the entire `\s` class would mistakenly accept
+ * payloads that lead with `\r` / `\n` / `\t`, which are themselves triggers. */
+function hasFormulaPrefix(value: string): boolean {
+  if (FORMULA_PREFIX.test(value)) return true;
+  return FORMULA_PREFIX.test(value.replace(NON_TRIGGER_LEADING, ''));
+}
+
 function escapeCsvCell(value: string): string {
   if (value === '') return '';
-  const guarded = FORMULA_PREFIX.test(value) ? `'${value}` : value;
+  const guarded = hasFormulaPrefix(value) ? `'${value}` : value;
   if (/[",\n\r]/.test(guarded)) {
     return `"${guarded.replace(/"/g, '""')}"`;
   }
