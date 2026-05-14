@@ -33,6 +33,12 @@ function getCacheHeaders(filePath: string): Record<string, string> {
 }
 
 // 'unsafe-inline' in style-src is required because Tailwind 4 + click-ui inject inline styles at runtime.
+// TanStack Start's SSR injects an inline `<script type="module">import("/_build/...")</script>` to
+// boot the client. Without a nonce or 'unsafe-inline' for script-src, browsers will block hydration.
+// Threading a per-request nonce through TanStack Start's manifest is non-trivial; until that wiring
+// lands we ship the policy as report-only so it surfaces violations in dev tooling without breaking
+// hydration in prod. Set ADMIN_PANEL_CSP_ENFORCE=true to switch back to enforcement (only safe once
+// the nonce path is in place).
 const CSP_VALUE = [
   "default-src 'self'",
   "script-src 'self'",
@@ -46,10 +52,15 @@ const CSP_VALUE = [
   "form-action 'self'",
 ].join('; ');
 
+const CSP_ENFORCE = process.env.ADMIN_PANEL_CSP_ENFORCE === 'true';
+const CSP_HEADER_NAME = CSP_ENFORCE
+  ? 'Content-Security-Policy'
+  : 'Content-Security-Policy-Report-Only';
+
 function applySecurityHeaders(headers: Headers): void {
   const contentType = headers.get('Content-Type') ?? '';
   if (!contentType.toLowerCase().startsWith('text/html')) return;
-  headers.set('Content-Security-Policy', CSP_VALUE);
+  headers.set(CSP_HEADER_NAME, CSP_VALUE);
   headers.set('X-Content-Type-Options', 'nosniff');
   headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
   headers.set('X-Frame-Options', 'DENY');
