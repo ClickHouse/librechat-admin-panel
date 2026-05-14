@@ -115,17 +115,24 @@ export async function requireCapability(capability: string): Promise<void> {
   }
 }
 
-/** Require at least one of the given capabilities.
- * @throws if `required` is empty — callers must provide at least one capability. */
-export async function requireAnyCapability(required: string[]): Promise<void> {
+/** Check `requireAnyCapability` against an already-fetched capability set.
+ * Lets handlers reuse a single effective-capabilities lookup across the guard
+ * and any follow-up backend call instead of hitting `/effective` twice. */
+export function checkAnyCapability(held: string[], required: readonly string[]): void {
   if (required.length === 0) {
     throw new Error('No capabilities provided for check');
   }
-  const { capabilities } = await getEffectiveCapabilitiesFn();
   for (const cap of required) {
-    if (hasImpliedCapability(capabilities, cap)) return;
+    if (hasImpliedCapability(held, cap)) return;
   }
   throw new Error(`Insufficient permissions: requires one of ${required.join(', ')}`);
+}
+
+/** Require at least one of the given capabilities.
+ * @throws if `required` is empty — callers must provide at least one capability. */
+export async function requireAnyCapability(required: string[]): Promise<void> {
+  const { capabilities } = await getEffectiveCapabilitiesFn();
+  checkAnyCapability(capabilities, required);
 }
 
 /**
@@ -263,6 +270,12 @@ export type AuditLogPage = z.infer<typeof auditLogPageResponseSchema>;
 
 export const AUDIT_LOG_PAGE_SIZE = 50;
 
+const AUDIT_LOG_REQUIRED_CAPS = [
+  SystemCapabilities.MANAGE_ROLES,
+  SystemCapabilities.MANAGE_USERS,
+  SystemCapabilities.MANAGE_GROUPS,
+];
+
 function buildAuditLogQuery(filters: AuditFilters): string {
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(filters)) {
@@ -277,14 +290,19 @@ function buildAuditLogQuery(filters: AuditFilters): string {
   return qs ? `?${qs}` : '';
 }
 
+/** Each handler invocation fetches effective capabilities exactly once, then
+ * runs the guard against the cached set. The previous shape called
+ * `requireAnyCapability` (one round-trip) followed by the backend call
+ * (another round-trip), doubling traffic for every page of the audit log. */
+async function guardAuditLogAccess(): Promise<void> {
+  const { capabilities } = await getEffectiveCapabilitiesFn();
+  checkAnyCapability(capabilities, AUDIT_LOG_REQUIRED_CAPS);
+}
+
 export const getAuditLogPageFn = createServerFn({ method: 'GET' })
   .inputValidator(auditFilterSchema)
   .handler(async ({ data }: { data: AuditFilters }): Promise<AuditLogPage> => {
-    await requireAnyCapability([
-      SystemCapabilities.MANAGE_ROLES,
-      SystemCapabilities.MANAGE_USERS,
-      SystemCapabilities.MANAGE_GROUPS,
-    ]);
+    await guardAuditLogAccess();
     const withDefaults: AuditFilters = { limit: AUDIT_LOG_PAGE_SIZE, ...data };
     const response = await apiFetch(`/api/admin/audit-log${buildAuditLogQuery(withDefaults)}`);
     if (!response.ok) {
@@ -310,14 +328,37 @@ export const auditLogQueryOptions = (
     staleTime: 60_000,
   });
 
+export const getAuditLogEntryFn = createServerFn({ method: 'GET' })
+  .inputValidator(z.object({ id: z.string().min(1).max(128) }))
+  .handler(
+    async ({
+      data,
+    }: {
+      data: { id: string };
+    }): Promise<{ entry: z.infer<typeof adminAuditLogEntrySchema> | null }> => {
+      await guardAuditLogAccess();
+      const response = await apiFetch(`/api/admin/audit-log/${encodeURIComponent(data.id)}`);
+      if (response.status === 404) return { entry: null };
+      if (!response.ok) {
+        await extractApiError(response, 'Failed to fetch audit log entry');
+      }
+      const json = (await response.json()) as { entry: unknown };
+      return { entry: adminAuditLogEntrySchema.parse(json.entry) };
+    },
+  );
+
+export const auditLogEntryQueryOptions = (id: string | undefined) =>
+  queryOptions({
+    queryKey: ['auditLogEntry', id] as const,
+    queryFn: () => getAuditLogEntryFn({ data: { id: id ?? '' } }),
+    enabled: !!id,
+    staleTime: 60_000,
+  });
+
 export const exportAuditLogServerFn = createServerFn({ method: 'POST' })
   .inputValidator(auditFilterSchema)
   .handler(async ({ data }: { data: AuditFilters }): Promise<{ csv: string }> => {
-    await requireAnyCapability([
-      SystemCapabilities.MANAGE_ROLES,
-      SystemCapabilities.MANAGE_USERS,
-      SystemCapabilities.MANAGE_GROUPS,
-    ]);
+    await guardAuditLogAccess();
     const response = await apiFetch(`/api/admin/audit-log/export.csv${buildAuditLogQuery(data)}`, {
       method: 'GET',
       headers: { Accept: 'text/csv' },
