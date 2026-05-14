@@ -270,12 +270,14 @@ export type AuditLogPage = z.infer<typeof auditLogPageResponseSchema>;
 
 export const AUDIT_LOG_PAGE_SIZE = 50;
 
-const AUDIT_LOG_REQUIRED_CAPS = [
-  SystemCapabilities.MANAGE_ROLES,
-  SystemCapabilities.MANAGE_USERS,
-  SystemCapabilities.MANAGE_GROUPS,
-];
-
+/**
+ * The LibreChat backend is the source of truth for audit-log access: the
+ * `/api/admin/audit-log` route enforces `ACCESS_ADMIN`, and any future
+ * tightening (e.g. a dedicated `READ_AUDIT_LOG` capability) belongs there. A
+ * BFF-layer guard duplicating that check costs a `/effective` round-trip per
+ * page request without buying real protection — the backend rejects the same
+ * requests we would.
+ */
 function buildAuditLogQuery(filters: AuditFilters): string {
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(filters)) {
@@ -290,19 +292,9 @@ function buildAuditLogQuery(filters: AuditFilters): string {
   return qs ? `?${qs}` : '';
 }
 
-/** Each handler invocation fetches effective capabilities exactly once, then
- * runs the guard against the cached set. The previous shape called
- * `requireAnyCapability` (one round-trip) followed by the backend call
- * (another round-trip), doubling traffic for every page of the audit log. */
-async function guardAuditLogAccess(): Promise<void> {
-  const { capabilities } = await getEffectiveCapabilitiesFn();
-  checkAnyCapability(capabilities, AUDIT_LOG_REQUIRED_CAPS);
-}
-
 export const getAuditLogPageFn = createServerFn({ method: 'GET' })
   .inputValidator(auditFilterSchema)
   .handler(async ({ data }: { data: AuditFilters }): Promise<AuditLogPage> => {
-    await guardAuditLogAccess();
     const withDefaults: AuditFilters = { limit: AUDIT_LOG_PAGE_SIZE, ...data };
     const response = await apiFetch(`/api/admin/audit-log${buildAuditLogQuery(withDefaults)}`);
     if (!response.ok) {
@@ -336,7 +328,6 @@ export const getAuditLogEntryFn = createServerFn({ method: 'GET' })
     }: {
       data: { id: string };
     }): Promise<{ entry: z.infer<typeof adminAuditLogEntrySchema> | null }> => {
-      await guardAuditLogAccess();
       const response = await apiFetch(`/api/admin/audit-log/${encodeURIComponent(data.id)}`);
       if (response.status === 404) return { entry: null };
       if (!response.ok) {
@@ -358,7 +349,6 @@ export const auditLogEntryQueryOptions = (id: string | undefined) =>
 export const exportAuditLogServerFn = createServerFn({ method: 'POST' })
   .inputValidator(auditFilterSchema)
   .handler(async ({ data }: { data: AuditFilters }): Promise<{ csv: string }> => {
-    await guardAuditLogAccess();
     const response = await apiFetch(`/api/admin/audit-log/export.csv${buildAuditLogQuery(data)}`, {
       method: 'GET',
       headers: { Accept: 'text/csv' },
