@@ -11,6 +11,7 @@ const CLIENT_DIR = join(import.meta.dir, 'dist', 'client');
 const SERVER_ENTRY = new URL('./dist/server/server.js', import.meta.url);
 
 const env = process.env;
+const BASE_PATH = (env.VITE_BASE_PATH || '').replace(/\/$/, '');
 
 const ONE_DAY = 86400;
 const rawMaxAge = Number(env.ADMIN_PANEL_STATIC_CACHE_MAX_AGE ?? env.STATIC_CACHE_MAX_AGE);
@@ -63,7 +64,7 @@ async function buildStaticRoutes(): Promise<Record<string, (req: Request) => Pro
   for await (const path of new Glob('**/*').scan(CLIENT_DIR)) {
     const file = Bun.file(`${CLIENT_DIR}/${path}`);
     const cache = getCacheHeaders(path);
-    const routePath = `/${path}`;
+    const routePath = `${BASE_PATH}/${path}`;
     routes[routePath] = (req) =>
       withHttpMetrics(
         req,
@@ -79,6 +80,8 @@ const server = Bun.serve({
   routes: {
     ...(await buildStaticRoutes()),
     '/metrics': (req) => metricsResponse(req),
+    '/health': () => new Response('ok'),
+    ...(BASE_PATH ? { [`${BASE_PATH}`]: () => Response.redirect(`${BASE_PATH}/`, 302) } : {}),
     '/*': async (req) => {
       const url = new URL(req.url);
       const res = await withHttpMetrics(req, url.pathname, () => handler.fetch(req));
@@ -91,7 +94,7 @@ const server = Bun.serve({
   },
 });
 
-console.log(`Admin panel listening on http://localhost:${server.port}`);
+console.log(`Admin panel listening on http://localhost:${server.port}${BASE_PATH}/`);
 
 if (!process.env.ADMIN_PANEL_METRICS_SECRET) {
   console.warn(

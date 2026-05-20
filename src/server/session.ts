@@ -40,11 +40,14 @@ if (!process.env.SESSION_SECRET && process.env.NODE_ENV === 'development') {
   );
 }
 
+const sessionCookiePath = process.env.VITE_BASE_PATH || '/';
+
 export function useAppSession(): ReturnType<typeof useSession<t.SessionData>> {
   return useSession<t.SessionData>({
     name: 'admin-session',
     password: sessionSecret || '',
     cookie: {
+      path: sessionCookiePath,
       secure: sessionCookieSecure,
       sameSite: 'lax',
       httpOnly: true,

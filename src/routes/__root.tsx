@@ -46,7 +46,7 @@ export const Route = createRootRoute({
       },
       {
         rel: 'icon',
-        href: '/favicon.ico',
+        href: `${import.meta.env.VITE_BASE_PATH || ''}/favicon.ico`,
       },
     ],
   }),

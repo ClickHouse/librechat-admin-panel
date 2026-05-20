@@ -43,6 +43,7 @@ docker compose down     # stop
 | `PORT`                          | No                                  | `3000`                                                                           | Port the admin panel listens on                                                                 |
 | `SESSION_SECRET`                | **Yes** (always required in Docker) | Dev fallback only when running `bun dev` locally; no default in the Docker image | Encryption key for sessions (min 32 chars)                                                      |
 | `VITE_API_BASE_URL`             | **Yes** (Docker)                    | `http://localhost:3080` (local dev only)                                         | LibreChat API server URL; use `http://host.docker.internal:<port>` in Docker                    |
+| `VITE_BASE_PATH`                | No                                  | `/`                                                                              | URL subpath to serve the panel under (e.g., `/adminpanel`). Must match at build time and runtime |
 | `API_SERVER_URL`                | No                                  | Falls back to `VITE_API_BASE_URL`                                                | Server-side LibreChat API URL when the container reaches LibreChat differently than the browser |
 | `ADMIN_SSO_ONLY`                | No                                  | `false`                                                                          | Hide email/password form, SSO only                                                              |
 | `ADMIN_SESSION_IDLE_TIMEOUT_MS` | No                                  | `1800000` (30 min)                                                               | Session idle timeout in ms                                                                      |
@@ -65,5 +66,14 @@ docker run -p 3000:3000 \
   -e SESSION_SECRET=your-secret-here-at-least-32-characters \
   -e VITE_API_BASE_URL=http://host.docker.internal:3080 \
   -e SESSION_COOKIE_SECURE=false \
+  librechat-admin-panel
+
+# To serve under a subpath (e.g., /adminpanel):
+docker build -t librechat-admin-panel --build-arg VITE_BASE_PATH=/adminpanel .
+docker run -p 3000:3000 \
+  --add-host=host.docker.internal:host-gateway \
+  -e SESSION_SECRET=your-secret-here-at-least-32-characters \
+  -e VITE_API_BASE_URL=http://host.docker.internal:3080 \
+  -e VITE_BASE_PATH=/adminpanel \
   librechat-admin-panel
 ```
