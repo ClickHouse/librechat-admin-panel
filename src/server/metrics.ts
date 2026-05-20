@@ -3,6 +3,53 @@ import client, { register } from 'prom-client';
 
 client.collectDefaultMetrics();
 
+const KNOWN_APP_ROUTES = new Map<string, string>([
+  ['/', '/'],
+  ['/login', '/login'],
+  ['/access', '/access'],
+  ['/configuration', '/configuration'],
+  ['/grants', '/grants'],
+  ['/help', '/help'],
+  ['/users', '/users'],
+  ['/auth/openid/callback', '/auth/openid/callback'],
+]);
+
+const STATIC_ASSET_RE =
+  /\.(?:avif|css|gif|ico|jpe?g|js|json|map|png|svg|txt|webmanifest|webp|woff2?)$/i;
+
+const SERVER_FUNCTION_PREFIXES = [
+  '/_server',
+  '/_serverFn',
+  '/__server',
+  '/_tanstack',
+  '/api/_server',
+];
+
+function canonicalPath(pathname: string): string {
+  if (!pathname.startsWith('/')) return '/unknown';
+  if (pathname === '/') return pathname;
+  return pathname.replace(/\/+$/, '');
+}
+
+export function normalizeMetricsPath(pathname: string): string {
+  const path = canonicalPath(pathname);
+
+  const appRoute = KNOWN_APP_ROUTES.get(path);
+  if (appRoute) return appRoute;
+
+  if (path === '/metrics') return '/metrics';
+
+  if (path.startsWith('/assets/') || STATIC_ASSET_RE.test(path)) {
+    return 'static_asset';
+  }
+
+  if (SERVER_FUNCTION_PREFIXES.some((prefix) => path === prefix || path.startsWith(`${prefix}/`))) {
+    return 'server_function';
+  }
+
+  return 'unknown';
+}
+
 export const httpRequestsTotal = new client.Counter({
   name: 'admin_http_requests_total',
   help: 'Total number of HTTP requests',
