@@ -7,6 +7,7 @@ import { createServerFn } from '@tanstack/react-start';
 import { getRequestHeader } from '@tanstack/react-start/server';
 import type * as t from '@/types';
 import { getApiBaseUrl, getServerApiUrl } from './utils/url';
+import { buildOAuthExchangePayload } from './utils/oauth';
 import { refreshAdminTokenDeduped } from './utils/refresh';
 import { useAppSession, SESSION_CONFIG } from './session';
 
@@ -210,7 +211,11 @@ export const verifyAdminTokenFn = createServerFn({ method: 'GET' }).handler(asyn
           }
           if (response.status === 401) {
             if (refreshToken) {
-              const refreshed = await refreshAdminTokenDeduped(refreshToken, tokenProvider, user.id);
+              const refreshed = await refreshAdminTokenDeduped(
+                refreshToken,
+                tokenProvider,
+                user.id,
+              );
               if (refreshed) {
                 const refreshedSession = {
                   token: refreshed.token,
@@ -347,7 +352,8 @@ export const openidLoginFn = createServerFn({ method: 'GET' }).handler(async () 
     const codeVerifier = crypto.randomBytes(32).toString('hex');
     const codeChallenge = crypto.createHash('sha256').update(codeVerifier).digest('hex');
     authUrl.searchParams.set('code_challenge', codeChallenge);
-    if (requestOrigin) authUrl.searchParams.set('redirect_uri', `${requestOrigin}/auth/openid/callback`);
+    if (requestOrigin)
+      authUrl.searchParams.set('redirect_uri', `${requestOrigin}/auth/openid/callback`);
 
     const session = await useAppSession();
     await session.update({ codeVerifier });
@@ -371,11 +377,18 @@ export const oauthExchangeFn = createServerFn({ method: 'POST' })
 
       const session = await useAppSession();
       const { codeVerifier } = session.data;
+      const exchangePayload = buildOAuthExchangePayload(data.code, codeVerifier);
+      if (!exchangePayload.ok) {
+        console.warn(
+          '[oauthExchangeFn] Missing PKCE verifier from admin session; check SESSION_COOKIE_SECURE for HTTP deployments',
+        );
+        return { error: true, message: exchangePayload.message };
+      }
 
       const response = await fetch(`${getServerApiUrl()}/api/admin/oauth/exchange`, {
         method: 'POST',
         headers,
-        body: JSON.stringify({ code: data.code, code_verifier: codeVerifier }),
+        body: exchangePayload.body,
       });
 
       const responseData = await response.json();
