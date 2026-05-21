@@ -347,13 +347,10 @@ export const openidLoginFn = createServerFn({ method: 'GET' }).handler(async () 
   try {
     const baseUrl = getApiBaseUrl();
     const authUrl = new URL(`${baseUrl}/api/admin/oauth/openid`);
-    const requestOrigin = getRequestOrigin();
 
     const codeVerifier = crypto.randomBytes(32).toString('hex');
     const codeChallenge = crypto.createHash('sha256').update(codeVerifier).digest('hex');
     authUrl.searchParams.set('code_challenge', codeChallenge);
-    if (requestOrigin)
-      authUrl.searchParams.set('redirect_uri', `${requestOrigin}/auth/openid/callback`);
 
     const session = await useAppSession();
     await session.update({ codeVerifier });
