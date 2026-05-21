@@ -84,6 +84,12 @@ export interface ConfigTabContentProps {
   sectionPermissions?: Record<string, { canView: boolean; canEdit: boolean }>;
   schemaDefaults?: FlatConfigMap;
   showConfiguredOnly?: boolean;
+  /** Entry-key sets for record-type sections that come from the un-merged
+   *  YAML/file base config. Keyed by the section's parent path (e.g.
+   *  `mcpServers`). Record-type renderers use this to distinguish entries
+   *  whose identity is locked by YAML from entries that exist only via
+   *  admin overrides. */
+  baseRecordKeys?: Record<string, Set<string>>;
 }
 
 export interface ConfigTableOfContentsProps {
@@ -206,6 +212,10 @@ export interface FieldRendererProps {
   getValue: (path: string, fallback: ConfigValue) => ConfigValue;
   onChange: (path: string, value: ConfigValue) => void;
   onResetField?: (path: string) => void;
+  /** Current edited values map keyed by dot-path. Used by record-type custom
+   *  renderers to drive per-entry dirty state without re-deriving from
+   *  touchedPaths (which sticks even after edits revert to baseline). */
+  editedValues?: FlatConfigMap;
   disabled?: boolean;
   profileMap?: Record<string, string[]>;
   previewMode?: boolean;
@@ -224,6 +234,12 @@ export interface FieldRendererProps {
   /** When true, never strip labels via isSoleField.  Use when rendering a
    *  subset of fields within a larger section (e.g. priority fields). */
   alwaysShowLabels?: boolean;
+  /** Entry keys that come from the un-merged YAML/file base config for
+   *  the section currently being rendered. Record-type renderers (e.g.
+   *  MCP servers) use this to lock identity affordances (rename, delete)
+   *  for entries whose names originate in YAML, regardless of whether
+   *  admin overrides have been added on top of them. */
+  yamlBaseKeys?: Set<string>;
 }
 
 export interface ImportYamlDialogProps {

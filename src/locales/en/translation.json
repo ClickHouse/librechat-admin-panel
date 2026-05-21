@@ -75,6 +75,8 @@
   "com_config_server_name": "Server name",
   "com_config_server_name_required": "Server name is required",
   "com_config_server_name_exists": "A server with this name already exists",
+  "com_config_server_name_no_dots": "Server name cannot contain dots",
+  "com_config_server_name_invalid": "Server name is not allowed",
   "com_config_group_connection": "Connection",
   "com_config_group_authentication": "Authentication",
   "com_config_group_api_key": "API key",

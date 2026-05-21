@@ -130,6 +130,21 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
     return new Set(Object.keys(flattenObject(dbOverrides)));
   }, [dbOverrides]);
 
+  /**
+   * Authoritative set of YAML-defined entries per section, sourced from the
+   * un-merged baseOnly response. Identity affordances (rename, delete) are
+   * locked iff a name appears here, regardless of whether admin overrides
+   * also exist for it.
+   */
+  const baseRecordKeys = useMemo(() => {
+    const result: Record<string, Set<string>> = {};
+    const yamlMcpKeys = baseConfigData?.yamlMcpKeys;
+    if (yamlMcpKeys && Array.isArray(yamlMcpKeys)) {
+      result.mcpServers = new Set(yamlMcpKeys);
+    }
+    return result;
+  }, [baseConfigData]);
+
   const hasUnmappedSections = useMemo(
     () =>
       schemaTree.some(
@@ -344,41 +359,70 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
     return scopeResolvedValues ?? {};
   }, [isEditingScope, flatBaseline, scopeResolvedValues]);
 
+  /**
+   * Every intermediate (non-leaf) path implied by the baseline's flat keys.
+   * Used by handleFieldChange to recognize "delete the whole subtree" writes
+   * whose target path doesn't itself appear in scopeBaseline because
+   * flatBaseline only stores leaf paths.
+   */
+  const baselineIntermediates = useMemo(() => {
+    const set = new Set<string>();
+    for (const leaf of Object.keys(scopeBaseline)) {
+      const parts = leaf.split('.');
+      for (let i = 1; i < parts.length; i++) {
+        set.add(parts.slice(0, i).join('.'));
+      }
+    }
+    return set;
+  }, [scopeBaseline]);
+
   const handleFieldChange = useCallback(
     (path: string, value: t.ConfigValue) => {
-      startTransition(() => {
-        setTouchedPaths((prev) => {
-          if (prev.has(path)) return prev;
-          const next = new Set(prev);
-          next.add(path);
+      setTouchedPaths((prev) => {
+        if (prev.has(path)) return prev;
+        const next = new Set(prev);
+        next.add(path);
+        return next;
+      });
+      setEditedValues((prev) => {
+        const baseline = scopeBaseline[path];
+        const match =
+          value === baseline ||
+          (typeof value === 'object' &&
+            typeof baseline === 'object' &&
+            JSON.stringify(value) === JSON.stringify(baseline));
+        /**
+         * Suppress the prune for undefined writes that target an intermediate
+         * container path. handleRemove/handleRename emit these to request
+         * "delete the whole subtree"; pruning would silently drop them
+         * because flatBaseline only stores leaf paths, so scopeBaseline at
+         * the container is always undefined and would falsely match.
+         */
+        const isContainerDelete = value === undefined && baselineIntermediates.has(path);
+        if (match && !isContainerDelete) {
+          const next = { ...prev };
+          delete next[path];
           return next;
-        });
-        setEditedValues((prev) => {
-          const baseline = scopeBaseline[path];
-          const match =
-            value === baseline ||
-            (typeof value === 'object' &&
-              typeof baseline === 'object' &&
-              JSON.stringify(value) === JSON.stringify(baseline));
-          if (match) {
-            const next = { ...prev };
-            delete next[path];
-            return next;
+        }
+        const next = { ...prev, [path]: value };
+        if (Array.isArray(value)) {
+          const prefix = `${path}.`;
+          for (const k of Object.keys(next)) {
+            if (k.startsWith(prefix) && /\.\d+$/.test(k)) delete next[k];
           }
-          const next = { ...prev, [path]: value };
-          if (Array.isArray(value)) {
-            const prefix = `${path}.`;
-            for (const k of Object.keys(next)) {
-              if (k.startsWith(prefix) && /\.\d+$/.test(k)) delete next[k];
-            }
+        }
+        const indexMatch = /^(.+)\.\d+$/.exec(path);
+        if (indexMatch) delete next[indexMatch[1]];
+        for (const existing of Object.keys(next)) {
+          if (existing === path) continue;
+          if (path.startsWith(`${existing}.`)) {
+            delete next[existing];
           }
-          const indexMatch = /^(.+)\.\d+$/.exec(path);
-          if (indexMatch) delete next[indexMatch[1]];
-          return next;
-        });
+        }
+        return next;
       });
     },
-    [scopeBaseline],
+    [scopeBaseline, baselineIntermediates],
   );
 
   const isDirty = Object.keys(editedValues).length > 0;
@@ -457,7 +501,9 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
       .filter((p) => editedValues[p] !== undefined)
       .map((p) => ({
         fieldPath: p,
-        value: /\.\d+$/.test(p) ? deepSerializeKVPairs(editedValues[p]) : serializeKVPairs(editedValues[p]),
+        value: /\.\d+$/.test(p)
+          ? deepSerializeKVPairs(editedValues[p])
+          : serializeKVPairs(editedValues[p]),
       }));
     const resets = touched.filter((p) => editedValues[p] === undefined);
 
@@ -540,7 +586,10 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
       const segments = path.split('.');
       let current: t.ConfigValue = configValues;
       for (const seg of segments) {
-        if (current == null || typeof current !== 'object') { current = undefined; break; }
+        if (current == null || typeof current !== 'object') {
+          current = undefined;
+          break;
+        }
         current = Array.isArray(current)
           ? (current as t.ConfigValue[])[Number(seg)]
           : (current as Record<string, t.ConfigValue>)[seg];
@@ -827,6 +876,7 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
               sectionPermissions={sectionPermissions}
               schemaDefaults={schemaDefaults}
               showConfiguredOnly={showConfiguredOnly}
+              baseRecordKeys={baseRecordKeys}
             />
           </div>
         </div>

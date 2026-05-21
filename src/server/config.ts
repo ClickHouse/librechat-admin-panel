@@ -129,7 +129,6 @@ function inferRecordKVTypes(schema: t.ZodSchemaLike): t.KVValueType[] | undefine
   return types.size > 0 ? [...types] : undefined;
 }
 
-
 /** Merges fields from union object variants into a single list.
  *  When the same key appears in multiple variants with different literal
  *  types, the literals are combined into a union(literal(...) | literal(...))
@@ -454,6 +453,70 @@ export function getZodTypeName(
   return typeName || 'unknown';
 }
 
+/**
+ * Builds a schema-like wrapper that accepts a value if any candidate's `safeParse`
+ * accepts it. Avoids `z.union` so we don't tie callers to a specific zod major
+ * version: candidates here may come from packages bundling an older zod release.
+ */
+function anyOfSchema(candidates: t.ZodSchemaLike[]): t.ZodSchemaLike {
+  type ParseResult = {
+    success: boolean;
+    error?: { issues: Array<{ message: string; path: (string | number)[] }> };
+  };
+  const safeParse = (value: unknown): ParseResult => {
+    const errors: NonNullable<ParseResult['error']>[] = [];
+    for (const candidate of candidates) {
+      const c = candidate as t.ZodSchemaLike & {
+        safeParse?: (v: unknown) => ParseResult;
+      };
+      if (typeof c.safeParse !== 'function') continue;
+      let result: ParseResult;
+      try {
+        result = c.safeParse(value);
+      } catch (e) {
+        errors.push({
+          issues: [{ message: e instanceof Error ? e.message : 'Validation failed', path: [] }],
+        });
+        continue;
+      }
+      if (result.success) return { success: true };
+      if (result.error) errors.push(result.error);
+    }
+    /**
+     * Heuristic: when every branch failed, return the branch with the FEWEST
+     * issues. That's almost always the one the user was aiming at (a single
+     * typed field mismatch is more specific than a multi-field shape error),
+     * so it produces a much cleaner message than dumping all branch issues.
+     * Ties on issue count are broken by preferring the longest issue path
+     * (more specific to the user's input shape) so a remote-URL field doesn't
+     * fall back to the first branch's generic literal mismatch.
+     */
+    const sorted = errors
+      .filter((e): e is NonNullable<typeof e> => e != null && Array.isArray(e.issues))
+      .sort((a, b) => {
+        const ca = a.issues?.length ?? Infinity;
+        const cb = b.issues?.length ?? Infinity;
+        if (ca !== cb) return ca - cb;
+        const pa = Math.max(0, ...(a.issues ?? []).map((i) => i.path?.length ?? 0));
+        const pb = Math.max(0, ...(b.issues ?? []).map((i) => i.path?.length ?? 0));
+        return pb - pa;
+      });
+    const best = sorted[0];
+    return {
+      success: false,
+      error: best ?? { issues: [{ message: 'Validation failed', path: [] }] },
+    };
+  };
+  /**
+   * SAFETY: We synthesize a partial ZodSchemaLike here that only implements
+   * safeParse + _def.typeName. validateFieldValue only invokes safeParse on
+   * the returned schema, so the partial shape is sufficient. We avoid
+   * constructing a real z.union to bypass the v3/v4 cross-version pitfall
+   * (configSchema bundles zod@3 while this file uses zod@4).
+   */
+  return { _def: { typeName: 'ZodUnion' }, safeParse } as t.ZodSchemaLike;
+}
+
 /** Walks a Zod schema tree to find the sub-schema at a given dot-path.
  *  Returns the schema **with wrappers intact** so `.safeParse()` runs the
  *  full validation chain (refine, transform, pipe). Returns `null` if the
@@ -484,16 +547,25 @@ export function resolveSubSchema(
       current = valueType;
     } else if (typeName === 'ZodUnion') {
       const options = unwrapped._def.options ?? [];
-      let found: t.ZodSchemaLike | null = null;
+      const candidates: t.ZodSchemaLike[] = [];
       for (const opt of options) {
         const optUnwrapped = unwrapSchema(opt);
         if (optUnwrapped?.shape?.[segment]) {
-          found = optUnwrapped.shape[segment];
-          break;
+          candidates.push(optUnwrapped.shape[segment]);
         }
       }
-      if (!found) return null;
-      current = found;
+      if (candidates.length === 0) return null;
+      if (candidates.length === 1) {
+        current = candidates[0];
+      } else {
+        /**
+         * Multiple union branches expose this field with potentially different schemas
+         * (e.g. MCPOptionsSchema's `type` is a different literal in each transport).
+         * Accept any of them by reconstructing a runtime union so per-field validation
+         * works without needing to pre-discriminate from sibling fields.
+         */
+        current = anyOfSchema(candidates);
+      }
     } else if (typeName === 'ZodIntersection') {
       const resolved = resolveIntersection(unwrapped);
       if (!resolved?.shape?.[segment]) return null;
@@ -761,8 +833,9 @@ function normalizeAppServiceKeys(
 }
 
 export const getBaseConfigFn = createServerFn({ method: 'GET' }).handler(async () => {
-  const [baseResponse, dbBaseResponse] = await Promise.all([
+  const [baseResponse, baseOnlyResponse, dbBaseResponse] = await Promise.all([
     apiFetch('/api/admin/config/base'),
+    apiFetch('/api/admin/config/base?baseOnly=true'),
     apiFetch(`/api/admin/config/role/${BASE_CONFIG_PRINCIPAL_ID}`),
   ]);
 
@@ -792,7 +865,19 @@ export const getBaseConfigFn = createServerFn({ method: 'GET' }).handler(async (
     dbOverrides = dbConfig.overrides as Record<string, t.ConfigValue>;
   }
 
-  return { config, dbOverrides, configuredFromBase, schemaDefaults: flatDefaults };
+  let yamlMcpKeys: string[] | undefined;
+  if (baseOnlyResponse.ok) {
+    const { config: baseOnlyRaw } = (await baseOnlyResponse.json()) as {
+      config: Record<string, t.ConfigValue>;
+    };
+    const baseOnly = normalizeAppServiceKeys(baseOnlyRaw);
+    const mcp = baseOnly.mcpServers;
+    if (mcp && typeof mcp === 'object' && !Array.isArray(mcp)) {
+      yamlMcpKeys = Object.keys(mcp as Record<string, t.ConfigValue>);
+    }
+  }
+
+  return { config, dbOverrides, configuredFromBase, schemaDefaults: flatDefaults, yamlMcpKeys };
 });
 
 export const baseConfigOptions = queryOptions({
@@ -833,7 +918,10 @@ async function mergeIndexedArrayEntries(
     const segments = arrayPath.split('.');
     let current: unknown = baseConfig;
     for (const seg of segments) {
-      if (current == null || typeof current !== 'object') { current = undefined; break; }
+      if (current == null || typeof current !== 'object') {
+        current = undefined;
+        break;
+      }
       current = (current as Record<string, unknown>)[seg];
     }
     const arr = Array.isArray(current) ? [...current] : [];

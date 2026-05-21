@@ -54,6 +54,7 @@ export function ConfigTabContent({
   sectionPermissions,
   schemaDefaults,
   showConfiguredOnly,
+  baseRecordKeys,
 }: t.ConfigTabContentProps) {
   const localize = useLocalize();
   const fieldsDisabled = readOnly;
@@ -164,6 +165,7 @@ export function ConfigTabContent({
       getValue,
       onChange: onFieldChange,
       onResetField,
+      editedValues,
       disabled: sectionDisabled,
       profileMap,
       previewMode,
@@ -179,6 +181,7 @@ export function ConfigTabContent({
       pendingResets,
       schemaDefaults,
       showConfiguredOnly,
+      yamlBaseKeys: baseRecordKeys?.[dataKey],
     };
     return (
       <>
@@ -232,7 +235,7 @@ export function ConfigTabContent({
   const isInlineSection = (section: t.ConfigSectionConfig): boolean =>
     Boolean(
       (section.sectionField && isSimpleScalar(section.sectionField)) ||
-        (section.fields.length === 1 && isSimpleScalar(section.fields[0])),
+      (section.fields.length === 1 && isSimpleScalar(section.fields[0])),
     );
 
   type SectionGroup =
