@@ -453,11 +453,7 @@ export function getZodTypeName(
   return typeName || 'unknown';
 }
 
-/**
- * Builds a schema-like wrapper that accepts a value if any candidate's `safeParse`
- * accepts it. Avoids `z.union` so we don't tie callers to a specific zod major
- * version: candidates here may come from packages bundling an older zod release.
- */
+/** Synthesizes a union without z.union to avoid the zod v3/v4 cross-version pitfall. */
 function anyOfSchema(candidates: t.ZodSchemaLike[]): t.ZodSchemaLike {
   type ParseResult = {
     success: boolean;
@@ -482,15 +478,7 @@ function anyOfSchema(candidates: t.ZodSchemaLike[]): t.ZodSchemaLike {
       if (result.success) return { success: true };
       if (result.error) errors.push(result.error);
     }
-    /**
-     * Heuristic: when every branch failed, return the branch with the FEWEST
-     * issues. That's almost always the one the user was aiming at (a single
-     * typed field mismatch is more specific than a multi-field shape error),
-     * so it produces a much cleaner message than dumping all branch issues.
-     * Ties on issue count are broken by preferring the longest issue path
-     * (more specific to the user's input shape) so a remote-URL field doesn't
-     * fall back to the first branch's generic literal mismatch.
-     */
+    /** Pick the branch with the fewest issues (most likely the intended one); tiebreak on longest path. */
     const sorted = errors
       .filter((e): e is NonNullable<typeof e> => e != null && Array.isArray(e.issues))
       .sort((a, b) => {
@@ -507,13 +495,6 @@ function anyOfSchema(candidates: t.ZodSchemaLike[]): t.ZodSchemaLike {
       error: best ?? { issues: [{ message: 'Validation failed', path: [] }] },
     };
   };
-  /**
-   * SAFETY: We synthesize a partial ZodSchemaLike here that only implements
-   * safeParse + _def.typeName. validateFieldValue only invokes safeParse on
-   * the returned schema, so the partial shape is sufficient. We avoid
-   * constructing a real z.union to bypass the v3/v4 cross-version pitfall
-   * (configSchema bundles zod@3 while this file uses zod@4).
-   */
   return { _def: { typeName: 'ZodUnion' }, safeParse } as t.ZodSchemaLike;
 }
 
@@ -558,12 +539,6 @@ export function resolveSubSchema(
       if (candidates.length === 1) {
         current = candidates[0];
       } else {
-        /**
-         * Multiple union branches expose this field with potentially different schemas
-         * (e.g. MCPOptionsSchema's `type` is a different literal in each transport).
-         * Accept any of them by reconstructing a runtime union so per-field validation
-         * works without needing to pre-discriminate from sibling fields.
-         */
         current = anyOfSchema(candidates);
       }
     } else if (typeName === 'ZodIntersection') {

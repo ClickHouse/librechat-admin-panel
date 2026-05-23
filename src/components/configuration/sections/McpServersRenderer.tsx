@@ -1,17 +1,3 @@
-/**
- * Custom section renderer for `mcpServers` — the MCP Servers tab.
- *
- * Renders MCP server entries as expandable cards with:
- *  - Transport-type-aware field visibility (stdio vs sse vs streamable-http vs websocket)
- *  - Semantic field groups (Connection, Authentication, Server Options, Advanced)
- *  - A "Create MCP Server" dialog for adding new entries
- *  - TOC-compatible scroll targets via entry card IDs
- *
- * All edits write per-leaf paths (`mcpServers.<key>.<field>`) into editedValues
- * so single-field reset, baseline-equality dirty pruning, and rename orphan
- * cleanup all work uniformly.
- */
-
 import { Icon } from '@clickhouse/click-ui';
 import { memo, useRef, useMemo, useState, useEffect, useCallback } from 'react';
 import type { ReactNode } from 'react';
@@ -26,11 +12,6 @@ import { FormDialog } from '@/components/shared';
 import { useLocalize } from '@/hooks';
 import { cn } from '@/utils';
 
-// ---------------------------------------------------------------------------
-// Transport type → field visibility
-// ---------------------------------------------------------------------------
-
-/** Fields specific to each transport type. */
 const TRANSPORT_FIELDS: Record<string, string[]> = {
   stdio: ['command', 'args', 'env', 'stderr'],
   sse: ['url', 'headers'],
@@ -39,15 +20,10 @@ const TRANSPORT_FIELDS: Record<string, string[]> = {
   websocket: ['url'],
 };
 
-/** All transport-specific field keys (union of all TRANSPORT_FIELDS values). */
 const ALL_TRANSPORT_KEYS = new Set(Object.values(TRANSPORT_FIELDS).flat());
-
-/** Auth-related fields only shown for remote transports (not stdio). */
 const REMOTE_ONLY_FIELDS = new Set(['requiresOAuth', 'apiKey', 'oauth', 'oauth_headers']);
-
 const REMOTE_TRANSPORTS = new Set(['sse', 'streamable-http', 'http', 'websocket']);
 
-/** Fields that require a value depending on transport type. */
 const REQUIRED_BY_TRANSPORT: Record<string, Set<string>> = {
   stdio: new Set(['command', 'args']),
   sse: new Set(['url']),
@@ -56,7 +32,6 @@ const REQUIRED_BY_TRANSPORT: Record<string, Set<string>> = {
   websocket: new Set(['url']),
 };
 
-/** Curated transport type options with lowercase labels, excluding `http` alias. */
 const TRANSPORT_TYPE_OPTIONS: { label: string; value: string }[] = [
   { label: 'streamable-http', value: 'streamable-http' },
   { label: 'sse', value: 'sse' },
@@ -64,17 +39,12 @@ const TRANSPORT_TYPE_OPTIONS: { label: string; value: string }[] = [
   { label: 'websocket', value: 'websocket' },
 ];
 
-/** The `type` field is always required. */
 const ALWAYS_REQUIRED = new Set(['type']);
 
 /**
- * Infer transport type from configured fields, mirroring Zod's union resolution
- * order in MCPOptionsSchema: Stdio → WebSocket → SSE → StreamableHTTP.
- *
  * YAML configs can omit `type` because each transport schema (except
- * streamable-http) provides a default. The backend infers the type from the
- * discriminating fields (command, url protocol). We replicate that here so the
- * UI shows the effective type for existing configs.
+ * streamable-http) defaults from the discriminating fields. Mirror the
+ * backend's Zod union resolution order so the UI shows the effective type.
  */
 function inferTransportType(values: Record<string, t.ConfigValue>): string {
   if (typeof values.type === 'string' && values.type) return values.type;
@@ -84,7 +54,7 @@ function inferTransportType(values: Record<string, t.ConfigValue>): string {
       const protocol = new URL(values.url).protocol;
       if (protocol === 'ws:' || protocol === 'wss:') return 'websocket';
     } catch {
-      // invalid URL — fall through to sse as default for any url presence
+      /* fall through */
     }
     return 'sse';
   }
@@ -101,10 +71,6 @@ function withFieldOverrides(field: t.SchemaField, transportType: string): t.Sche
   }
   return field;
 }
-
-// ---------------------------------------------------------------------------
-// Per-leaf edit overlay helpers
-// ---------------------------------------------------------------------------
 
 function setLeaf(
   target: Record<string, t.ConfigValue>,
@@ -157,12 +123,6 @@ function isPlainObject(value: t.ConfigValue): value is Record<string, t.ConfigVa
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-/**
- * Walks a nested record and returns one entry per leaf (primitive or array).
- * Used by rename to enumerate every leaf path beneath an MCP entry so nested
- * structures like `headers.Authorization` survive the rename intact instead of
- * collapsing into one whole-object write.
- */
 function enumerateLeafPaths(
   obj: Record<string, t.ConfigValue>,
   prefix: string[] = [],
@@ -182,15 +142,10 @@ function enumerateLeafPaths(
   return out;
 }
 
-// ---------------------------------------------------------------------------
-// Semantic field groups
-// ---------------------------------------------------------------------------
-
 interface FieldGroupDef {
   labelKey: string;
   fields: string[];
   defaultExpanded: boolean;
-  /** Nested sub-groups rendered inside this group (fields should be empty when using children). */
   children?: FieldGroupDef[];
 }
 
@@ -234,10 +189,6 @@ const MCP_FIELD_GROUPS: FieldGroupDef[] = [
   },
 ];
 
-// ---------------------------------------------------------------------------
-// FieldGroup — collapsible group within a card (replicates EndpointsRenderer)
-// ---------------------------------------------------------------------------
-
 function flattenGroupFields(
   fields: t.SchemaField[],
   parentValue: t.ConfigValue,
@@ -254,9 +205,6 @@ function flattenGroupFields(
   const nodes: ReactNode[] = [];
   for (const field of fields) {
     const fieldDisabled = disabled || (lockedKeys?.has(field.key) ?? false);
-    // Custom render for transport type select — curated options with lowercase labels.
-    // When `type` is omitted (common in YAML configs), infer it from other fields
-    // to mirror backend Zod union resolution.
     if (field.key === 'type') {
       const fieldId = `${parentPath}-${field.key}`;
       const label = localize(`com_config_field_${field.key}`);
@@ -324,7 +272,6 @@ function flattenGroupFields(
   return nodes;
 }
 
-/** Parent-level collapsible section that wraps child sub-groups. */
 function FieldGroupSection({
   labelKey,
   defaultExpanded,
@@ -441,10 +388,6 @@ function FieldGroup({
   );
 }
 
-// ---------------------------------------------------------------------------
-// McpEntryFields — dynamic visibility based on transport type
-// ---------------------------------------------------------------------------
-
 function McpEntryFields({
   fields,
   parentValue,
@@ -465,7 +408,6 @@ function McpEntryFields({
   const explicitType = typeof values.type === 'string' ? values.type : '';
   const currentType = explicitType || inferTransportType(values);
 
-  // Build visible field keys based on current transport type
   const currentTransportFields = new Set(TRANSPORT_FIELDS[currentType] ?? []);
   const isRemote = REMOTE_TRANSPORTS.has(currentType);
   const visibleKeys = new Set<string>();
@@ -577,10 +519,6 @@ function McpEntryFields({
   );
 }
 
-// ---------------------------------------------------------------------------
-// CreateMcpServerDialog
-// ---------------------------------------------------------------------------
-
 function CreateMcpServerDialog({
   open,
   onClose,
@@ -683,9 +621,6 @@ function CreateMcpServerDialog({
   );
 }
 
-// ---------------------------------------------------------------------------
-// McpServersRenderer — main export
-// ---------------------------------------------------------------------------
 
 export function McpServersRenderer(props: t.FieldRendererProps) {
   const {
@@ -708,13 +643,6 @@ export function McpServersRenderer(props: t.FieldRendererProps) {
   const baseValue = getValue(path, parentValue ?? {});
   const baseRecord: Record<string, t.ConfigValue> = isPlainObject(baseValue) ? baseValue : {};
 
-  /**
-   * Group edited paths by their entry key. Per-leaf paths are
-   * `mcpServers.<key>.<...>`; the entry key is the first path segment after
-   * the renderer's parent path. We collect [segmentsAfterEntry, value] pairs
-   * keyed by entry name so the record overlay can apply edits per entry
-   * without re-walking the full edit map.
-   */
   const editsByEntry = useMemo(() => {
     const map = new Map<string, Array<{ segments: string[]; value: t.ConfigValue }>>();
     if (!editedValues) return map;
@@ -732,14 +660,6 @@ export function McpServersRenderer(props: t.FieldRendererProps) {
     return map;
   }, [editedValues, entryPrefix]);
 
-  /**
-   * Effective record overlay: walks every per-leaf edit for each entry and
-   * applies it on top of the base value. Leaf undefined deletes the leaf;
-   * if every leaf under an entry is undefined and the entry has no remaining
-   * keys, the entry is removed from the rendered list. Entries with no edits
-   * are referenced by identity from `baseRecord` (no deep clone) so steady
-   * state does not pay for cloning unchanged data.
-   */
   const record = useMemo(() => {
     if (editsByEntry.size === 0) return baseRecord;
     const result: Record<string, t.ConfigValue> = {};
@@ -749,8 +669,6 @@ export function McpServersRenderer(props: t.FieldRendererProps) {
       }
     }
     for (const [entryKey, leafEdits] of editsByEntry) {
-      // Whole-entry writes (empty segments) are kept for backward compatibility
-      // with the previous create/delete flows.
       const wholeEntryWrites = leafEdits.filter((e) => e.segments.length === 0);
       const leafWrites = leafEdits.filter((e) => e.segments.length > 0);
 
@@ -784,25 +702,15 @@ export function McpServersRenderer(props: t.FieldRendererProps) {
   const existingKeys = useMemo(() => new Set(Object.keys(record)), [record]);
 
   /**
-   * Server identity is locked iff the entry's name appears in the un-merged
-   * YAML/file base config (sourced via getBaseConfigFn's yamlMcpKeys).
-   *
-   * When the upstream YAML key set is unavailable (older LibreChat backend
-   * without ?baseOnly=true support), return an empty set so nothing is
-   * locked. That degrades to "everything editable" rather than to a
-   * subtraction heuristic which produced false positives on YAML servers
-   * with admin overrides on cosmetic fields like title or iconPath.
+   * Fall back to an empty set when the backend predates ?baseOnly support, so
+   * nothing is locked rather than falling back to a subtraction heuristic that
+   * produces false positives on YAML servers with admin overrides.
    */
   const yamlSourceKeys = useMemo(() => {
     return yamlBaseKeys ?? new Set<string>();
   }, [yamlBaseKeys]);
 
-  /**
-   * Refs let the create/remove/rename callbacks stay referentially stable so
-   * memo(McpEntryRow) actually bails on entries that didn't change. The refs
-   * shadow editedValues/baseRecord/record (each of which changes on every
-   * keystroke) and are read at call time from inside the callback bodies.
-   */
+  /** Refs keep the callbacks referentially stable so memo(McpEntryRow) can bail. */
   const editedValuesRef = useRef(editedValues);
   useEffect(() => {
     editedValuesRef.current = editedValues;
@@ -873,11 +781,7 @@ export function McpServersRenderer(props: t.FieldRendererProps) {
           if (!seen.has(leafPath)) onChange(leafPath, undefined);
         }
       }
-      /**
-       * Also emit a delete at the entry path so MongoDB's $unset collapses
-       * the whole subtree. Per-leaf $unset alone leaves an empty parent
-       * object that refetches as a phantom server entry.
-       */
+      /** Entry-path delete is needed to make MongoDB's $unset collapse the subtree; per-leaf $unset alone leaves an empty parent that refetches as a phantom entry. */
       if (!seen.has(entryPath)) {
         onChange(entryPath, undefined);
       }
@@ -918,14 +822,7 @@ export function McpServersRenderer(props: t.FieldRendererProps) {
       const baseEntry = baseRecord[oldKey];
       const overlayEntry = record[oldKey];
 
-      /**
-       * Enumerate leaves recursively so nested per-leaf data like
-       * `headers.Authorization` survives the rename intact. The overlay
-       * representation is authoritative because the edit overlay already
-       * reflects in-flight changes (including deletions); we still walk the
-       * base to find leaves removed only in the overlay so the old paths get
-       * proper undefined-cleanup writes.
-       */
+      /** Walk overlay AND base: overlay holds in-flight edits, base catches leaves the overlay has already deleted so their old paths still get undefined-cleanup writes. */
       const baseLeaves = isPlainObject(baseEntry) ? enumerateLeafPaths(baseEntry) : [];
       const overlayLeaves = isPlainObject(overlayEntry) ? enumerateLeafPaths(overlayEntry) : [];
 
@@ -946,11 +843,7 @@ export function McpServersRenderer(props: t.FieldRendererProps) {
         }
         onChange(`${oldPrefix}${segments.join('.')}`, undefined);
       }
-      /**
-       * Emit an entry-path delete on the old key so MongoDB's $unset collapses
-       * the whole subtree. Without this, per-leaf unsets leave an empty parent
-       * object that refetches as a phantom entry under the old name.
-       */
+      /** See $unset note in handleRemove. */
       onChange(`${path}.${oldKey}`, undefined);
     },
     [onChange, path, localize, onValidationError],
@@ -1009,10 +902,6 @@ export function McpServersRenderer(props: t.FieldRendererProps) {
   );
 }
 
-// ---------------------------------------------------------------------------
-// McpEntryRow — single entry card, memoized per entry
-// ---------------------------------------------------------------------------
-
 const McpEntryRow = memo(function McpEntryRowImpl({
   entryKey,
   entryValue,
@@ -1046,11 +935,6 @@ const McpEntryRow = memo(function McpEntryRowImpl({
   const entryPathBase = `${path}.${entryKey}`;
   const lockedKeys = isYamlSource ? YAML_LOCKED_FIELDS : undefined;
 
-  /**
-   * Stable per-leaf onChange shared across renderFields invocations. Hoisting
-   * this out of the renderEntryFields closure keeps child component identity
-   * steady when the parent re-renders with the same props.
-   */
   const entryOnChange = useCallback(
     (leafKey: string, leafValue: t.ConfigValue) => {
       onChange(`${entryPathBase}.${leafKey}`, leafValue);
@@ -1058,12 +942,6 @@ const McpEntryRow = memo(function McpEntryRowImpl({
     [onChange, entryPathBase],
   );
 
-  /**
-   * Bypass ObjectEntryCard.handleFieldChange and write absolute per-leaf paths
-   * directly. The renderFields callback ignores the handleFieldChange supplied
-   * by ObjectEntryCard and uses an entry-scoped onChange built here that
-   * prefixes with the full entry path.
-   */
   const renderEntryFields: t.CollectionRenderFields = useCallback(
     (entryFields, ev, ep) => (
       <McpEntryFields
@@ -1078,8 +956,7 @@ const McpEntryRow = memo(function McpEntryRowImpl({
     [entryOnChange, disabled, lockedKeys],
   );
 
-  /** Whole-entry replace path (kept for back-compat with ObjectEntryCard's
-   *  onValueChange contract). Not used by typical leaf edits. */
+  /** Required by ObjectEntryCard's onValueChange contract; unused on leaf edits. */
   const handleWholeEntryChange = useCallback(
     (v: t.ConfigValue) => {
       onChange(entryPathBase, v);
@@ -1103,7 +980,6 @@ const McpEntryRow = memo(function McpEntryRowImpl({
   );
 });
 
-// Re-export metadata constants used by tests / future schema-driven extraction.
 export {
   YAML_LOCKED_FIELDS,
   INSPECTOR_DERIVED,

@@ -644,8 +644,6 @@ describe('validateFieldValue', () => {
     expect(result.success).toBe(false);
     if (!result.success) {
       const semicolonSplits = result.error.split(';');
-      // The most-specific branch is the literal-mismatch failure with a single
-      // issue, not the cumulative dump of every transport-branch failure.
       expect(semicolonSplits.length).toBeLessThanOrEqual(2);
       expect(result.error.length).toBeGreaterThan(0);
     }

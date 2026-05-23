@@ -130,12 +130,6 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
     return new Set(Object.keys(flattenObject(dbOverrides)));
   }, [dbOverrides]);
 
-  /**
-   * Authoritative set of YAML-defined entries per section, sourced from the
-   * un-merged baseOnly response. Identity affordances (rename, delete) are
-   * locked iff a name appears here, regardless of whether admin overrides
-   * also exist for it.
-   */
   const baseRecordKeys = useMemo(() => {
     const result: Record<string, Set<string>> = {};
     const yamlMcpKeys = baseConfigData?.yamlMcpKeys;
@@ -359,12 +353,7 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
     return scopeResolvedValues ?? {};
   }, [isEditingScope, flatBaseline, scopeResolvedValues]);
 
-  /**
-   * Every intermediate (non-leaf) path implied by the baseline's flat keys.
-   * Used by handleFieldChange to recognize "delete the whole subtree" writes
-   * whose target path doesn't itself appear in scopeBaseline because
-   * flatBaseline only stores leaf paths.
-   */
+  /** Container paths inferred from leaf baselines, used to tell apart subtree-deletes from no-op writes. */
   const baselineIntermediates = useMemo(() => {
     const set = new Set<string>();
     for (const leaf of Object.keys(scopeBaseline)) {
@@ -391,13 +380,7 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
           (typeof value === 'object' &&
             typeof baseline === 'object' &&
             JSON.stringify(value) === JSON.stringify(baseline));
-        /**
-         * Suppress the prune for undefined writes that target an intermediate
-         * container path. handleRemove/handleRename emit these to request
-         * "delete the whole subtree"; pruning would silently drop them
-         * because flatBaseline only stores leaf paths, so scopeBaseline at
-         * the container is always undefined and would falsely match.
-         */
+        /** A container-path undefined write must survive; baseline only stores leaves, so it would otherwise match `undefined === undefined` and get pruned. */
         const isContainerDelete = value === undefined && baselineIntermediates.has(path);
         if (match && !isContainerDelete) {
           const next = { ...prev };
