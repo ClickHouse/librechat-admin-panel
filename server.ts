@@ -84,7 +84,10 @@ const server = Bun.serve({
     ...(BASE_PATH ? { [`${BASE_PATH}`]: () => Response.redirect(`${BASE_PATH}/`, 302) } : {}),
     '/*': async (req) => {
       const url = new URL(req.url);
-      const res = await withHttpMetrics(req, url.pathname, () => handler.fetch(req));
+      const metricsPath = BASE_PATH && url.pathname.startsWith(BASE_PATH)
+        ? url.pathname.slice(BASE_PATH.length) || '/'
+        : url.pathname;
+      const res = await withHttpMetrics(req, metricsPath, () => handler.fetch(req));
       const patched = new Response(res.body, res);
       for (const [k, v] of Object.entries(NO_CACHE)) {
         patched.headers.set(k, v);

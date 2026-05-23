@@ -64,6 +64,7 @@ function OpenIdCallback() {
         <p className="text-sm text-(--cui-color-text-muted)">{errorMessage}</p>
         <Link
           to="/login"
+          search={{ redirect: '/' }}
           className="mt-2 rounded-lg border border-(--cui-color-stroke-default) bg-transparent px-4 py-2 text-sm font-medium text-(--cui-color-text-default) no-underline transition-colors hover:bg-(--cui-color-background-hover)"
         >
           {localize('com_auth_sso_back_to_login')}
