@@ -697,11 +697,11 @@ export function McpServersRenderer(props: t.FieldRendererProps) {
     disabled,
     editedValues,
     yamlBaseKeys,
+    onValidationError,
   } = props;
   const localize = useLocalize();
   const [createOpen, setCreateOpen] = useState(false);
   const [justAddedKey, setJustAddedKey] = useState<string | null>(null);
-  const [validationError, setValidationError] = useState<string | null>(null);
 
   const path = parentPath;
   const entryPrefix = `${path}.`;
@@ -821,7 +821,7 @@ export function McpServersRenderer(props: t.FieldRendererProps) {
   const handleCreate = useCallback(
     (serverName: string, entry: Record<string, t.ConfigValue>) => {
       if (serverName.includes('.')) {
-        setValidationError(localize('com_config_server_name_no_dots'));
+        onValidationError?.(localize('com_config_server_name_no_dots'));
         return;
       }
       if (
@@ -829,7 +829,7 @@ export function McpServersRenderer(props: t.FieldRendererProps) {
         serverName === 'constructor' ||
         serverName === 'prototype'
       ) {
-        setValidationError(localize('com_config_server_name_invalid'));
+        onValidationError?.(localize('com_config_server_name_invalid'));
         return;
       }
       for (const [fieldKey, fieldValue] of Object.entries(entry)) {
@@ -846,10 +846,9 @@ export function McpServersRenderer(props: t.FieldRendererProps) {
           onChange(`${path}.${serverName}.${fieldKey}`, fieldValue);
         }
       }
-      setValidationError(null);
       setJustAddedKey(serverName);
     },
-    [onChange, path, localize],
+    [onChange, path, localize, onValidationError],
   );
 
   const handleRemove = useCallback(
@@ -889,22 +888,21 @@ export function McpServersRenderer(props: t.FieldRendererProps) {
   const handleRename = useCallback(
     (oldKey: string, newKey: string) => {
       if (newKey === oldKey) {
-        setValidationError(null);
         return;
       }
       const editedValues = editedValuesRef.current;
       const baseRecord = baseRecordRef.current;
       const record = recordRef.current;
       if (newKey.includes('.')) {
-        setValidationError(localize('com_config_server_name_no_dots'));
+        onValidationError?.(localize('com_config_server_name_no_dots'));
         return;
       }
       if (newKey === '__proto__' || newKey === 'constructor' || newKey === 'prototype') {
-        setValidationError(localize('com_config_server_name_invalid'));
+        onValidationError?.(localize('com_config_server_name_invalid'));
         return;
       }
       if (Object.hasOwn(record, newKey)) {
-        setValidationError(localize('com_config_server_name_exists'));
+        onValidationError?.(localize('com_config_server_name_exists'));
         return;
       }
       const oldPrefixFull = `${path}.${oldKey}`;
@@ -954,9 +952,8 @@ export function McpServersRenderer(props: t.FieldRendererProps) {
        * object that refetches as a phantom entry under the old name.
        */
       onChange(`${path}.${oldKey}`, undefined);
-      setValidationError(null);
     },
-    [onChange, path, localize],
+    [onChange, path, localize, onValidationError],
   );
 
   return (
@@ -972,19 +969,6 @@ export function McpServersRenderer(props: t.FieldRendererProps) {
           <span>{localize('com_config_create_mcp_server')}</span>
         </button>
       </div>
-      {validationError && (
-        <div className="flex items-center justify-between rounded border border-(--cui-color-stroke-danger) bg-(--cui-color-background-danger-soft) px-3 py-2 text-sm text-(--cui-color-text-danger)">
-          <span>{validationError}</span>
-          <button
-            type="button"
-            onClick={() => setValidationError(null)}
-            className="ml-2 cursor-pointer border-none bg-transparent text-(--cui-color-text-danger) hover:underline"
-            aria-label={localize('com_ui_dismiss')}
-          >
-            ×
-          </button>
-        </div>
-      )}
       {entries.map(([key, entryValue]) => (
         <McpEntryRow
           key={key}

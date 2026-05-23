@@ -90,6 +90,7 @@ export interface ConfigTabContentProps {
    *  whose identity is locked by YAML from entries that exist only via
    *  admin overrides. */
   baseRecordKeys?: Record<string, Set<string>>;
+  onValidationError?: (message: string) => void;
 }
 
 export interface ConfigTableOfContentsProps {
@@ -240,6 +241,7 @@ export interface FieldRendererProps {
    *  for entries whose names originate in YAML, regardless of whether
    *  admin overrides have been added on top of them. */
   yamlBaseKeys?: Set<string>;
+  onValidationError?: (message: string) => void;
 }
 
 export interface ImportYamlDialogProps {

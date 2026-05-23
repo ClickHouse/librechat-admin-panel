@@ -173,12 +173,14 @@ function renderRenderer({
   dbOverridePaths,
   yamlBaseKeys,
   onChange = vi.fn(),
+  onValidationError = vi.fn(),
 }: {
   baseRecord: Record<string, t.ConfigValue>;
   editedValues?: t.FlatConfigMap;
   dbOverridePaths?: Set<string>;
   yamlBaseKeys?: Set<string>;
   onChange?: (path: string, value: t.ConfigValue) => void;
+  onValidationError?: (message: string) => void;
 }) {
   const fields = fieldsForMcp();
   const props: t.FieldRendererProps = {
@@ -194,8 +196,14 @@ function renderRenderer({
     editedValues,
     dbOverridePaths,
     yamlBaseKeys,
+    onValidationError,
   };
-  return { ...render(<McpServersRenderer {...props} />), onChange, fields };
+  return {
+    ...render(<McpServersRenderer {...props} />),
+    onChange,
+    onValidationError,
+    fields,
+  };
 }
 
 describe('McpServersRenderer — metadata sets', () => {
@@ -536,8 +544,9 @@ describe('McpServersRenderer — handleRename', () => {
     expect(newUrlWrite).toBeDefined();
   });
 
-  it('rejects rename to an existing entry name and surfaces an error banner', () => {
+  it('rejects rename to an existing entry name and reports a validation error', () => {
     const onChange = vi.fn();
+    const onValidationError = vi.fn();
     const baseRecord = {
       foo: { type: 'sse', url: 'https://x.com' },
       bar: { type: 'sse', url: 'https://y.com' },
@@ -546,6 +555,7 @@ describe('McpServersRenderer — handleRename', () => {
       baseRecord,
       yamlBaseKeys: new Set<string>(),
       onChange,
+      onValidationError,
     });
 
     fireEvent.click(screen.getByText('foo'));
@@ -555,7 +565,7 @@ describe('McpServersRenderer — handleRename', () => {
       ([p]) => typeof p === 'string' && p.startsWith('mcpServers.bar.'),
     );
     expect(renamePaths).toEqual([]);
-    expect(screen.getByText('com_config_server_name_exists')).toBeInTheDocument();
+    expect(onValidationError).toHaveBeenCalledWith('com_config_server_name_exists');
   });
 });
 
