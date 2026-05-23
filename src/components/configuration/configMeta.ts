@@ -109,6 +109,11 @@ export const SECTION_META: Record<
     descriptionKey: 'com_config_section_fileStrategies_desc',
     tab: 'files',
   },
+  cloudfront: {
+    titleKey: 'com_config_section_cloudfront',
+    descriptionKey: 'com_config_section_cloudfront_desc',
+    tab: 'files',
+  },
   imageOutputType: {
     titleKey: 'com_config_section_imageOutputType',
     descriptionKey: 'com_config_section_imageOutputType_desc',

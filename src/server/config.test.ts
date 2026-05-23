@@ -634,8 +634,22 @@ describe('validateFieldValue', () => {
  *    that LibreChat would reject at startup
  * -----------------------------------------------------------------------*/
 
+/** Per-path sample overrides for fields whose schema applies stricter
+ *  validation than the generic control sample (URLs, host:port, etc.). */
+const SAMPLE_OVERRIDES: Record<string, unknown> = {
+  'cloudfront.domain': 'https://example.com',
+  'cloudfront.cookieDomain': '.example.com',
+  'mcpSettings.allowedAddresses': ['localhost:11434'],
+  'actions.allowedAddresses': ['localhost:11434'],
+  'endpoints.allowedAddresses': ['localhost:11434'],
+  'endpoints.agents.remoteApi.auth.oidc.issuer': 'https://example.com',
+  'endpoints.agents.remoteApi.auth.oidc.jwksUri': 'https://example.com/.well-known/jwks.json',
+  'summarization.trigger': { type: 'token_ratio', value: 0.5 },
+};
+
 /** Generates a representative value that a given UI control would produce. */
-function sampleValueForControl(field: t.SchemaField): unknown {
+function sampleValueForControl(field: t.SchemaField, path?: string): unknown {
+  if (path && path in SAMPLE_OVERRIDES) return SAMPLE_OVERRIDES[path];
   const control = getControlType(field);
   switch (control) {
     case 'toggle':
@@ -733,7 +747,7 @@ describe('control → value → safeParse round-trip (real configSchema)', () =>
     const control = getControlType(field);
 
     it(`${path} (${field.type} → ${control}): sample value passes safeParse`, () => {
-      const value = sampleValueForControl(field);
+      const value = sampleValueForControl(field, path);
 
       const sub = resolveSubSchema(realConfigSchema, path.split('.'));
       if (!sub) return;
