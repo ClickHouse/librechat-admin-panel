@@ -754,10 +754,21 @@ export function McpServersRenderer(props: t.FieldRendererProps) {
     recordRef.current = record;
   }, [record]);
 
+  /** ConfigPage passes a fresh inline arrow each render for onValidationError, and useLocalize returns a new function reference each render too; without these refs the create/rename callbacks below would change identity every render and defeat the memo on McpEntryRow. */
+  const onValidationErrorRef = useRef(onValidationError);
+  useEffect(() => {
+    onValidationErrorRef.current = onValidationError;
+  }, [onValidationError]);
+
+  const localizeRef = useRef(localize);
+  useEffect(() => {
+    localizeRef.current = localize;
+  }, [localize]);
+
   const handleCreate = useCallback(
     (serverName: string, entry: Record<string, t.ConfigValue>) => {
       if (serverName.includes('.')) {
-        onValidationError?.(localize('com_config_server_name_no_dots'));
+        onValidationErrorRef.current?.(localizeRef.current('com_config_server_name_no_dots'));
         return;
       }
       if (
@@ -765,7 +776,7 @@ export function McpServersRenderer(props: t.FieldRendererProps) {
         serverName === 'constructor' ||
         serverName === 'prototype'
       ) {
-        onValidationError?.(localize('com_config_server_name_invalid'));
+        onValidationErrorRef.current?.(localizeRef.current('com_config_server_name_invalid'));
         return;
       }
       for (const [fieldKey, fieldValue] of Object.entries(entry)) {
@@ -784,7 +795,7 @@ export function McpServersRenderer(props: t.FieldRendererProps) {
       }
       setJustAddedKey(serverName);
     },
-    [onChange, path, localize, onValidationError],
+    [onChange, path],
   );
 
   const handleRemove = useCallback(
@@ -830,15 +841,15 @@ export function McpServersRenderer(props: t.FieldRendererProps) {
       const baseRecord = baseRecordRef.current;
       const record = recordRef.current;
       if (newKey.includes('.')) {
-        onValidationError?.(localize('com_config_server_name_no_dots'));
+        onValidationErrorRef.current?.(localizeRef.current('com_config_server_name_no_dots'));
         return;
       }
       if (newKey === '__proto__' || newKey === 'constructor' || newKey === 'prototype') {
-        onValidationError?.(localize('com_config_server_name_invalid'));
+        onValidationErrorRef.current?.(localizeRef.current('com_config_server_name_invalid'));
         return;
       }
       if (Object.hasOwn(record, newKey)) {
-        onValidationError?.(localize('com_config_server_name_exists'));
+        onValidationErrorRef.current?.(localizeRef.current('com_config_server_name_exists'));
         return;
       }
       const oldPrefixFull = `${path}.${oldKey}`;
@@ -878,7 +889,7 @@ export function McpServersRenderer(props: t.FieldRendererProps) {
       /** See $unset note in handleRemove. */
       onChange(`${path}.${oldKey}`, undefined);
     },
-    [onChange, path, localize, onValidationError],
+    [onChange, path],
   );
 
   return (
