@@ -781,6 +781,8 @@ export function McpServersRenderer(props: t.FieldRendererProps) {
 
   const handleRemove = useCallback(
     (key: string) => {
+      /** Dotted entry names cannot survive the per-leaf save path; the row hides the trash button for them, this is defense-in-depth so no programmatic caller can corrupt sibling subtrees by emitting `mcpServers.<dotted>.<...>` writes. */
+      if (key.includes('.')) return;
       const editedValues = editedValuesRef.current;
       const baseRecord = baseRecordRef.current;
       const prefix = `${path}.${key}.`;
@@ -814,6 +816,8 @@ export function McpServersRenderer(props: t.FieldRendererProps) {
       if (newKey === oldKey) {
         return;
       }
+      /** Same dotted-key reasoning as handleRemove; defense-in-depth even though the row hides the rename pencil. */
+      if (oldKey.includes('.')) return;
       const editedValues = editedValuesRef.current;
       const baseRecord = baseRecordRef.current;
       const record = recordRef.current;
@@ -953,13 +957,18 @@ const McpEntryRow = memo(function McpEntryRowImpl({
     effectiveType !== rawType ? { ...entryObj, type: effectiveType } : entryValue;
 
   const entryPathBase = `${path}.${entryKey}`;
-  const lockedKeys = isYamlSource ? YAML_LOCKED_FIELDS : undefined;
+  /** Dotted entry names predate the dot-rejecting create/rename validators; the save endpoint parses fieldPath as dot-delimited so any per-leaf write under such a key collides with a parallel "legacy" → "dotted" nested-object interpretation. Render them read-only so they stay visible in the list but never round-trip through the per-field save API. */
+  const isDottedLegacy = entryKey.includes('.');
+  const isReadOnly = !!disabled || isDottedLegacy;
+  const isLockedIdentity = isYamlSource || isDottedLegacy;
+  const lockedKeys = isYamlSource && !isDottedLegacy ? YAML_LOCKED_FIELDS : undefined;
 
   const entryOnChange = useCallback(
     (leafKey: string, leafValue: t.ConfigValue) => {
+      if (isDottedLegacy) return;
       onChange(`${entryPathBase}.${leafKey}`, leafValue);
     },
-    [onChange, entryPathBase],
+    [onChange, entryPathBase, isDottedLegacy],
   );
 
   const renderEntryFields: t.CollectionRenderFields = useCallback(
@@ -969,19 +978,20 @@ const McpEntryRow = memo(function McpEntryRowImpl({
         parentValue={ev}
         parentPath={ep}
         onChange={entryOnChange}
-        disabled={disabled}
+        disabled={isReadOnly}
         lockedKeys={lockedKeys}
       />
     ),
-    [entryOnChange, disabled, lockedKeys],
+    [entryOnChange, isReadOnly, lockedKeys],
   );
 
   /** Required by ObjectEntryCard's onValueChange contract; unused on leaf edits. */
   const handleWholeEntryChange = useCallback(
     (v: t.ConfigValue) => {
+      if (isDottedLegacy) return;
       onChange(entryPathBase, v);
     },
-    [onChange, entryPathBase],
+    [onChange, entryPathBase, isDottedLegacy],
   );
 
   return (
@@ -991,9 +1001,9 @@ const McpEntryRow = memo(function McpEntryRowImpl({
       fields={fields}
       value={displayValue}
       onValueChange={handleWholeEntryChange}
-      onRemove={disabled || isYamlSource ? undefined : () => onRemove(entryKey)}
-      onRename={disabled || isYamlSource ? undefined : (renamed) => onRename(entryKey, renamed)}
-      disabled={disabled}
+      onRemove={isReadOnly || isLockedIdentity ? undefined : () => onRemove(entryKey)}
+      onRename={isReadOnly || isLockedIdentity ? undefined : (renamed) => onRename(entryKey, renamed)}
+      disabled={isReadOnly}
       defaultExpanded={entryKey === justAddedKey}
       renderFields={renderEntryFields}
     />

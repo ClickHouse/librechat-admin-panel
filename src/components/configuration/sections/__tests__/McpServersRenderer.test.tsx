@@ -369,12 +369,10 @@ describe('McpServersRenderer — rejects dotted server names', () => {
 describe('McpServersRenderer — legacy dotted entry keys', () => {
   it('groups edits under the dotted base key instead of splitting on the first dot', () => {
     const baseRecord = {
-      'legacy.dotted': { type: 'sse', url: 'https://old.example.com' },
+      'legacy.dotted': { type: 'sse', url: 'https://new.example.com' },
     };
-    const editedValues = { 'mcpServers.legacy.dotted.url': 'https://new.example.com' };
     const { container } = renderRenderer({
       baseRecord,
-      editedValues,
       yamlBaseKeys: new Set<string>(),
     });
 
@@ -386,7 +384,7 @@ describe('McpServersRenderer — legacy dotted entry keys', () => {
     expect(url!.value).toBe('https://new.example.com');
   });
 
-  it('clears the dotted base entry on remove, not a phantom shortened key', () => {
+  it('renders dotted legacy entries read-only with no rename or delete affordances', () => {
     const onChange = vi.fn();
     const baseRecord = {
       'legacy.dotted': { type: 'sse', url: 'https://old.example.com' },
@@ -397,21 +395,30 @@ describe('McpServersRenderer — legacy dotted entry keys', () => {
       onChange,
     });
 
-    const trashBtn = container.querySelector(
-      'button[aria-label^="com_ui_delete"]',
-    ) as HTMLButtonElement | null;
-    expect(trashBtn).not.toBeNull();
-    fireEvent.click(trashBtn!);
+    fireEvent.click(screen.getByText('legacy.dotted'));
+    const url = container.querySelector('input#legacy-dotted-url') as HTMLInputElement | null;
+    expect(url).not.toBeNull();
+    expect(url!.hasAttribute('disabled')).toBe(true);
 
-    const undefinedPaths = onChange.mock.calls.filter(([, v]) => v === undefined).map(([p]) => p);
-    expect(undefinedPaths).toEqual(
-      expect.arrayContaining([
-        'mcpServers.legacy.dotted',
-        'mcpServers.legacy.dotted.type',
-        'mcpServers.legacy.dotted.url',
-      ]),
+    expect(container.querySelector('button[aria-label^="com_ui_delete"]')).toBeNull();
+    expect(container.querySelector('button[aria-label^="com_a11y_rename_entry"]')).toBeNull();
+  });
+
+  it('emits no per-leaf writes for a dotted entry even if the field would otherwise fire onChange', () => {
+    const onChange = vi.fn();
+    const baseRecord = {
+      'legacy.dotted': { type: 'sse', url: 'https://old.example.com' },
+    };
+    renderRenderer({
+      baseRecord,
+      yamlBaseKeys: new Set<string>(),
+      onChange,
+    });
+
+    const dottedWrites = onChange.mock.calls.filter(([p]) =>
+      typeof p === 'string' && p.startsWith('mcpServers.legacy'),
     );
-    expect(undefinedPaths).not.toContain('mcpServers.legacy');
+    expect(dottedWrites).toEqual([]);
   });
 });
 
