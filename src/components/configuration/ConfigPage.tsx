@@ -423,9 +423,10 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
         }
         const indexMatch = /^(.+)\.\d+$/.exec(path);
         if (indexMatch) delete next[indexMatch[1]];
+        /** Two-way dedup: drop ancestors that the new leaf supersedes AND descendants that the new parent supersedes. Without the descendant sweep, a rename's per-leaf writes plus a subsequent parent-level edit of the same subtree would both reach the field PATCH endpoint and race order-dependently against each other. */
         for (const existing of Object.keys(next)) {
           if (existing === path) continue;
-          if (path.startsWith(`${existing}.`)) {
+          if (path.startsWith(`${existing}.`) || existing.startsWith(`${path}.`)) {
             delete next[existing];
           }
         }
