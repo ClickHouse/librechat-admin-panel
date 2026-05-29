@@ -848,7 +848,17 @@ export const getBaseConfigFn = createServerFn({ method: 'GET' }).handler(async (
     const baseOnly = normalizeAppServiceKeys(baseOnlyRaw);
     const mcp = baseOnly.mcpServers;
     if (mcp && typeof mcp === 'object' && !Array.isArray(mcp)) {
-      yamlMcpKeys = Object.keys(mcp as Record<string, t.ConfigValue>);
+      /** A LibreChat that predates the companion baseOnly support returns the same merged payload for both endpoints, so the response itself is not a reliable signal. When admin overrides on mcpServers exist (so we _expect_ baseOnly to be a strict subset of regular) but the two responses are byte-identical, treat the backend as legacy and fall back to "lock nothing" rather than locking admin-only servers. */
+      const mcpOverrides =
+        dbOverrides && typeof dbOverrides.mcpServers === 'object' && dbOverrides.mcpServers !== null
+          ? (dbOverrides.mcpServers as Record<string, t.ConfigValue>)
+          : null;
+      const hasMcpOverrides = !!mcpOverrides && Object.keys(mcpOverrides).length > 0;
+      const baseOnlyIsAuthoritative =
+        !hasMcpOverrides || JSON.stringify(mcp) !== JSON.stringify(config.mcpServers);
+      if (baseOnlyIsAuthoritative) {
+        yamlMcpKeys = Object.keys(mcp as Record<string, t.ConfigValue>);
+      }
     }
   }
 
