@@ -889,6 +889,7 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
               showConfiguredOnly={showConfiguredOnly}
               baseRecordKeys={baseRecordKeys}
               onValidationError={(message) => showToast({ type: 'error', message }, 5000)}
+              scopeMode={isEditingScope}
             />
           </div>
         </div>

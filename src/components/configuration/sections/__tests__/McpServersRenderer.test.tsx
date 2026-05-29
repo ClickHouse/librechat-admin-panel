@@ -174,6 +174,7 @@ function renderRenderer({
   yamlBaseKeys,
   onChange = vi.fn(),
   onValidationError = vi.fn(),
+  scopeMode,
 }: {
   baseRecord: Record<string, t.ConfigValue>;
   editedValues?: t.FlatConfigMap;
@@ -181,6 +182,7 @@ function renderRenderer({
   yamlBaseKeys?: Set<string>;
   onChange?: (path: string, value: t.ConfigValue) => void;
   onValidationError?: (message: string) => void;
+  scopeMode?: boolean;
 }) {
   const fields = fieldsForMcp();
   const props: t.FieldRendererProps = {
@@ -197,6 +199,7 @@ function renderRenderer({
     dbOverridePaths,
     yamlBaseKeys,
     onValidationError,
+    scopeMode,
   };
   return {
     ...render(<McpServersRenderer {...props} />),
@@ -363,6 +366,49 @@ describe('McpServersRenderer — rejects dotted server names', () => {
       expect.stringContaining('mcpServers.has.dots'),
       expect.anything(),
     );
+  });
+});
+
+describe('McpServersRenderer — scope mode', () => {
+  it('disables create and hides rename/delete in scope mode', () => {
+    const baseRecord = {
+      adminOnly: { type: 'sse', url: 'https://admin.example.com' },
+    };
+    const { container } = renderRenderer({
+      baseRecord,
+      yamlBaseKeys: new Set<string>(),
+      scopeMode: true,
+    });
+
+    const createBtn = screen.getByText('com_config_create_mcp_server')
+      .closest('button') as HTMLButtonElement;
+    expect(createBtn.hasAttribute('disabled')).toBe(true);
+
+    expect(container.querySelector('button[aria-label^="com_ui_delete"]')).toBeNull();
+    expect(container.querySelector('button[aria-label^="com_a11y_rename_entry"]')).toBeNull();
+  });
+
+  it('still allows field-level edits to flow as per-leaf scope overrides', () => {
+    const onChange = vi.fn();
+    const baseRecord = {
+      adminOnly: { type: 'sse', url: 'https://admin.example.com' },
+    };
+    const { container } = renderRenderer({
+      baseRecord,
+      yamlBaseKeys: new Set<string>(),
+      scopeMode: true,
+      onChange,
+    });
+
+    fireEvent.click(screen.getByText('adminOnly'));
+    const urlInput = container.querySelector('input#adminOnly-url') as HTMLInputElement | null;
+    expect(urlInput).not.toBeNull();
+    expect(urlInput!.hasAttribute('disabled')).toBe(false);
+    fireEvent.change(urlInput!, { target: { value: 'https://override.example.com' } });
+    fireEvent.blur(urlInput!);
+
+    const urlCalls = onChange.mock.calls.filter(([p]) => p === 'mcpServers.adminOnly.url');
+    expect(urlCalls.length).toBeGreaterThan(0);
   });
 });
 

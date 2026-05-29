@@ -87,6 +87,8 @@ export interface ConfigTabContentProps {
   /** YAML-defined entry keys per section, keyed by parent path. */
   baseRecordKeys?: Record<string, Set<string>>;
   onValidationError?: (message: string) => void;
+  /** True when editing a role/group scope rather than the base config; renderers may suppress structural actions (rename/delete of inherited entries) that can't be expressed without a scope-level tombstone. */
+  scopeMode?: boolean;
 }
 
 export interface ConfigTableOfContentsProps {
@@ -231,6 +233,8 @@ export interface FieldRendererProps {
   /** YAML-defined entry keys for the section being rendered. */
   yamlBaseKeys?: Set<string>;
   onValidationError?: (message: string) => void;
+  /** True when editing a role/group scope. Renderers that manage record entries should suppress rename/delete affordances because per-leaf saves alone can't tombstone an inherited entry. */
+  scopeMode?: boolean;
 }
 
 export interface ImportYamlDialogProps {

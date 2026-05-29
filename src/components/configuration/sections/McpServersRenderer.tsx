@@ -673,6 +673,7 @@ export function McpServersRenderer(props: t.FieldRendererProps) {
     editedValues,
     yamlBaseKeys,
     onValidationError,
+    scopeMode,
   } = props;
   const localize = useLocalize();
   const [createOpen, setCreateOpen] = useState(false);
@@ -917,13 +918,18 @@ export function McpServersRenderer(props: t.FieldRendererProps) {
         <button
           type="button"
           onClick={() => setCreateOpen(true)}
-          disabled={disabled}
+          disabled={disabled || scopeMode}
           className="config-add-btn"
         >
           <Icon name="plus" size="sm" />
           <span>{localize('com_config_create_mcp_server')}</span>
         </button>
       </div>
+      {scopeMode && (
+        <p className="text-sm text-(--cui-color-text-muted)">
+          {localize('com_config_mcp_scope_structural_disabled')}
+        </p>
+      )}
       {entries.map(([key, entryValue]) => (
         <McpEntryRow
           key={key}
@@ -933,6 +939,7 @@ export function McpServersRenderer(props: t.FieldRendererProps) {
           path={path}
           disabled={disabled}
           isYamlSource={yamlSourceKeys.has(key)}
+          scopeMode={scopeMode}
           onChange={onChange}
           onRemove={handleRemove}
           onRename={handleRename}
@@ -971,6 +978,7 @@ const McpEntryRow = memo(function McpEntryRowImpl({
   path,
   disabled,
   isYamlSource,
+  scopeMode,
   onChange,
   onRemove,
   onRename,
@@ -982,6 +990,7 @@ const McpEntryRow = memo(function McpEntryRowImpl({
   path: string;
   disabled?: boolean;
   isYamlSource: boolean;
+  scopeMode?: boolean;
   onChange: (path: string, value: t.ConfigValue) => void;
   onRemove: (key: string) => void;
   onRename: (oldKey: string, newKey: string) => void;
@@ -998,7 +1007,8 @@ const McpEntryRow = memo(function McpEntryRowImpl({
   /** Dotted entry names predate the dot-rejecting create/rename validators; the save endpoint parses fieldPath as dot-delimited so any per-leaf write under such a key collides with a parallel "legacy" → "dotted" nested-object interpretation. Render them read-only so they stay visible in the list but never round-trip through the per-field save API. */
   const isDottedLegacy = entryKey.includes('.');
   const isReadOnly = !!disabled || isDottedLegacy;
-  const isLockedIdentity = isYamlSource || isDottedLegacy;
+  /** Scope mode can't tombstone an inherited entry through per-leaf saves alone, so rename/delete are unreachable until the backend grows tombstone support; field edits still produce per-leaf scope overrides as expected. */
+  const isLockedIdentity = isYamlSource || isDottedLegacy || !!scopeMode;
   const lockedKeys = isYamlSource && !isDottedLegacy ? YAML_LOCKED_FIELDS : undefined;
 
   const entryOnChange = useCallback(

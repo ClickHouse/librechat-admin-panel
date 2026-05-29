@@ -78,6 +78,7 @@
   "com_config_server_name_no_dots": "Server name cannot contain dots",
   "com_config_server_name_invalid": "Server name is not allowed",
   "com_config_server_missing_required": "Missing required field: {{field}}",
+  "com_config_mcp_scope_structural_disabled": "Renaming, creating, and removing MCP servers from a role or group scope is not supported. Make these changes in the base configuration; field-level overrides still work in this scope.",
   "com_config_group_connection": "Connection",
   "com_config_group_authentication": "Authentication",
   "com_config_group_api_key": "API key",
