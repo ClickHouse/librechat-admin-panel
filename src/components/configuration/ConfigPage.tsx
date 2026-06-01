@@ -403,16 +403,14 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
         const isContainerDelete =
           value === undefined &&
           (baselineIntermediates.has(path) || baselineContainerPaths.has(path));
-        if (match && !isContainerDelete) {
+        /** When the user deleted a container entry and is now writing descendants under it (delete-then-recreate of an MCP server), the new leaf must persist even if it matches baseline so the post-DELETE recreate is not missing required fields, and the ancestor-undefined must outlive the descendant write so handleConfirmSave can DELETE the entry before PATCHing the new leaves. */
+        const hasPendingAncestorDelete = Object.keys(prev).some(
+          (existing) =>
+            existing !== path && path.startsWith(`${existing}.`) && prev[existing] === undefined,
+        );
+        if (match && !isContainerDelete && !hasPendingAncestorDelete) {
           const next = { ...prev };
           delete next[path];
-          /** Drop any orphaned ancestor `undefined` writes; a leaf returning to baseline means the user is re-asserting that subtree, so a stale "delete this whole entry" left over from a prior remove (e.g. delete-then-recreate-at-baseline) must not survive to hide the resurrected entry. */
-          for (const existing of Object.keys(next)) {
-            if (existing === path) continue;
-            if (path.startsWith(`${existing}.`) && next[existing] === undefined) {
-              delete next[existing];
-            }
-          }
           return next;
         }
         const next = { ...prev, [path]: value };
@@ -424,10 +422,13 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
         }
         const indexMatch = /^(.+)\.\d+$/.exec(path);
         if (indexMatch) delete next[indexMatch[1]];
-        /** Two-way dedup: drop ancestors that the new leaf supersedes AND descendants that the new parent supersedes. Without the descendant sweep, a rename's per-leaf writes plus a subsequent parent-level edit of the same subtree would both reach the field PATCH endpoint and race order-dependently against each other. */
+        /** Two-way dedup: drop ancestors that the new leaf supersedes AND descendants that the new parent supersedes. An ancestor whose value is `undefined` expresses "delete this whole subtree" and must outlive subsequent descendant writes so DELETE-then-PATCH ordering at save time can fully replace the entry instead of leaking stale fields. */
         for (const existing of Object.keys(next)) {
           if (existing === path) continue;
-          if (path.startsWith(`${existing}.`) || existing.startsWith(`${path}.`)) {
+          const newIsDescendant = path.startsWith(`${existing}.`);
+          const newIsAncestor = existing.startsWith(`${path}.`);
+          if (newIsDescendant && next[existing] === undefined) continue;
+          if (newIsDescendant || newIsAncestor) {
             delete next[existing];
           }
         }
@@ -558,41 +559,36 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
     showToast({ type: 'saving' });
 
     try {
-      const promises: Promise<unknown>[] = [];
-
-      if (saves.length > 0) {
-        if (isEditingScope) {
-          promises.push(
-            bulkSaveProfileValuesFn({
-              data: {
-                principalType: editingScope!.principalType,
-                principalId: editingScope!.principalId,
-                entries: saves,
-              },
-            }),
-          );
-        } else {
-          promises.push(saveBaseConfigFn({ data: { entries: saves } }));
-        }
-      }
-
-      for (const fieldPath of resets) {
-        if (isEditingScope) {
-          promises.push(
-            removeFieldProfileValueFn({
+      /** Resets must land before saves so a delete-then-recreate at the same path (e.g. MCP entry replaced with different fields) wipes stale fields first and the new leaf PATCHes don't race against the DELETE. */
+      if (resets.length > 0) {
+        const resetPromises = resets.map((fieldPath) => {
+          if (isEditingScope) {
+            return removeFieldProfileValueFn({
               data: {
                 fieldPath,
                 principalType: editingScope!.principalType,
                 principalId: editingScope!.principalId,
               },
-            }),
-          );
-        } else {
-          promises.push(resetBaseConfigFieldFn({ data: { fieldPath } }));
-        }
+            });
+          }
+          return resetBaseConfigFieldFn({ data: { fieldPath } });
+        });
+        await Promise.all(resetPromises);
       }
 
-      await Promise.all(promises);
+      if (saves.length > 0) {
+        if (isEditingScope) {
+          await bulkSaveProfileValuesFn({
+            data: {
+              principalType: editingScope!.principalType,
+              principalId: editingScope!.principalId,
+              entries: saves,
+            },
+          });
+        } else {
+          await saveBaseConfigFn({ data: { entries: saves } });
+        }
+      }
 
       if (isEditingScope) {
         invalidateAndResetScope();

@@ -100,17 +100,7 @@ function applyLeafOverlay(
 }
 
 function deepClone(value: Record<string, t.ConfigValue>): Record<string, t.ConfigValue> {
-  const result: Record<string, t.ConfigValue> = {};
-  for (const [k, v] of Object.entries(value)) {
-    if (v !== null && typeof v === 'object' && !Array.isArray(v)) {
-      result[k] = deepClone(v as Record<string, t.ConfigValue>);
-    } else if (Array.isArray(v)) {
-      result[k] = v.slice();
-    } else {
-      result[k] = v;
-    }
-  }
-  return result;
+  return JSON.parse(JSON.stringify(value)) as Record<string, t.ConfigValue>;
 }
 
 function isPlainObject(value: t.ConfigValue): value is Record<string, t.ConfigValue> {
