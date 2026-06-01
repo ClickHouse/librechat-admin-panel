@@ -403,11 +403,16 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
         const isContainerDelete =
           value === undefined &&
           (baselineIntermediates.has(path) || baselineContainerPaths.has(path));
-        /** When the user deleted a container entry and is now writing descendants under it (delete-then-recreate of an MCP server), the new leaf must persist even if it matches baseline so the post-DELETE recreate is not missing required fields, and the ancestor-undefined must outlive the descendant write so handleConfirmSave can DELETE the entry before PATCHing the new leaves. */
-        const hasPendingAncestorDelete = Object.keys(prev).some(
-          (existing) =>
-            existing !== path && path.startsWith(`${existing}.`) && prev[existing] === undefined,
-        );
+        /** When the user deleted a container entry and is now writing descendants under it (delete-then-recreate of an MCP server), the new leaf must persist even if it matches baseline so the post-DELETE recreate is not missing required fields, and the ancestor-undefined must outlive the descendant write so handleConfirmSave can DELETE the entry before PATCHing the new leaves. Walk ancestors directly instead of scanning every pending edit; rename/remove emit one onChange per leaf and the prior O(n)-per-call scan compounded to O(n*m) work per event. */
+        const hasPendingAncestorDelete = (() => {
+          let lastDot = path.lastIndexOf('.');
+          while (lastDot > 0) {
+            const ancestor = path.slice(0, lastDot);
+            if (ancestor in prev && prev[ancestor] === undefined) return true;
+            lastDot = ancestor.lastIndexOf('.');
+          }
+          return false;
+        })();
         if (match && !isContainerDelete && !hasPendingAncestorDelete) {
           const next = { ...prev };
           delete next[path];
