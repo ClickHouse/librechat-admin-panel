@@ -926,7 +926,7 @@ export const saveBaseConfigFn = createServerFn({ method: 'POST' })
       entries: z
         .array(z.object({ fieldPath: safeFieldPath, value: z.unknown() }))
         .min(1)
-        .max(100),
+        .max(500),
     }),
   )
   .handler(async ({ data }) => {

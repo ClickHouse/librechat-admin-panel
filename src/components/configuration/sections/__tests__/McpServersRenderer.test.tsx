@@ -175,7 +175,6 @@ function renderRenderer({
   yamlBaseKeys,
   onChange = vi.fn(),
   onValidationError = vi.fn(),
-  scopeMode,
 }: {
   baseRecord: Record<string, t.ConfigValue>;
   editedValues?: t.FlatConfigMap;
@@ -183,7 +182,6 @@ function renderRenderer({
   yamlBaseKeys?: Set<string>;
   onChange?: (path: string, value: t.ConfigValue) => void;
   onValidationError?: (message: string) => void;
-  scopeMode?: boolean;
 }) {
   const fields = fieldsForMcp();
   const props: t.FieldRendererProps = {
@@ -200,7 +198,6 @@ function renderRenderer({
     dbOverridePaths,
     yamlBaseKeys,
     onValidationError,
-    scopeMode,
   };
   return {
     ...render(<McpServersRenderer {...props} />),
@@ -445,17 +442,29 @@ describe('validateMcpCrossField', () => {
     expect(errors.length).toBe(1);
     expect(errors[0].missingField).toBe('url');
   });
+
+  it('flags a stdio-by-inference entry whose command is cleared, falling back to the baseline transport when the merged entry loses its discriminator', () => {
+    /** YAML can omit `type` for stdio (the backend Zod schema defaults it). The renderer's transport inference relies on `command` to identify stdio in that case. When the user clears `command`, the merged entry has no discriminator and inferTransportType(entry) returns ''. Without a baseline fallback the validator skipped the required-field check and let the broken entry save. */
+    const baseline = {
+      foo: { command: 'node', args: ['index.js'] },
+    };
+    const errors = validateMcpCrossField(baseline, [
+      ['mcpServers.foo.command', ''],
+    ]);
+    expect(errors.length).toBe(1);
+    expect(errors[0].entryKey).toBe('foo');
+    expect(errors[0].missingField).toBe('command');
+  });
 });
 
-describe('McpServersRenderer — scope mode', () => {
-  it('enables create and shows rename/delete affordances in scope mode (tombstone-backed)', () => {
+describe('McpServersRenderer — non-YAML entry identity affordances', () => {
+  it('enables create and shows rename/delete affordances for a non-YAML entry', () => {
     const baseRecord = {
       adminOnly: { type: 'sse', url: 'https://admin.example.com' },
     };
     const { container } = renderRenderer({
       baseRecord,
       yamlBaseKeys: new Set<string>(),
-      scopeMode: true,
     });
 
     const createBtn = screen.getByText('com_config_create_mcp_server')
@@ -467,7 +476,7 @@ describe('McpServersRenderer — scope mode', () => {
     expect(container.querySelector('button[aria-label^="com_a11y_rename_entry"]')).not.toBeNull();
   });
 
-  it('still allows field-level edits to flow as per-leaf scope overrides', () => {
+  it('flows field-level edits as per-leaf onChange writes', () => {
     const onChange = vi.fn();
     const baseRecord = {
       adminOnly: { type: 'sse', url: 'https://admin.example.com' },
@@ -475,7 +484,6 @@ describe('McpServersRenderer — scope mode', () => {
     const { container } = renderRenderer({
       baseRecord,
       yamlBaseKeys: new Set<string>(),
-      scopeMode: true,
       onChange,
     });
 
@@ -490,7 +498,7 @@ describe('McpServersRenderer — scope mode', () => {
     expect(urlCalls.length).toBeGreaterThan(0);
   });
 
-  it('writes undefined at entry-path on delete in scope mode (the existing DELETE field-path cleanly $unsets a scope-tier entry)', () => {
+  it('writes undefined at the entry path on delete (so the DELETE field-path can $unset the entry cleanly)', () => {
     const onChange = vi.fn();
     const baseRecord = {
       adminOnly: { type: 'sse', url: 'https://admin.example.com' },
@@ -498,7 +506,6 @@ describe('McpServersRenderer — scope mode', () => {
     const { container } = renderRenderer({
       baseRecord,
       yamlBaseKeys: new Set<string>(),
-      scopeMode: true,
       onChange,
     });
 
@@ -511,7 +518,7 @@ describe('McpServersRenderer — scope mode', () => {
     expect(entryWrite![1]).toBeUndefined();
   });
 
-  it('writes undefined at old entry-path on rename in scope mode', () => {
+  it('writes undefined at the old entry path on rename and per-leaf writes for the new key', () => {
     const onChange = vi.fn();
     const baseRecord = {
       adminOnly: { type: 'sse', url: 'https://admin.example.com' },
@@ -519,7 +526,6 @@ describe('McpServersRenderer — scope mode', () => {
     const { container } = renderRenderer({
       baseRecord,
       yamlBaseKeys: new Set<string>(),
-      scopeMode: true,
       onChange,
     });
     fireEvent.click(screen.getByText('adminOnly'));

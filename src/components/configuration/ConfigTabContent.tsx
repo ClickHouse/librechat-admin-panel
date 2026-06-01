@@ -56,7 +56,6 @@ export function ConfigTabContent({
   showConfiguredOnly,
   baseRecordKeys,
   onValidationError,
-  scopeMode,
 }: t.ConfigTabContentProps) {
   const localize = useLocalize();
   const fieldsDisabled = readOnly;
@@ -185,7 +184,6 @@ export function ConfigTabContent({
       showConfiguredOnly,
       yamlBaseKeys: baseRecordKeys?.[dataKey],
       onValidationError,
-      scopeMode,
     };
     return (
       <>

@@ -1143,7 +1143,14 @@ export function validateMcpCrossField(
     const entry = merged[entryKey];
     if (!isPlainObject(entry)) continue;
     const rawType = typeof entry.type === 'string' ? entry.type : '';
-    const transportType = rawType || inferTransportType(entry);
+    /** When the user clears the field that was inferring transport on an inferred-stdio entry (no explicit `type`), `inferTransportType(entry)` collapses to '' and the validator would skip required-field checks. Fall back to the baseline's inference so a stdio-by-default server still trips the missing-command check after its discriminator gets cleared. */
+    const baselineEntry = isPlainObject(baseline[entryKey])
+      ? (baseline[entryKey] as Record<string, t.ConfigValue>)
+      : null;
+    const transportType =
+      rawType ||
+      inferTransportType(entry) ||
+      (baselineEntry ? inferTransportType(baselineEntry) : '');
     const normalized = transportType === 'http' ? 'streamable-http' : transportType;
     const required = REQUIRED_BY_TRANSPORT[normalized];
     if (!required) continue;
