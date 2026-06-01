@@ -616,7 +616,6 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
     saving,
     baseActiveConfigValues,
     configValues,
-    isEditingScope,
     localize,
   ]);
 
