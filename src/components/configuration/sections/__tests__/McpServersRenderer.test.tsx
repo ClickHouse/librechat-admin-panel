@@ -443,6 +443,16 @@ describe('validateMcpCrossField', () => {
     expect(errors[0].missingField).toBe('url');
   });
 
+  it('accepts an empty array for stdio args (the Zod schema requires presence but allows []) without flagging it as missing', () => {
+    const baseline = {
+      foo: { type: 'stdio', command: 'node', args: ['index.js'] },
+    };
+    const errors = validateMcpCrossField(baseline, [
+      ['mcpServers.foo.args', []],
+    ]);
+    expect(errors).toEqual([]);
+  });
+
   it('flags a stdio-by-inference entry whose command is cleared, falling back to the baseline transport when the merged entry loses its discriminator', () => {
     /** YAML can omit `type` for stdio (the backend Zod schema defaults it). The renderer's transport inference relies on `command` to identify stdio in that case. When the user clears `command`, the merged entry has no discriminator and inferTransportType(entry) returns ''. Without a baseline fallback the validator skipped the required-field check and let the broken entry save. */
     const baseline = {

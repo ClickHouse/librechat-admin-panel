@@ -576,10 +576,9 @@ function CreateMcpServerDialog({
     const entry: Record<string, t.ConfigValue> = {};
     for (const [key, val] of Object.entries(draft)) {
       if (val === '' || val === undefined || val === null) continue;
-      if (Array.isArray(val) && val.length === 0) continue;
       entry[key] = val;
     }
-    /** Per-leaf saves bypass whole-object Zod validation, so a partial create (e.g. transport `sse` with no url) would persist as an invalid server. Validate transport-specific required fields here while we still hold the dialog draft. */
+    /** Per-leaf saves bypass whole-object Zod validation, so a partial create (e.g. transport `sse` with no url) would persist as an invalid server. Validate transport-specific required fields here while we still hold the dialog draft. An empty array is a valid Zod value for required array fields like stdio `args` (the schema requires presence but accepts `[]`), so do not flag it as missing. */
     const rawType = typeof entry.type === 'string' ? entry.type : '';
     const transportType = rawType || inferTransportType(entry);
     const normalizedTransport = transportType === 'http' ? 'streamable-http' : transportType;
@@ -587,11 +586,7 @@ function CreateMcpServerDialog({
     if (required) {
       for (const field of required) {
         const val = entry[field];
-        const missing =
-          val === undefined ||
-          val === null ||
-          val === '' ||
-          (Array.isArray(val) && val.length === 0);
+        const missing = val === undefined || val === null || val === '';
         if (missing) {
           setError(localize('com_config_server_missing_required', { field }));
           return;
@@ -1162,11 +1157,8 @@ export function validateMcpCrossField(
     if (!required) continue;
     for (const field of required) {
       const v = entry[field];
-      const missing =
-        v === undefined ||
-        v === null ||
-        v === '' ||
-        (Array.isArray(v) && v.length === 0);
+      /** Empty array is a valid Zod value for required array fields like stdio `args` (the schema requires presence, not non-empty). Don't flag it as missing. */
+      const missing = v === undefined || v === null || v === '';
       if (missing) {
         errors.push({ entryKey, missingField: field });
         break;
