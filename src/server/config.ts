@@ -848,17 +848,8 @@ export const getBaseConfigFn = createServerFn({ method: 'GET' }).handler(async (
     const baseOnly = normalizeAppServiceKeys(baseOnlyRaw);
     const mcp = baseOnly.mcpServers;
     if (mcp && typeof mcp === 'object' && !Array.isArray(mcp)) {
-      /** A LibreChat that predates the companion baseOnly support returns the same merged payload for both endpoints, so the response itself is not a reliable signal. When admin overrides on mcpServers exist (so we _expect_ baseOnly to be a strict subset of regular) but the two responses are byte-identical, treat the backend as legacy and fall back to "lock nothing" rather than locking admin-only servers. */
-      const mcpOverrides =
-        dbOverrides && typeof dbOverrides.mcpServers === 'object' && dbOverrides.mcpServers !== null
-          ? (dbOverrides.mcpServers as Record<string, t.ConfigValue>)
-          : null;
-      const hasMcpOverrides = !!mcpOverrides && Object.keys(mcpOverrides).length > 0;
-      const baseOnlyIsAuthoritative =
-        !hasMcpOverrides || JSON.stringify(mcp) !== JSON.stringify(config.mcpServers);
-      if (baseOnlyIsAuthoritative) {
-        yamlMcpKeys = Object.keys(mcp as Record<string, t.ConfigValue>);
-      }
+      /** Trust the baseOnly response when it has a valid mcpServers shape. The previous byte-equality fallback against `config.mcpServers` was a defensive heuristic for hypothetical legacy backends that ignore `?baseOnly`, but it false-negatived whenever an admin override happened to be a no-op (e.g. an admin set `title` to a value that already matched YAML), causing the YAML lock affordances to disappear for entries that should stay locked. The deployed LibreChat supports `?baseOnly` directly, so the heuristic is no longer earning its keep. */
+      yamlMcpKeys = Object.keys(mcp as Record<string, t.ConfigValue>);
     }
   }
 
