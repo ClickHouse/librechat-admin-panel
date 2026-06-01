@@ -6,6 +6,7 @@ import {
   YAML_LOCKED_FIELDS,
   INSPECTOR_DERIVED,
   enumerateLeafPaths,
+  validateMcpCrossField,
 } from '../McpServersRenderer';
 import { createField } from '@/test/fixtures';
 
@@ -366,6 +367,53 @@ describe('McpServersRenderer — rejects dotted server names', () => {
       expect.stringContaining('mcpServers.has.dots'),
       expect.anything(),
     );
+  });
+});
+
+describe('validateMcpCrossField', () => {
+  it('flags an existing sse entry whose transport is changed to stdio without command/args', () => {
+    const baseline = {
+      foo: { type: 'sse', url: 'https://x.example.com' },
+    };
+    const errors = validateMcpCrossField(baseline, [
+      ['mcpServers.foo.type', 'stdio'],
+    ]);
+    expect(errors.length).toBe(1);
+    expect(errors[0].entryKey).toBe('foo');
+    expect(errors[0].missingField).toBe('command');
+  });
+
+  it('passes when a transport switch is accompanied by the new required fields', () => {
+    const baseline = {
+      foo: { type: 'sse', url: 'https://x.example.com' },
+    };
+    const errors = validateMcpCrossField(baseline, [
+      ['mcpServers.foo.type', 'stdio'],
+      ['mcpServers.foo.command', 'node'],
+      ['mcpServers.foo.args', ['index.js']],
+    ]);
+    expect(errors).toEqual([]);
+  });
+
+  it('treats http as streamable-http and ignores entries with no edits', () => {
+    const baseline = {
+      foo: { type: 'streamable-http', url: 'https://x.example.com' },
+      bar: { type: 'stdio', command: 'node', args: ['x.js'] },
+    };
+    const errors = validateMcpCrossField(baseline, [
+      ['mcpServers.foo.type', 'http'],
+    ]);
+    expect(errors).toEqual([]);
+  });
+
+  it('does not flag a deleted entry', () => {
+    const baseline = {
+      foo: { type: 'sse', url: 'https://x.example.com' },
+    };
+    const errors = validateMcpCrossField(baseline, [
+      ['mcpServers.foo', undefined],
+    ]);
+    expect(errors).toEqual([]);
   });
 });
 

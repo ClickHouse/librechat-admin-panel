@@ -35,6 +35,7 @@ import { StickyActionBar } from '@/components/shared';
 import { ConfigTabContent } from './ConfigTabContent';
 import { ImportYamlDialog } from './ImportYamlDialog';
 import { ContentToolbar } from './ContentToolbar';
+import { validateMcpCrossField } from './sections/McpServersRenderer';
 import { mergeIndexedArrayEdits } from './utils';
 import { SystemCapabilities } from '@/constants';
 import { ConfigTabBar } from './ConfigTabBar';
@@ -508,6 +509,31 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
     const touched = [...touchedPaths].filter((p) => p in editedValues);
     if (touched.length === 0) return;
 
+    /** Per-leaf saves can land an MCP entry in a transport state whose required siblings are missing (e.g. type=stdio with no command/args). Server-side per-field validation only sees one path at a time, so do the cross-field check here against the merged effective entry before any PATCH fires. */
+    const mcpBaseline = (() => {
+      const v = configValues?.mcpServers;
+      if (v && typeof v === 'object' && !Array.isArray(v)) {
+        return v as Record<string, t.ConfigValue>;
+      }
+      return {};
+    })();
+    const mcpEdits: Array<[string, t.ConfigValue]> = touched
+      .filter((p) => p.startsWith('mcpServers.'))
+      .map((p) => [p, editedValues[p]] as [string, t.ConfigValue]);
+    if (mcpEdits.length > 0) {
+      const mcpErrors = validateMcpCrossField(mcpBaseline, mcpEdits);
+      if (mcpErrors.length > 0) {
+        const { entryKey, missingField } = mcpErrors[0];
+        const message = localize('com_config_mcp_invalid_after_edit', {
+          entry: entryKey,
+          field: missingField,
+        });
+        setSaveError(message);
+        showToast({ type: 'error', message }, 5000);
+        return;
+      }
+    }
+
     const saves = touched
       .filter((p) => editedValues[p] !== undefined)
       .map((p) => ({
@@ -579,6 +605,8 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
     invalidateAndResetBase,
     invalidateAndResetScope,
     saving,
+    configValues,
+    localize,
   ]);
 
   const serializedEditedValues = useMemo(() => {

@@ -1058,6 +1058,134 @@ const McpEntryRow = memo(function McpEntryRowImpl({
   );
 });
 
+/** Returns the entry key + field-path within it, or null if the path is not under mcpServers. */
+function splitMcpEntryPath(
+  fullPath: string,
+  knownEntryKeys: Iterable<string>,
+): { entryKey: string; field: string } | null {
+  if (!fullPath.startsWith('mcpServers.')) return null;
+  const rest = fullPath.slice('mcpServers.'.length);
+  if (rest === '') return null;
+  let best: string | null = null;
+  for (const key of knownEntryKeys) {
+    if (rest === key || rest.startsWith(`${key}.`)) {
+      if (best === null || key.length > best.length) best = key;
+    }
+  }
+  if (best !== null) {
+    const field = rest.length > best.length ? rest.slice(best.length + 1) : '';
+    return { entryKey: best, field };
+  }
+  const dotIdx = rest.indexOf('.');
+  if (dotIdx === -1) return { entryKey: rest, field: '' };
+  return { entryKey: rest.slice(0, dotIdx), field: rest.slice(dotIdx + 1) };
+}
+
+function setLeafByPath(
+  target: Record<string, t.ConfigValue>,
+  segments: string[],
+  value: t.ConfigValue,
+): void {
+  let cursor: Record<string, t.ConfigValue> = target;
+  for (let i = 0; i < segments.length - 1; i++) {
+    const seg = segments[i];
+    const next = cursor[seg];
+    if (!isPlainObject(next)) cursor[seg] = {};
+    cursor = cursor[seg] as Record<string, t.ConfigValue>;
+  }
+  const leaf = segments[segments.length - 1];
+  if (value === undefined) delete cursor[leaf];
+  else cursor[leaf] = value;
+}
+
+/** Merges leaf edits onto the baseline MCP entries (omitting deleted entries) so callers can validate the post-save state. */
+export function mergeMcpEdits(
+  baseline: Record<string, t.ConfigValue>,
+  edits: Array<[string, t.ConfigValue]>,
+): Record<string, t.ConfigValue> {
+  const baseEntries: Record<string, Record<string, t.ConfigValue>> = {};
+  for (const [k, v] of Object.entries(baseline)) {
+    if (isPlainObject(v)) baseEntries[k] = JSON.parse(JSON.stringify(v));
+  }
+  const knownKeys = new Set(Object.keys(baseEntries));
+  const deletedEntries = new Set<string>();
+  const upsertEntries: Record<string, Record<string, t.ConfigValue>> = {};
+
+  for (const [path, value] of edits) {
+    const split = splitMcpEntryPath(path, knownKeys);
+    if (!split) continue;
+    const { entryKey, field } = split;
+    knownKeys.add(entryKey);
+    if (field === '') {
+      if (value === undefined) {
+        deletedEntries.add(entryKey);
+        delete upsertEntries[entryKey];
+        delete baseEntries[entryKey];
+      } else if (isPlainObject(value)) {
+        upsertEntries[entryKey] = JSON.parse(JSON.stringify(value));
+        deletedEntries.delete(entryKey);
+      }
+      continue;
+    }
+    if (deletedEntries.has(entryKey) && value !== undefined) {
+      deletedEntries.delete(entryKey);
+    }
+    if (!upsertEntries[entryKey]) {
+      upsertEntries[entryKey] = baseEntries[entryKey] ?? {};
+    }
+    setLeafByPath(upsertEntries[entryKey], field.split('.'), value);
+  }
+
+  const result: Record<string, t.ConfigValue> = {};
+  for (const [k, v] of Object.entries(baseEntries)) {
+    if (deletedEntries.has(k)) continue;
+    if (k in upsertEntries) continue;
+    result[k] = v;
+  }
+  for (const [k, v] of Object.entries(upsertEntries)) {
+    if (deletedEntries.has(k)) continue;
+    result[k] = v;
+  }
+  return result;
+}
+
+/** Returns a list of validation errors for affected MCP entries after applying edits, so the save flow can block invalid transport-state combinations the per-leaf PATCH cannot catch. */
+export function validateMcpCrossField(
+  baseline: Record<string, t.ConfigValue>,
+  edits: Array<[string, t.ConfigValue]>,
+): Array<{ entryKey: string; missingField: string }> {
+  const merged = mergeMcpEdits(baseline, edits);
+  const knownKeys = new Set(Object.keys(baseline));
+  const affected = new Set<string>();
+  for (const [path] of edits) {
+    const split = splitMcpEntryPath(path, knownKeys);
+    if (split) affected.add(split.entryKey);
+  }
+  const errors: Array<{ entryKey: string; missingField: string }> = [];
+  for (const entryKey of affected) {
+    const entry = merged[entryKey];
+    if (!isPlainObject(entry)) continue;
+    const rawType = typeof entry.type === 'string' ? entry.type : '';
+    const transportType = rawType || inferTransportType(entry);
+    const normalized = transportType === 'http' ? 'streamable-http' : transportType;
+    const required = REQUIRED_BY_TRANSPORT[normalized];
+    if (!required) continue;
+    for (const field of required) {
+      const v = entry[field];
+      const missing =
+        v === undefined ||
+        v === null ||
+        v === '' ||
+        (Array.isArray(v) && v.length === 0);
+      if (missing) {
+        errors.push({ entryKey, missingField: field });
+        break;
+      }
+    }
+  }
+  return errors;
+}
+
 export {
   YAML_LOCKED_FIELDS,
   INSPECTOR_DERIVED,
