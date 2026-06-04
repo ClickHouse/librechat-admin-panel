@@ -287,17 +287,24 @@ export const requireAuthFn = createServerFn({ method: 'GET' })
     };
   });
 
+const logoutResponseSchema = z.object({ redirect: z.string().optional() });
+
 export const adminLogoutFn = createServerFn({ method: 'POST' }).handler(async () => {
   try {
     const session = await useAppSession();
     const token = session.data.token;
 
+    let redirect: string | undefined;
     if (token) {
       try {
-        await fetch(`${getServerApiUrl()}/api/auth/logout`, {
+        const response = await fetch(`${getServerApiUrl()}/api/auth/logout`, {
           method: 'POST',
           headers: { Authorization: `Bearer ${token}` },
         });
+        const parsed = logoutResponseSchema.safeParse(await response.json().catch(() => ({})));
+        if (parsed.success) {
+          redirect = parsed.data.redirect;
+        }
       } catch {
         // Ignore remote logout errors
       }
@@ -305,7 +312,7 @@ export const adminLogoutFn = createServerFn({ method: 'POST' }).handler(async ()
 
     await clearSession(session);
 
-    return { error: false };
+    return { error: false, redirect };
   } catch (error) {
     console.error('Admin logout error:', error);
     return { error: true, message: 'Logout failed' };

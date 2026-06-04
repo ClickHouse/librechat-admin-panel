@@ -61,7 +61,11 @@ export function Sidebar({ user, collapsed, onToggle }: t.SidebarProps) {
   const handleLogout = async () => {
     setIsLoggingOut(true);
     try {
-      await adminLogoutFn();
+      const result = await adminLogoutFn();
+      if (!result.error && result.redirect) {
+        window.location.href = result.redirect;
+        return;
+      }
       await router.invalidate();
       router.navigate({ to: '/login', search: { redirect: '/' } });
     } catch (error) {
