@@ -341,10 +341,22 @@ describe('partitionScopeResetPaths', () => {
         'mcpServers.github',
         'mcpServers.github.url',
         'interface.modelSelect',
-      ]),
+      ], new Set(['github'])),
     ).toEqual({
       resetPaths: ['mcpServers.github.url', 'interface.modelSelect'],
       tombstonePaths: ['mcpServers.github'],
+    });
+  });
+
+  it('routes whole MCP entry resets to unsets when the entry is scope-local', () => {
+    expect(
+      partitionScopeResetPaths([
+        'mcpServers.scopeOnly',
+        'mcpServers.inherited',
+      ], new Set(['inherited'])),
+    ).toEqual({
+      resetPaths: ['mcpServers.scopeOnly'],
+      tombstonePaths: ['mcpServers.inherited'],
     });
   });
 
@@ -355,7 +367,7 @@ describe('partitionScopeResetPaths', () => {
         'registration.enabled',
         'mcpServers.beta',
         'endpoints.custom.0',
-      ]),
+      ], new Set(['alpha', 'beta'])),
     ).toEqual({
       resetPaths: ['registration.enabled', 'endpoints.custom.0'],
       tombstonePaths: ['mcpServers.alpha', 'mcpServers.beta'],

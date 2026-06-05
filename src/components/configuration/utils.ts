@@ -229,14 +229,18 @@ export function isMcpEntryPath(path: string): boolean {
   return key.length > 0 && !key.includes('.');
 }
 
-export function partitionScopeResetPaths(paths: string[]): {
+export function partitionScopeResetPaths(
+  paths: string[],
+  inheritedMcpKeys: Set<string>,
+): {
   resetPaths: string[];
   tombstonePaths: string[];
 } {
   const resetPaths: string[] = [];
   const tombstonePaths: string[] = [];
   for (const path of paths) {
-    if (isMcpEntryPath(path)) {
+    const key = path.startsWith('mcpServers.') ? path.slice('mcpServers.'.length) : '';
+    if (isMcpEntryPath(path) && inheritedMcpKeys.has(key)) {
       tombstonePaths.push(path);
     } else {
       resetPaths.push(path);

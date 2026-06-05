@@ -558,6 +558,13 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
           : serializeKVPairs(editedValues[p]),
       }));
     const resets = touched.filter((p) => editedValues[p] === undefined);
+    const inheritedMcpKeys = (() => {
+      const source = isEditingScope ? configValues?.mcpServers : undefined;
+      if (source && typeof source === 'object' && !Array.isArray(source)) {
+        return new Set(Object.keys(source as Record<string, t.ConfigValue>));
+      }
+      return new Set<string>();
+    })();
 
     setSaving(true);
     setSaveError(null);
@@ -568,7 +575,10 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
       if (resets.length > 0) {
         const resetPromises = isEditingScope
           ? (() => {
-              const { resetPaths, tombstonePaths } = partitionScopeResetPaths(resets);
+              const { resetPaths, tombstonePaths } = partitionScopeResetPaths(
+                resets,
+                inheritedMcpKeys,
+              );
               return [
                 ...resetPaths.map((fieldPath) =>
                   removeFieldProfileValueFn({
