@@ -328,6 +328,9 @@ export const openIdCheckOptions = queryOptions({
 });
 
 export const checkOpenIdFn = createServerFn({ method: 'GET' }).handler(async () => {
+  if (process.env.ADMIN_SSO_ENABLED === 'false') {
+    return { available: false, ssoOnly: false };
+  }
   const checkUrl = `${getServerApiUrl()}/api/admin/oauth/openid/check`;
   try {
     const response = await fetch(checkUrl);

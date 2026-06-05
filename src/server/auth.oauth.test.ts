@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MISSING_PKCE_VERIFIER_MESSAGE } from './utils/oauth';
 
 const fetchMock = vi.fn();
@@ -44,7 +44,7 @@ vi.mock('./utils/refresh', () => ({
   refreshAdminTokenDeduped: vi.fn(),
 }));
 
-import { oauthExchangeFn } from './auth';
+import { checkOpenIdFn, oauthExchangeFn } from './auth';
 
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -114,5 +114,70 @@ describe('oauthExchangeFn', () => {
     expect(warnSpy).toHaveBeenCalledWith(
       '[oauthExchangeFn] Missing PKCE verifier from admin session; check SESSION_COOKIE_SECURE for HTTP deployments',
     );
+  });
+});
+
+describe('checkOpenIdFn', () => {
+  const originalSsoEnabled = process.env.ADMIN_SSO_ENABLED;
+  const originalSsoOnly = process.env.ADMIN_SSO_ONLY;
+
+  beforeEach(() => {
+    fetchMock.mockReset();
+    warnSpy.mockClear();
+    vi.stubGlobal('fetch', fetchMock);
+    delete process.env.ADMIN_SSO_ENABLED;
+    delete process.env.ADMIN_SSO_ONLY;
+  });
+
+  afterEach(() => {
+    if (originalSsoEnabled === undefined) delete process.env.ADMIN_SSO_ENABLED;
+    else process.env.ADMIN_SSO_ENABLED = originalSsoEnabled;
+    if (originalSsoOnly === undefined) delete process.env.ADMIN_SSO_ONLY;
+    else process.env.ADMIN_SSO_ONLY = originalSsoOnly;
+  });
+
+  it('reports SSO available with auto-redirect off by default', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, {}));
+
+    const result = await checkOpenIdFn();
+
+    expect(result).toEqual({ available: true, ssoOnly: false });
+    expect(fetchMock).toHaveBeenCalledWith('http://librechat.test/api/admin/oauth/openid/check');
+  });
+
+  it('marks the session SSO-only when ADMIN_SSO_ONLY=true', async () => {
+    process.env.ADMIN_SSO_ONLY = 'true';
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, {}));
+
+    const result = await checkOpenIdFn();
+
+    expect(result).toEqual({ available: true, ssoOnly: true });
+  });
+
+  it('hides the SSO button without calling the backend when ADMIN_SSO_ENABLED=false', async () => {
+    process.env.ADMIN_SSO_ENABLED = 'false';
+
+    const result = await checkOpenIdFn();
+
+    expect(result).toEqual({ available: false, ssoOnly: false });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('lets ADMIN_SSO_ENABLED=false take precedence over ADMIN_SSO_ONLY=true', async () => {
+    process.env.ADMIN_SSO_ENABLED = 'false';
+    process.env.ADMIN_SSO_ONLY = 'true';
+
+    const result = await checkOpenIdFn();
+
+    expect(result).toEqual({ available: false, ssoOnly: false });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('reports SSO unavailable when the backend check fails', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(503, {}));
+
+    const result = await checkOpenIdFn();
+
+    expect(result).toEqual({ available: false, ssoOnly: false });
   });
 });
