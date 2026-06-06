@@ -21,9 +21,17 @@ export const Route = createFileRoute('/_app/grants')({
 });
 
 function GrantsRoute() {
-  const { tab } = Route.useSearch();
+  const { tab, entryId } = Route.useSearch();
   const navigate = useNavigate({ from: '/grants' });
-  const activeTab: Tab = isValidTab(tab) ? tab : 'management';
+  /**
+   * Permalinks land here without `tab` set (e.g. `/grants?entryId=abc`), so
+   * default to the audit-log tab when an `entryId` is present so the drawer
+   * actually opens on cold load. `GrantsPage` still falls back to management
+   * for users without `READ_AUDIT_LOG`, so this does not strand anyone on a
+   * tab they cannot read.
+   */
+  const fallbackTab: Tab = entryId ? 'audit-log' : 'management';
+  const activeTab: Tab = isValidTab(tab) ? tab : fallbackTab;
 
   const handleTabChange = (value: string) => {
     if (isValidTab(value)) {

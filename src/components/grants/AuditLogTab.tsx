@@ -173,6 +173,16 @@ export function AuditLogTab() {
   const pageEntries = useMemo<t.AuditLogEntryWithDiff[]>(() => data?.entries ?? [], [data]);
   const total = data?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / AUDIT_LOG_PAGE_SIZE));
+  /**
+   * Surface-level views of `total`/`totalPages` for the footer + pagination
+   * UI. `keepPreviousData` means a failed refetch still has the last page's
+   * counts in `data`, but we render the error EmptyState in the table — so
+   * showing "showing 47 of 482 entries" with working pagination next to a
+   * "failed to load" message is misleading. On error we collapse both to
+   * zero/one so the user sees a clean error state rather than mixed signals.
+   */
+  const displayTotal = isError ? 0 : total;
+  const displayTotalPages = isError ? 1 : totalPages;
 
   useEffect(() => {
     if (currentPage > totalPages) {
@@ -221,6 +231,13 @@ export function AuditLogTab() {
   useEffect(() => {
     if (isFetching) return;
     if (lastAnnouncedSignature.current === filterSignature) return;
+    /**
+     * Don't announce a match count when the fetch failed: the table is showing
+     * an error EmptyState, so reading "X entries match the current filters"
+     * (where X is a stale or zero count) misrepresents what the user can see.
+     * The signature stays untracked so a retry that succeeds will announce.
+     */
+    if (isError) return;
     lastAnnouncedSignature.current = filterSignature;
     /**
      * Announce the full match count, not the per-page slice. The visible
@@ -229,7 +246,7 @@ export function AuditLogTab() {
      * rendered on this page.
      */
     announce(localize('com_a11y_audit_filter_changed', { count: total }));
-  }, [filterSignature, isFetching, total, announce, localize]);
+  }, [filterSignature, isFetching, isError, total, announce, localize]);
 
   const entryOnPage = useMemo(
     () => (entryId ? (pageEntries.find((e) => e.id === entryId) ?? null) : null),
@@ -556,11 +573,15 @@ export function AuditLogTab() {
         </table>
       </div>
 
-      <Pagination currentPage={currentPage} totalPages={totalPages} onPageChange={setCurrentPage} />
+      <Pagination
+        currentPage={currentPage}
+        totalPages={displayTotalPages}
+        onPageChange={setCurrentPage}
+      />
 
       <div className="flex items-center justify-between gap-3 pb-4">
         <p className="text-xs text-(--cui-color-text-muted)" aria-live="polite" aria-atomic="true">
-          {localize('com_audit_entry_count', { count: total })}
+          {localize('com_audit_entry_count', { count: displayTotal })}
         </p>
       </div>
 
