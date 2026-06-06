@@ -579,11 +579,24 @@ export function AuditLogTab() {
         onPageChange={setCurrentPage}
       />
 
-      <div className="flex items-center justify-between gap-3 pb-4">
-        <p className="text-xs text-(--cui-color-text-muted)" aria-live="polite" aria-atomic="true">
-          {localize('com_audit_entry_count', { count: displayTotal })}
-        </p>
-      </div>
+      {/*
+        Hide the count footer entirely on error so the aria-live region does
+        not contradict the table EmptyState by announcing "No entries" when
+        the actual situation is "failed to load". The visible table already
+        carries the error message; doubling up here would mislead screen
+        readers and produce mixed signals.
+      */}
+      {!isError && (
+        <div className="flex items-center justify-between gap-3 pb-4">
+          <p
+            className="text-xs text-(--cui-color-text-muted)"
+            aria-live="polite"
+            aria-atomic="true"
+          >
+            {localize('com_audit_entry_count', { count: displayTotal })}
+          </p>
+        </div>
+      )}
 
       <ScreenReaderAnnouncer message={announcement} />
 
