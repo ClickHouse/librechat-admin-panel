@@ -34,6 +34,11 @@ interface AuditLogDetailDrawerProps {
    * for an entry that is not on the current page. Without this, the drawer
    * would either flicker shut during the fetch or never appear on cold load. */
   loading?: boolean;
+  /** Render a load-error message + close affordance when the single-entry
+   * fetch failed for reasons other than not-found (network failure, 5xx). The
+   * caller is responsible for distinguishing this from `notFound` (which is
+   * the 404 case where the request itself succeeded but the entry is gone). */
+  loadError?: boolean;
 }
 
 function CopyableMono({
@@ -125,6 +130,7 @@ export function AuditLogDetailDrawer({
   onCopyFailed,
   notFound = false,
   loading = false,
+  loadError = false,
 }: AuditLogDetailDrawerProps): ReactElement | null {
   const localize = useLocalize();
 
@@ -137,10 +143,14 @@ export function AuditLogDetailDrawer({
   // false in the same tick that `open` flips false. Without this latch the
   // component would short-circuit to `return null` and skip the exit animation.
   const [latestNotFound, setLatestNotFound] = useState<boolean>(notFound);
+  // Same latch idea for the load-error branch — close should slide the error
+  // shell out rather than yank it.
+  const [latestLoadError, setLatestLoadError] = useState<boolean>(loadError);
   useEffect(() => {
     if (entry) {
       setLatestEntry(entry);
       setLatestNotFound(false);
+      setLatestLoadError(false);
     } else if (notFound) {
       /**
        * A permalink to a missing entry can arrive after the user has opened a
@@ -151,6 +161,12 @@ export function AuditLogDetailDrawer({
        */
       setLatestEntry(null);
       setLatestNotFound(true);
+      setLatestLoadError(false);
+    } else if (loadError) {
+      /** Fetch failed non-404 — surface the error shell + drop any stale latches. */
+      setLatestEntry(null);
+      setLatestNotFound(false);
+      setLatestLoadError(true);
     } else if (loading) {
       /**
        * `entryId` switched to a new row while its fetch is in flight (e.g.
@@ -162,8 +178,9 @@ export function AuditLogDetailDrawer({
        */
       setLatestEntry(null);
       setLatestNotFound(false);
+      setLatestLoadError(false);
     }
-  }, [entry, notFound, loading]);
+  }, [entry, notFound, loading, loadError]);
 
   // Copied-feedback state for the permalink button.
   const [copied, setCopied] = useState(false);
@@ -229,6 +246,62 @@ export function AuditLogDetailDrawer({
             <div className="flex flex-1 items-center justify-center px-4 py-8">
               <LoadingState />
             </div>
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
+    );
+  }
+
+  if (latestLoadError && !latestEntry && !latestNotFound) {
+    return (
+      <Dialog.Root
+        open={open}
+        onOpenChange={(isOpen) => {
+          if (!isOpen) onClose();
+        }}
+      >
+        <Dialog.Portal>
+          <Dialog.Overlay
+            className={cn(
+              'fixed inset-0 z-(--z-overlay) bg-black/30 backdrop-blur-[1px]',
+              'data-[state=closed]:animate-overlay-out data-[state=open]:animate-overlay-in',
+            )}
+          />
+          <Dialog.Content
+            aria-label={localize('com_audit_detail_title')}
+            onEscapeKeyDown={() => onClose()}
+            className={cn(
+              'fixed top-0 right-0 z-(--z-overlay) flex h-full w-full flex-col bg-(--cui-color-background-panel) shadow-xl sm:w-120',
+              'border-l border-(--cui-color-stroke-default)',
+              'will-change-transform',
+              'data-[state=closed]:animate-drawer-out data-[state=open]:animate-drawer-in',
+            )}
+          >
+            <Dialog.Title className="sr-only">{localize('com_audit_detail_title')}</Dialog.Title>
+            <header className="flex items-center justify-between gap-3 border-b border-(--cui-color-stroke-default) px-4 py-3">
+              <span className="text-sm font-semibold text-(--cui-color-text-default)">
+                {localize('com_audit_detail_title')}
+              </span>
+              <IconButton
+                icon="cross"
+                type="ghost"
+                size="sm"
+                aria-label={localize('com_audit_detail_close')}
+                onClick={onClose}
+              />
+            </header>
+            <div className="flex flex-1 items-center justify-center px-4 py-8 text-center">
+              <p className="text-sm text-(--cui-color-text-muted)">
+                {localize('com_audit_detail_load_error')}
+              </p>
+            </div>
+            <footer className="flex items-center justify-end gap-2 border-t border-(--cui-color-stroke-default) px-4 py-3">
+              <Button
+                type="primary"
+                label={localize('com_audit_detail_close')}
+                onClick={onClose}
+              />
+            </footer>
           </Dialog.Content>
         </Dialog.Portal>
       </Dialog.Root>

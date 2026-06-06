@@ -248,9 +248,16 @@ export function AuditLogTab() {
     announce(localize('com_a11y_audit_filter_changed', { count: total }));
   }, [filterSignature, isFetching, isError, total, announce, localize]);
 
+  /**
+   * Gate on `!isError` so a failed list refetch (which `keepPreviousData`
+   * leaves with stale `pageEntries` in memory) does not surface a cached row
+   * here. Falling through to `entryFetch` instead is the right behavior on
+   * error — the single-entry endpoint is independent of the list query.
+   */
   const entryOnPage = useMemo(
-    () => (entryId ? (pageEntries.find((e) => e.id === entryId) ?? null) : null),
-    [pageEntries, entryId],
+    () =>
+      entryId && !isError ? (pageEntries.find((e) => e.id === entryId) ?? null) : null,
+    [pageEntries, entryId, isError],
   );
 
   // Fall back to a direct single-entry fetch when the deep-linked id isn't on
@@ -613,6 +620,15 @@ export function AuditLogTab() {
         open={!!entryId}
         loading={!!entryId && entryFetch.isFetching && !entryOnPage && !entryNotFound}
         notFound={entryNotFound}
+        /**
+         * Non-404 fetch failures (5xx, network) leave `entryNotFound` false
+         * because that flag requires `isSuccess` + `entry === null` for a
+         * positive 404. Without this signal the drawer would render no
+         * content while `open` stayed true — `entryId` stuck in the URL with
+         * no panel and no way to close. Surfacing the error gets a proper
+         * dialog shell with an error message and a close affordance.
+         */
+        loadError={!!entryId && !entryOnPage && entryFetch.isError}
         onClose={closeEntry}
         onCopyPermalink={handleCopyPermalink}
         onCopyFailed={() => announce(localize('com_a11y_copy_failed'))}
