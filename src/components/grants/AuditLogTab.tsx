@@ -55,14 +55,30 @@ const TARGET_TYPE_ALL = '__all__';
  * replaced and the previous patch is lost, so the effect must re-run and
  * re-apply `tabIndex = -1` against the fresh DOM node.
  */
-function DatePickerCell({ children, resetKey }: { children: React.ReactNode; resetKey?: unknown }) {
+function DatePickerCell({
+  children,
+  resetKey,
+  inputId,
+}: {
+  children: React.ReactNode;
+  resetKey?: unknown;
+  /**
+   * Stamps the click-ui-rendered `<input>` with an `id` so an external
+   * `<label htmlFor={...}>` (and the e2e WCAG check) can target it. click-ui
+   * has no `id` prop, so we apply it via DOM ref in the same effect that
+   * removes the input from the tab order.
+   */
+  inputId?: string;
+}) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const node = ref.current;
     if (!node) return;
     const input = node.querySelector('input');
-    if (input) input.tabIndex = -1;
-  }, [resetKey]);
+    if (!input) return;
+    input.tabIndex = -1;
+    if (inputId) input.id = inputId;
+  }, [resetKey, inputId]);
   return (
     <div ref={ref} className="audit-date-cell contents">
       {children}
@@ -103,28 +119,51 @@ export function AuditLogTab() {
   const targetIdFilter = useDebouncedFilter('', resetToFirstPage);
   const capabilityFilter = useDebouncedFilter('', resetToFirstPage);
 
-  const filters = useMemo<Omit<AuditFilters, 'offset' | 'limit'>>(() => {
-    const trimmed = searchFilter.debouncedValue.trim();
-    return {
-      search: trimmed ? trimmed : undefined,
-      action: actionFilter.length ? actionFilter : undefined,
-      from: localDayBoundaryIso(dateFrom, 'start'),
-      to: localDayBoundaryIso(dateTo, 'end'),
-      actorId: actorIdFilter.debouncedValue || undefined,
-      targetPrincipalId: targetIdFilter.debouncedValue || undefined,
-      targetPrincipalType: targetTypeFilter ? targetTypeFilter : undefined,
-      capability: capabilityFilter.debouncedValue || undefined,
-    };
-  }, [
-    searchFilter.debouncedValue,
-    actionFilter,
-    dateFrom,
-    dateTo,
-    actorIdFilter.debouncedValue,
-    targetIdFilter.debouncedValue,
-    capabilityFilter.debouncedValue,
-    targetTypeFilter,
-  ]);
+  /**
+   * Build the wire filter object from one snapshot of inputs. Used by both the
+   * page query (passing the debounced values, so a typing user does not trigger
+   * a refetch on every keystroke) and the export handler (passing the
+   * immediate input values, so a click within the 300ms debounce window exports
+   * exactly what the user can see in the inputs).
+   */
+  const buildFilters = useCallback(
+    (
+      search: string,
+      actorId: string,
+      targetId: string,
+      capability: string,
+    ): Omit<AuditFilters, 'offset' | 'limit'> => {
+      const trimmedSearch = search.trim();
+      return {
+        search: trimmedSearch ? trimmedSearch : undefined,
+        action: actionFilter.length ? actionFilter : undefined,
+        from: localDayBoundaryIso(dateFrom, 'start'),
+        to: localDayBoundaryIso(dateTo, 'end'),
+        actorId: actorId || undefined,
+        targetPrincipalId: targetId || undefined,
+        targetPrincipalType: targetTypeFilter ? targetTypeFilter : undefined,
+        capability: capability || undefined,
+      };
+    },
+    [actionFilter, dateFrom, dateTo, targetTypeFilter],
+  );
+
+  const filters = useMemo<Omit<AuditFilters, 'offset' | 'limit'>>(
+    () =>
+      buildFilters(
+        searchFilter.debouncedValue,
+        actorIdFilter.debouncedValue,
+        targetIdFilter.debouncedValue,
+        capabilityFilter.debouncedValue,
+      ),
+    [
+      buildFilters,
+      searchFilter.debouncedValue,
+      actorIdFilter.debouncedValue,
+      targetIdFilter.debouncedValue,
+      capabilityFilter.debouncedValue,
+    ],
+  );
 
   const { data, isPending, isFetching, isError } = useQuery({
     ...auditLogQueryOptions(currentPage, filters),
@@ -265,7 +304,18 @@ export function AuditLogTab() {
   const handleExport = useCallback(async () => {
     setExporting(true);
     try {
-      const { csv } = await exportAuditLogServerFn({ data: filters });
+      /**
+       * Use the immediate input values (not the debounced snapshot) so that
+       * a click inside the 300 ms debounce window exports exactly what the
+       * user sees in the inputs rather than a stale broader filter set.
+       */
+      const exportFilters = buildFilters(
+        searchFilter.value,
+        actorIdFilter.value,
+        targetIdFilter.value,
+        capabilityFilter.value,
+      );
+      const { csv } = await exportAuditLogServerFn({ data: exportFilters });
       downloadCsv(csv);
     } catch {
       /**
@@ -278,7 +328,15 @@ export function AuditLogTab() {
     } finally {
       setExporting(false);
     }
-  }, [filters, announce, localize]);
+  }, [
+    buildFilters,
+    searchFilter.value,
+    actorIdFilter.value,
+    targetIdFilter.value,
+    capabilityFilter.value,
+    announce,
+    localize,
+  ]);
 
   const showLoading = isPending && !data;
   const exportLabel = localize('com_audit_export_server');
@@ -323,10 +381,13 @@ export function AuditLogTab() {
           </div>
 
           <div className="flex items-center gap-1.5">
-            <span className="text-xs text-(--cui-color-text-muted)">
+            <label
+              htmlFor="audit-date-from"
+              className="text-xs text-(--cui-color-text-muted)"
+            >
               {localize('com_audit_date_from')}
-            </span>
-            <DatePickerCell resetKey={dateResetNonce}>
+            </label>
+            <DatePickerCell resetKey={dateResetNonce} inputId="audit-date-from">
               <DatePicker
                 key={`from-${dateResetNonce}`}
                 date={isoDateToDate(dateFrom)}
@@ -336,10 +397,13 @@ export function AuditLogTab() {
             </DatePickerCell>
           </div>
           <div className="flex items-center gap-1.5">
-            <span className="text-xs text-(--cui-color-text-muted)">
+            <label
+              htmlFor="audit-date-to"
+              className="text-xs text-(--cui-color-text-muted)"
+            >
               {localize('com_audit_date_to')}
-            </span>
-            <DatePickerCell resetKey={dateResetNonce}>
+            </label>
+            <DatePickerCell resetKey={dateResetNonce} inputId="audit-date-to">
               <DatePicker
                 key={`to-${dateResetNonce}`}
                 date={isoDateToDate(dateTo)}

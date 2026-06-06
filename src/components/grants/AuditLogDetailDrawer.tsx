@@ -119,9 +119,21 @@ export function AuditLogDetailDrawer({
   // while Radix Dialog slides the panel out. Without this, unmounting on
   // `entry === null` would cut off the data-state="closed" exit animation.
   const [latestEntry, setLatestEntry] = useState<t.AuditLogEntryWithDiff | null>(entry);
+  // Mirror the `latestEntry` pattern for the not-found path so the drawer can
+  // animate out: when the user closes the not-found drawer, `notFound` flips
+  // false in the same tick that `open` flips false. Without this latch the
+  // component would short-circuit to `return null` and skip the exit animation.
+  const [latestNotFound, setLatestNotFound] = useState<boolean>(notFound);
   useEffect(() => {
     if (entry) setLatestEntry(entry);
   }, [entry]);
+  useEffect(() => {
+    if (entry) {
+      setLatestNotFound(false);
+    } else if (notFound) {
+      setLatestNotFound(true);
+    }
+  }, [entry, notFound]);
 
   // Copied-feedback state for the permalink button.
   const [copied, setCopied] = useState(false);
@@ -140,7 +152,7 @@ export function AuditLogDetailDrawer({
     copiedTimerRef.current = setTimeout(() => setCopied(false), 1500);
   }, [entry, onCopyPermalink]);
 
-  if (notFound) {
+  if (latestNotFound && !latestEntry) {
     return (
       <Dialog.Root
         open={open}
