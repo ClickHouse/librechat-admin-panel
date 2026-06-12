@@ -61,21 +61,29 @@ export function ListField({
 
         let control: React.ReactNode;
         if (options) {
-          control = (
-            <select
-              value={value}
-              onChange={(e) => handleChange(index, e.target.value)}
-              disabled={disabled}
-              aria-label={itemLabel}
-              className="config-input flex-1"
-            >
-              {options.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
-          );
+          if (disabled) {
+            const matchedLabel = options.find((o) => o.value === value)?.label ?? value;
+            control = (
+              <span className="config-input flex-1" aria-label={itemLabel}>
+                {matchedLabel}
+              </span>
+            );
+          } else {
+            control = (
+              <select
+                value={value}
+                onChange={(e) => handleChange(index, e.target.value)}
+                aria-label={itemLabel}
+                className="config-input flex-1"
+              >
+                {options.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            );
+          }
         } else if (variant === 'inline-edit') {
           control = (
             <input

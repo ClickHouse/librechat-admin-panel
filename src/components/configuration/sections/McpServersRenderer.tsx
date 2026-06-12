@@ -906,19 +906,27 @@ export function McpServersRenderer(props: t.FieldRendererProps) {
     [onChange, path],
   );
 
+  const isEmpty = entries.length === 0;
+
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex items-center gap-3 py-2">
-        <button
-          type="button"
-          onClick={() => setCreateOpen(true)}
-          disabled={disabled}
-          className="config-add-btn"
-        >
-          <Icon name="plus" size="sm" />
-          <span>{localize('com_config_create_mcp_server')}</span>
-        </button>
-      </div>
+      {!disabled && (
+        <div className="flex items-center gap-3 py-2">
+          <button
+            type="button"
+            onClick={() => setCreateOpen(true)}
+            className="config-add-btn"
+          >
+            <Icon name="plus" size="sm" />
+            <span>{localize('com_config_create_mcp_server')}</span>
+          </button>
+        </div>
+      )}
+      {disabled && isEmpty && (
+        <div className="py-3 text-sm text-(--cui-color-text-muted)">
+          {localize('com_config_no_mcp_servers')}
+        </div>
+      )}
       {entries.map(([key, entryValue]) => (
         <McpEntryRow
           key={key}

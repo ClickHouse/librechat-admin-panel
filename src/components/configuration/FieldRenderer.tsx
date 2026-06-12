@@ -93,6 +93,7 @@ function ArrayObjectNestedGroup({
       totalCount={items.length}
       depth={field.depth}
       onAdd={handleAdd}
+      disabled={disabled}
     >
       {arrayField}
     </NestedGroup>
@@ -146,6 +147,7 @@ function RecordObjectNestedGroup({
       totalCount={entries.length}
       depth={field.depth}
       onAdd={handleAdd}
+      disabled={disabled}
     >
       {recordField}
     </NestedGroup>
@@ -549,7 +551,10 @@ function BooleanChip({ value }: { value: boolean }) {
   const localize = useLocalize();
   return (
     <span
-      className={cn('boolean-chip', value ? 'boolean-chip-true' : 'boolean-chip-false')}
+      className={cn(
+        'boolean-chip self-start',
+        value ? 'boolean-chip-true' : 'boolean-chip-false',
+      )}
       aria-label={localize(value ? 'com_ui_true' : 'com_ui_false')}
     >
       {localize(value ? 'com_ui_true' : 'com_ui_false')}
@@ -565,6 +570,7 @@ export function NestedGroup({
   depth = 0,
   onAdd,
   addLabel,
+  disabled,
   children,
 }: {
   label: string;
@@ -575,6 +581,12 @@ export function NestedGroup({
   /** When provided, renders a "+ Add" button inline in the header. */
   onAdd?: () => void;
   addLabel?: string;
+  /**
+   * When true, the caret/collapse affordance is dropped and the group renders
+   * flat with a static heading. Used in fully read-only sections where the
+   * expand/collapse interaction would be misleading.
+   */
+  disabled?: boolean;
   children: ReactNode;
 }) {
   const localize = useLocalize();
@@ -584,6 +596,33 @@ export function NestedGroup({
   const { isExpanded, hasEverExpanded, sectionRef, toggle, handleAddClick } = useCollapsibleSection(
     { defaultExpanded: hasConfigured, onAdd },
   );
+
+  if (disabled) {
+    return (
+      <section
+        ref={sectionRef}
+        id={sectionId}
+        aria-label={label}
+        className={cn(depth > 0 ? 'mt-3' : 'mt-4', 'flex flex-col')}
+        style={indent ? { paddingLeft: indent } : undefined}
+      >
+        <div className="flex items-center gap-2 border-b border-(--cui-color-stroke-default) py-2 pl-1">
+          <span className="text-sm font-medium text-(--cui-color-text-default)">{label}</span>
+          {totalCount > 0 && (
+            <span
+              className={cn(
+                'config-count-badge',
+                hasConfigured ? 'config-count-badge-active' : 'config-count-badge-muted',
+              )}
+            >
+              {configuredCount}/{totalCount}
+            </span>
+          )}
+        </div>
+        {children}
+      </section>
+    );
+  }
 
   return (
     <section
@@ -852,8 +891,9 @@ function NestedGroupWithAddField({
   return (
     <NestedGroup
       label={label}
-      onAdd={hasHideable ? () => addFieldRef.current?.() : undefined}
+      onAdd={!disabled && hasHideable ? () => addFieldRef.current?.() : undefined}
       addLabel={localize('com_config_add_field')}
+      disabled={disabled}
     >
       <InlineFieldRenderer
         fields={fields}
@@ -960,6 +1000,7 @@ export function renderInlineField(
           id={fieldId}
           checked={Boolean(fieldValue)}
           onChange={(checked) => onChange(field.key, checked)}
+          disabled={disabled}
           aria-label={fieldLabel}
         />
       </InlineRow>
@@ -1217,6 +1258,7 @@ export function FieldRenderer({
               configuredCount={nestedCounts.configured}
               totalCount={nestedCounts.total}
               depth={group.field.depth}
+              disabled={disabled}
             >
               <FieldRenderer
                 fields={group.field.children!}

@@ -574,6 +574,7 @@ function ProviderSection({
               totalCount={restChildren.length}
               configuredCount={restConfigured}
               depth={2}
+              disabled={rendererProps.disabled}
             >
               <FieldRenderer fields={restChildren} {...rendererProps} />
             </NestedGroup>
@@ -614,30 +615,39 @@ export function CustomEndpointsRenderer(props: t.FieldRendererProps) {
     onChange(path, [...items, entry]);
   };
 
+  const isEmpty = items.length === 0;
+
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex items-center gap-3 py-2">
-        <button
-          type="button"
-          onClick={() => setCreateOpen(true)}
+      {!disabled && (
+        <div className="flex items-center gap-3 py-2">
+          <button
+            type="button"
+            onClick={() => setCreateOpen(true)}
+            className="config-add-btn"
+          >
+            <Icon name="plus" size="sm" />
+            <span>{localize('com_config_create_endpoint')}</span>
+          </button>
+        </div>
+      )}
+      {disabled && isEmpty ? (
+        <div className="py-3 text-sm text-(--cui-color-text-muted)">
+          {localize('com_config_no_custom_endpoints')}
+        </div>
+      ) : (
+        <ArrayObjectField
+          id={`${path.replace(/\./g, '-')}`}
+          value={value}
+          fields={customField.children ?? []}
+          onChange={(v) => onChange(path, v)}
+          onEntryChange={(index, v) => onChange(`${path}.${index}`, v)}
           disabled={disabled}
-          className="config-add-btn"
-        >
-          <Icon name="plus" size="sm" />
-          <span>{localize('com_config_create_endpoint')}</span>
-        </button>
-      </div>
-      <ArrayObjectField
-        id={`${path.replace(/\./g, '-')}`}
-        value={value}
-        fields={customField.children ?? []}
-        onChange={(v) => onChange(path, v)}
-        onEntryChange={(index, v) => onChange(`${path}.${index}`, v)}
-        disabled={disabled}
-        hideAddButton
-        renderFields={renderGroupedEndpointFields}
-        entryIdPrefix={`section-${path.split('.')[0]}-custom`}
-      />
+          hideAddButton
+          renderFields={renderGroupedEndpointFields}
+          entryIdPrefix={`section-${path.split('.')[0]}-custom`}
+        />
+      )}
       <CreateCustomEndpointDialog
         open={createOpen}
         onClose={() => setCreateOpen(false)}

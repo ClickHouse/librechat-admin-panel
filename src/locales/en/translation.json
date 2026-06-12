@@ -70,6 +70,8 @@
   "com_config_select_field": "Select a field...",
   "com_config_more_settings": "More settings",
   "com_config_create_endpoint": "Create endpoint",
+  "com_config_no_custom_endpoints": "No custom endpoints configured",
+  "com_config_no_mcp_servers": "No MCP servers configured",
   "com_config_endpoint_name_required": "Endpoint name is required",
   "com_config_create_mcp_server": "Create MCP server",
   "com_config_server_name": "Server name",

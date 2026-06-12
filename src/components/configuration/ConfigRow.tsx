@@ -80,7 +80,6 @@ export function ConfigRow({
       className={cn(
         'config-row flex w-full gap-6 rounded-md px-2.5 py-2 transition-opacity',
         hasSubContent ? 'items-start' : 'items-center',
-        disabled && 'pointer-events-none',
         isPendingReset && 'opacity-50',
         !isPendingReset && !isConfigured && !isTouched && 'opacity-50',
       )}
