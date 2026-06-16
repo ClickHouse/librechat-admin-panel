@@ -943,7 +943,7 @@ export function McpServersRenderer(props: t.FieldRendererProps) {
           justAdded={key === justAddedKey}
         />
       ))}
-      {entries.length === 0 && (
+      {!disabled && entries.length === 0 && (
         <p className="py-2 text-sm text-(--cui-color-text-muted)">
           {localize('com_config_no_entries')}
         </p>

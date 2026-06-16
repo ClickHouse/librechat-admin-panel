@@ -606,7 +606,10 @@ export function NestedGroup({
         className={cn(depth > 0 ? 'mt-3' : 'mt-4', 'flex flex-col')}
         style={indent ? { paddingLeft: indent } : undefined}
       >
-        <div className="flex items-center gap-2 border-b border-(--cui-color-stroke-default) py-2 pl-1">
+        <div
+          data-section-id={sectionId}
+          className="flex items-center gap-2 border-b border-(--cui-color-stroke-default) py-2 pl-1"
+        >
           <span className="text-sm font-medium text-(--cui-color-text-default)">{label}</span>
           {totalCount > 0 && (
             <span
