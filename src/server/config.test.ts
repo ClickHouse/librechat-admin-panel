@@ -731,6 +731,10 @@ const SAMPLE_OVERRIDES: Record<string, unknown> = {
   'endpoints.agents.remoteApi.auth.oidc.issuer': 'https://example.com',
   'endpoints.agents.remoteApi.auth.oidc.jwksUri': 'https://example.com/.well-known/jwks.json',
   'summarization.trigger': { type: 'token_ratio', value: 0.5 },
+  'skillSync.github.intervalMinutes': 5,
+  'skillSync.github.sources': [
+    { id: 'sample', owner: 'foo', repo: 'bar', paths: ['skills/'], credentialKey: 'sample-key' },
+  ],
 };
 
 /** Generates a representative value that a given UI control would produce. */
