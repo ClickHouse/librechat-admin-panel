@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { createFileRoute, redirect } from '@tanstack/react-router';
+import { Link, createFileRoute, redirect } from '@tanstack/react-router';
 import { oauthExchangeFn } from '@/server';
 import { useLocalize } from '@/hooks';
 
@@ -62,12 +62,13 @@ function GoogleCallback() {
           {localize('com_auth_sso_error_title')}
         </h1>
         <p className="text-sm text-(--cui-color-text-muted)">{errorMessage}</p>
-        <a
-          href="/login"
+        <Link
+          to="/login"
+          search={{ redirect: '/' }}
           className="mt-2 rounded-lg border border-(--cui-color-stroke-default) bg-transparent px-4 py-2 text-sm font-medium text-(--cui-color-text-default) no-underline transition-colors hover:bg-(--cui-color-background-hover)"
         >
           {localize('com_auth_sso_back_to_login')}
-        </a>
+        </Link>
       </div>
     </div>
   );
