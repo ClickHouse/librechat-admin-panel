@@ -5,12 +5,28 @@ import { useLocalize } from '@/hooks';
 
 const searchSchema = z.object({
   code: z.string().optional(),
+  error: z.string().optional(),
+  error_description: z.string().optional(),
 });
 
 export const Route = createFileRoute('/auth/google/callback')({
   validateSearch: searchSchema,
-  loaderDeps: ({ search }) => ({ code: search.code }),
-  loader: async ({ deps: { code } }) => {
+  loaderDeps: ({ search }) => ({
+    code: search.code,
+    error: search.error,
+    error_description: search.error_description,
+  }),
+  loader: async ({ deps: { code, error, error_description } }) => {
+    /**
+     * LibreChat's admin Google route redirects passport/PKCE/auth failures
+     * back with `error` + `error_description` query params (see
+     * `api/server/routes/admin/auth.js` `/oauth/google` and
+     * `/oauth/google/callback`). Surface those instead of falling back to a
+     * generic "code may have expired" message.
+     */
+    if (error) {
+      return { error: 'upstream_error' as const, message: error_description ?? error };
+    }
     if (!code || !/^[a-f0-9]{64}$/.test(code)) {
       return { error: 'invalid_code' as const };
     }
