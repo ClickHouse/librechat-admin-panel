@@ -2,35 +2,13 @@ import { z } from 'zod';
 import { REGEXP_ONLY_DIGITS } from 'input-otp';
 import { useRouter } from '@tanstack/react-router';
 import { useState, useEffect, useRef, useMemo } from 'react';
-import {
-  Alert,
-  Title,
-  Panel,
-  Button,
-  Logo,
-  Separator,
-  TextField,
-  Container,
-} from '@clickhouse/click-ui';
+import { Alert, Title, Panel, Button, Separator, TextField, Container } from '@clickhouse/click-ui';
 import type * as t from '@/types';
 import { InputOTP, InputOTPGroup, InputOTPSlot, InputOTPSeparator } from './InputOTP';
 import { adminLoginFn, adminVerify2FAFn, oauthLoginFn } from '@/server';
 import { PasswordInput } from './PasswordInput';
-import { OAUTH_PROVIDERS } from '@/constants';
+import { OAuthButton } from './OAuthButton';
 import { useLocalize } from '@/hooks';
-
-function renderProviderGlyph(
-  provider: t.ResolvedProvider,
-  def: t.OAuthProviderDef,
-): React.ReactNode {
-  if (provider.imageUrl) {
-    return <img src={provider.imageUrl} alt="" aria-hidden="true" width={20} height={20} />;
-  }
-  if (def.logo) {
-    return <Logo name={def.logo} size="sm" />;
-  }
-  return null;
-}
 
 export function AuthCard({
   redirectTo = '/',
@@ -353,44 +331,15 @@ export function AuthCard({
             {providers.length > 0 && (
               <>
                 {showPasswordForm && <Separator size="sm" />}
-                {providers.map((provider) => {
-                  const def = OAUTH_PROVIDERS.find((p) => p.id === provider.id);
-                  if (!def) return null;
-                  const label = provider.label ?? localize(def.defaultLabelKey);
-                  const isPending = pendingProvider === provider.id;
-                  const buttonText = isPending ? localize('com_auth_sso_redirecting') : label;
-                  const glyph = renderProviderGlyph(provider, def);
-                  /**
-                   * click-ui's Button only renders text via `label`. Branded OAuth
-                   * buttons need a logo glyph alongside the text, so we use children
-                   * for the logo + label composition. The rule disable below is
-                   * narrowly scoped to this OAuth-provider case.
-                   */
-                  return glyph ? (
-                    // eslint-disable-next-line click-ui/button-requires-label -- OAuth buttons need logo + label composition
-                    <Button
-                      key={provider.id}
-                      type="secondary"
-                      onClick={() => handleProviderLogin(provider.id)}
-                      disabled={!!pendingProvider}
-                      fillWidth
-                    >
-                      <span className="inline-flex items-center gap-2">
-                        {glyph}
-                        {buttonText}
-                      </span>
-                    </Button>
-                  ) : (
-                    <Button
-                      key={provider.id}
-                      label={buttonText}
-                      type="secondary"
-                      onClick={() => handleProviderLogin(provider.id)}
-                      disabled={!!pendingProvider}
-                      fillWidth
-                    />
-                  );
-                })}
+                {providers.map((provider) => (
+                  <OAuthButton
+                    key={provider.id}
+                    provider={provider}
+                    isPending={pendingProvider === provider.id}
+                    disabled={!!pendingProvider}
+                    onClick={() => handleProviderLogin(provider.id)}
+                  />
+                ))}
               </>
             )}
           </>
