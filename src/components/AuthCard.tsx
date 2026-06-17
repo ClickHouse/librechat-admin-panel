@@ -33,8 +33,16 @@ export function AuthCard({
   const [totpCode, setTotpCode] = useState('');
 
   const showAutoRedirect = !!autoRedirectProvider && !autoRedirectFailed;
-  /** Hide the password form only when ssoOnly is set AND at least one provider is configured. */
-  const hidePasswordForm = ssoOnly && providers.length > 0;
+  /**
+   * `ssoOnly` is the deployer's intent ("no password login"). It must hide the
+   * password form even when SSO discovery returns no providers, otherwise a
+   * misconfiguration (e.g. ADMIN_SSO_ONLY=true + only Google configured +
+   * upstream ALLOW_SOCIAL_LOGIN=false) would silently fall back to password
+   * login and defeat the policy. The unconfigured-SSO banner below surfaces
+   * the broken state instead.
+   */
+  const hidePasswordForm = ssoOnly;
+  const ssoOnlyUnconfigured = ssoOnly && providers.length === 0;
 
   useEffect(() => {
     const messages = [generalError, errors.email, errors.password].filter(Boolean);
@@ -245,6 +253,14 @@ export function AuthCard({
         </Title>
 
         {generalError && <Alert type="banner" state="danger" text={generalError} />}
+
+        {ssoOnlyUnconfigured && step !== '2fa' && (
+          <Alert
+            type="banner"
+            state="warning"
+            text={localize('com_auth_sso_required_unconfigured')}
+          />
+        )}
 
         {step === '2fa' ? (
           <>
