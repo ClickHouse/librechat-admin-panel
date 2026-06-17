@@ -155,7 +155,7 @@ export function CapabilityPanel({ capabilities, onChange, disabled }: t.Capabili
                                           v &&
                                           (
                                             CapabilityImplications[k as BaseSystemCapability] ?? []
-                                          ).includes(cap),
+                                          ).includes(cap as BaseSystemCapability),
                                       )?.[0]
                                       ?.replace(/:/g, '_') ?? cap.replace(/:/g, '_')
                                   }`,

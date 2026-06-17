@@ -227,9 +227,6 @@ export interface FieldRendererProps {
   schemaDefaults?: FlatConfigMap;
   showConfiguredOnly?: boolean;
   isEditingScope?: boolean;
-  /** When true, never strip labels via isSoleField.  Use when rendering a
-   *  subset of fields within a larger section (e.g. priority fields). */
-  alwaysShowLabels?: boolean;
   /** YAML-defined entry keys for the section being rendered. */
   yamlBaseKeys?: Set<string>;
   onValidationError?: (message: string) => void;

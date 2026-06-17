@@ -567,7 +567,7 @@ function ProviderSection({
     <MultiAccordion.Item id={`section-${path}`} value={path} title={title}>
       {hasPrioritySplit ? (
         <>
-          <FieldRenderer fields={priorityChildren} {...rendererProps} alwaysShowLabels />
+          <FieldRenderer fields={priorityChildren} {...rendererProps} />
           {restChildren.length > 0 && (
             <NestedGroup
               label={localize('com_config_more_settings')}

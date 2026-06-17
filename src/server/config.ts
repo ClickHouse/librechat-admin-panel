@@ -1,7 +1,6 @@
 import { z } from 'zod';
 import yaml from 'js-yaml';
 import { queryOptions } from '@tanstack/react-query';
-import { AppService } from '@librechat/data-schemas';
 import { configSchema } from 'librechat-data-provider';
 import { createServerFn } from '@tanstack/react-start';
 import { SystemCapabilities } from '@librechat/data-schemas/capabilities';
@@ -652,22 +651,23 @@ export const parseImportedYaml = createServerFn({ method: 'POST' })
       };
     }
 
-    try {
-      const appConfig = await AppService({ config: result.data });
-      return { success: true, error: undefined, validationErrors: undefined, appConfig };
-    } catch (appServiceError) {
-      console.warn(
-        'AppService failed for imported config, falling back to raw config:',
-        appServiceError instanceof Error ? appServiceError.message : appServiceError,
-      );
-      const fallbackConfig = result.data;
-      return {
-        success: true,
-        error: undefined,
-        validationErrors: undefined,
-        appConfig: fallbackConfig,
-      };
-    }
+    /**
+     * `librechat-data-provider` and `@librechat/data-schemas` both migrated
+     * to tsdown (upstream #13578, #13597) and now ship dual `.d.cts` + `.d.mts`
+     * declaration files. Under `moduleResolution: bundler`, TS treats
+     * `TCustomConfig` resolved through one declaration path as nominally
+     * distinct from `TCustomConfig` resolved through the other, even when
+     * structurally identical. That collision shows up here as "Two different
+     * types with this name exist, but they are unrelated" in the ServerFn
+     * registration. The consumer (ImportYamlDialog) treats appConfig as
+     * `Record<string, ConfigValue>`, so widening the return is the local fix.
+     */
+    return {
+      success: true,
+      error: undefined,
+      validationErrors: undefined,
+      appConfig: result.data as Record<string, t.ConfigValue>,
+    };
   });
 
 function getFieldDefault(schema: t.ZodSchemaLike): { hasDefault: boolean; value: unknown } {

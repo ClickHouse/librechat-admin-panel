@@ -1164,7 +1164,6 @@ export function FieldRenderer({
   pendingResets,
   schemaDefaults,
   showConfiguredOnly,
-  alwaysShowLabels,
 }: t.FieldRendererProps) {
   const localize = useLocalize();
   const values =
@@ -1267,7 +1266,7 @@ export function FieldRenderer({
             pendingResets={pendingResets}
             schemaDefaults={schemaDefaults}
             showConfiguredOnly={showConfiguredOnly}
-            isSoleField={!alwaysShowLabels && fields.length === 1 && groups.length === 1}
+            isSoleField={false}
           />
         );
       })}

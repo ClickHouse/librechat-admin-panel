@@ -23,6 +23,8 @@ const TRANSPORT_FIELDS: Record<string, string[]> = {
 const ALL_TRANSPORT_KEYS = new Set(Object.values(TRANSPORT_FIELDS).flat());
 const REMOTE_ONLY_FIELDS = new Set(['requiresOAuth', 'apiKey', 'oauth', 'oauth_headers']);
 const REMOTE_TRANSPORTS = new Set(['sse', 'streamable-http', 'http', 'websocket']);
+const HTTP_ONLY_FIELDS = new Set(['obo', 'proxy']);
+const HTTP_TRANSPORTS = new Set(['sse', 'streamable-http', 'http']);
 
 const REQUIRED_BY_TRANSPORT: Record<string, Set<string>> = {
   stdio: new Set(['command', 'args']),
@@ -428,6 +430,10 @@ function McpEntryFields({
       if (currentTransportFields.has(field.key)) {
         visibleKeys.add(field.key);
       }
+    } else if (HTTP_ONLY_FIELDS.has(field.key)) {
+      if (HTTP_TRANSPORTS.has(currentType)) {
+        visibleKeys.add(field.key);
+      }
     } else if (REMOTE_ONLY_FIELDS.has(field.key)) {
       if (isRemote) {
         visibleKeys.add(field.key);
@@ -646,7 +652,6 @@ function CreateMcpServerDialog({
   );
 }
 
-
 export function McpServersRenderer(props: t.FieldRendererProps) {
   const {
     fields,
@@ -667,7 +672,9 @@ export function McpServersRenderer(props: t.FieldRendererProps) {
   const path = parentPath;
   const entryPrefix = `${path}.`;
   const baseValue = getValue(path, parentValue ?? EMPTY_RECORD);
-  const baseRecord: Record<string, t.ConfigValue> = isPlainObject(baseValue) ? baseValue : EMPTY_RECORD;
+  const baseRecord: Record<string, t.ConfigValue> = isPlainObject(baseValue)
+    ? baseValue
+    : EMPTY_RECORD;
 
   const editsByEntry = useMemo(() => {
     const map = new Map<string, Array<{ segments: string[]; value: t.ConfigValue }>>();
@@ -709,9 +716,7 @@ export function McpServersRenderer(props: t.FieldRendererProps) {
           seedIndex = i;
         }
       }
-      const subsequentLeaves = leafEdits
-        .slice(seedIndex + 1)
-        .filter((e) => e.segments.length > 0);
+      const subsequentLeaves = leafEdits.slice(seedIndex + 1).filter((e) => e.segments.length > 0);
       if (subsequentLeaves.length === 0) {
         return seedFromDelete ? undefined : seed;
       }
@@ -1038,7 +1043,9 @@ const McpEntryRow = memo(function McpEntryRowImpl({
       value={displayValue}
       onValueChange={handleWholeEntryChange}
       onRemove={isReadOnly || isLockedIdentity ? undefined : () => onRemove(entryKey)}
-      onRename={isReadOnly || isLockedIdentity ? undefined : (renamed) => onRename(entryKey, renamed)}
+      onRename={
+        isReadOnly || isLockedIdentity ? undefined : (renamed) => onRename(entryKey, renamed)
+      }
       disabled={isReadOnly}
       defaultExpanded={justAdded}
       renderFields={renderEntryFields}
@@ -1046,10 +1053,7 @@ const McpEntryRow = memo(function McpEntryRowImpl({
   );
 });
 
-function lookupLeaf(
-  obj: unknown,
-  segments: string[],
-): t.ConfigValue | undefined {
+function lookupLeaf(obj: unknown, segments: string[]): t.ConfigValue | undefined {
   let cursor: unknown = obj;
   for (const seg of segments) {
     if (!cursor || typeof cursor !== 'object' || Array.isArray(cursor)) return undefined;

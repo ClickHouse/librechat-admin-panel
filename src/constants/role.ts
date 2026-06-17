@@ -40,6 +40,7 @@ export const PERMISSION_TYPE_SCHEMA: Record<PermissionTypes, Permissions[]> = {
     Permissions.CREATE,
     Permissions.SHARE,
     Permissions.SHARE_PUBLIC,
+    Permissions.CONFIGURE_OBO,
   ],
   [PermissionTypes.REMOTE_AGENTS]: [
     Permissions.USE,
@@ -53,6 +54,7 @@ export const PERMISSION_TYPE_SCHEMA: Record<PermissionTypes, Permissions[]> = {
     Permissions.SHARE,
     Permissions.SHARE_PUBLIC,
   ],
+  [PermissionTypes.SHARED_LINKS]: [Permissions.CREATE, Permissions.SHARE, Permissions.SHARE_PUBLIC],
 };
 
 export function defaultPermissions(): t.RolePermissions {
