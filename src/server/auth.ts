@@ -348,12 +348,30 @@ export const getStartupConfigFn = createServerFn({ method: 'GET' }).handler(
     }
     const ssoOnly = process.env.ADMIN_SSO_ONLY === 'true';
     try {
-      const response = await fetch(`${getServerApiUrl()}/api/config`);
+      /**
+       * Forward the tenant header so LibreChat's `/api/config` route
+       * (mounted behind `preAuthTenantMiddleware`) resolves tenant-scoped
+       * `registration.socialLogins` instead of falling back to base config.
+       */
+      const headers: Record<string, string> = {};
+      const tenantId = getRequestHeader('x-tenant-id');
+      if (typeof tenantId === 'string' && tenantId.trim().length > 0) {
+        headers['X-Tenant-Id'] = tenantId.trim();
+      }
+      const response = await fetch(`${getServerApiUrl()}/api/config`, { headers });
       if (!response.ok) return { providers: [], ssoOnly };
       const config = (await response.json()) as t.StartupConfigResponse;
       const providers: t.ResolvedProvider[] = [];
       for (const def of OAUTH_PROVIDERS) {
         if (config[def.enabledKey as keyof t.StartupConfigResponse] !== true) continue;
+        /**
+         * Providers whose LibreChat strategy is registered inside
+         * `configureSocialLogins` (e.g. google) are only available when the
+         * upstream `ALLOW_SOCIAL_LOGIN` env is true. Surfacing the button
+         * otherwise lands users on an "Unknown authentication strategy" 500.
+         * OpenID has its own registration path and is unaffected.
+         */
+        if (def.social && config.socialLoginEnabled !== true) continue;
         providers.push({
           id: def.id,
           label: def.labelKey

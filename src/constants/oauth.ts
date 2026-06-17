@@ -24,5 +24,6 @@ export const OAUTH_PROVIDERS: ReadonlyArray<t.OAuthProviderDef> = [
     defaultLabelKey: 'com_auth_provider_google',
     logo: 'google',
     enabledKey: 'googleLoginEnabled',
+    social: true,
   },
 ];

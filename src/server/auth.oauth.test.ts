@@ -145,6 +145,7 @@ describe('getStartupConfigFn', () => {
       jsonResponse(200, {
         openidLoginEnabled: true,
         googleLoginEnabled: true,
+        socialLoginEnabled: true,
         openidLabel: 'Corp SSO',
         openidImageUrl: 'https://corp.example/logo.png',
       }),
@@ -159,7 +160,7 @@ describe('getStartupConfigFn', () => {
       ],
       ssoOnly: false,
     });
-    expect(fetchMock).toHaveBeenCalledWith('http://librechat.test/api/config');
+    expect(fetchMock).toHaveBeenCalledWith('http://librechat.test/api/config', { headers: {} });
   });
 
   it('marks the session SSO-only when ADMIN_SSO_ONLY=true', async () => {
@@ -171,6 +172,34 @@ describe('getStartupConfigFn', () => {
     expect(result).toEqual({
       providers: [{ id: 'openid', label: undefined, imageUrl: undefined }],
       ssoOnly: true,
+    });
+  });
+
+  it('hides social providers when LibreChat has not enabled social login', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(200, {
+        openidLoginEnabled: true,
+        googleLoginEnabled: true,
+        socialLoginEnabled: false,
+      }),
+    );
+
+    const result = await getStartupConfigFn();
+
+    expect(result).toEqual({
+      providers: [{ id: 'openid', label: undefined, imageUrl: undefined }],
+      ssoOnly: false,
+    });
+  });
+
+  it('forwards X-Tenant-Id to the LibreChat startup config request', async () => {
+    requestHeaders.set('x-tenant-id', 'tenant-42');
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { openidLoginEnabled: true }));
+
+    await getStartupConfigFn();
+
+    expect(fetchMock).toHaveBeenCalledWith('http://librechat.test/api/config', {
+      headers: { 'X-Tenant-Id': 'tenant-42' },
     });
   });
 

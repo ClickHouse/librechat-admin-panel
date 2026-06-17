@@ -25,6 +25,13 @@ export interface OAuthProviderDef {
   labelKey?: string;
   /** /api/config field for a deployer-supplied image URL. */
   imageKey?: string;
+  /**
+   * Provider whose LibreChat passport strategy is registered inside
+   * `configureSocialLogins` (gated on `ALLOW_SOCIAL_LOGIN`). For these,
+   * surfacing the button when `socialLoginEnabled !== true` upstream would
+   * point users at an "Unknown authentication strategy" 500.
+   */
+  social?: boolean;
 }
 
 export interface ResolvedProvider {
