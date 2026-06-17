@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { createFileRoute, redirect, Link } from '@tanstack/react-router';
+import { createFileRoute, redirect } from '@tanstack/react-router';
 import { oauthExchangeFn } from '@/server';
 import { useLocalize } from '@/hooks';
 
@@ -7,7 +7,7 @@ const searchSchema = z.object({
   code: z.string().optional(),
 });
 
-export const Route = createFileRoute('/auth/openid/callback')({
+export const Route = createFileRoute('/auth/google/callback')({
   validateSearch: searchSchema,
   loaderDeps: ({ search }) => ({ code: search.code }),
   loader: async ({ deps: { code } }) => {
@@ -16,7 +16,7 @@ export const Route = createFileRoute('/auth/openid/callback')({
     }
 
     try {
-      const result = await oauthExchangeFn({ data: { code, provider: 'openid' } });
+      const result = await oauthExchangeFn({ data: { code, provider: 'google' } });
       if (result.error) {
         return { error: 'exchange_failed' as const, message: result.message };
       }
@@ -26,10 +26,10 @@ export const Route = createFileRoute('/auth/openid/callback')({
       return { error: 'exchange_failed' as const };
     }
   },
-  component: OpenIdCallback,
+  component: GoogleCallback,
 });
 
-function OpenIdCallback() {
+function GoogleCallback() {
   const loaderData = Route.useLoaderData();
   const localize = useLocalize();
 
@@ -62,13 +62,12 @@ function OpenIdCallback() {
           {localize('com_auth_sso_error_title')}
         </h1>
         <p className="text-sm text-(--cui-color-text-muted)">{errorMessage}</p>
-        <Link
-          to="/login"
-          search={{ redirect: '/' }}
+        <a
+          href="/login"
           className="mt-2 rounded-lg border border-(--cui-color-stroke-default) bg-transparent px-4 py-2 text-sm font-medium text-(--cui-color-text-default) no-underline transition-colors hover:bg-(--cui-color-background-hover)"
         >
           {localize('com_auth_sso_back_to_login')}
-        </Link>
+        </a>
       </div>
     </div>
   );

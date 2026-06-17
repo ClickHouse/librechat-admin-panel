@@ -44,7 +44,7 @@ vi.mock('./utils/refresh', () => ({
   refreshAdminTokenDeduped: vi.fn(),
 }));
 
-import { checkOpenIdFn, oauthExchangeFn } from './auth';
+import { getStartupConfigFn, oauthExchangeFn } from './auth';
 
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -75,7 +75,9 @@ describe('oauthExchangeFn', () => {
       }),
     );
 
-    const result = await oauthExchangeFn({ data: { code: 'a'.repeat(64) } });
+    const result = await oauthExchangeFn({
+      data: { code: 'a'.repeat(64), provider: 'openid' },
+    });
 
     expect(result).toEqual({
       error: false,
@@ -103,7 +105,9 @@ describe('oauthExchangeFn', () => {
   it('does not consume the one-time LibreChat exchange code when the PKCE verifier was lost', async () => {
     sessionState.data = {};
 
-    const result = await oauthExchangeFn({ data: { code: 'b'.repeat(64) } });
+    const result = await oauthExchangeFn({
+      data: { code: 'b'.repeat(64), provider: 'openid' },
+    });
 
     expect(result).toEqual({
       error: true,
@@ -117,7 +121,7 @@ describe('oauthExchangeFn', () => {
   });
 });
 
-describe('checkOpenIdFn', () => {
+describe('getStartupConfigFn', () => {
   const originalSsoEnabled = process.env.ADMIN_SSO_ENABLED;
   const originalSsoOnly = process.env.ADMIN_SSO_ONLY;
 
@@ -136,30 +140,46 @@ describe('checkOpenIdFn', () => {
     else process.env.ADMIN_SSO_ONLY = originalSsoOnly;
   });
 
-  it('reports SSO available with auto-redirect off by default', async () => {
-    fetchMock.mockResolvedValueOnce(jsonResponse(200, {}));
+  it('lists each LibreChat-enabled provider with branding overrides', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(200, {
+        openidLoginEnabled: true,
+        googleLoginEnabled: true,
+        openidLabel: 'Corp SSO',
+        openidImageUrl: 'https://corp.example/logo.png',
+      }),
+    );
 
-    const result = await checkOpenIdFn();
+    const result = await getStartupConfigFn();
 
-    expect(result).toEqual({ available: true, ssoOnly: false });
-    expect(fetchMock).toHaveBeenCalledWith('http://librechat.test/api/admin/oauth/openid/check');
+    expect(result).toEqual({
+      providers: [
+        { id: 'openid', label: 'Corp SSO', imageUrl: 'https://corp.example/logo.png' },
+        { id: 'google', label: undefined, imageUrl: undefined },
+      ],
+      ssoOnly: false,
+    });
+    expect(fetchMock).toHaveBeenCalledWith('http://librechat.test/api/config');
   });
 
   it('marks the session SSO-only when ADMIN_SSO_ONLY=true', async () => {
     process.env.ADMIN_SSO_ONLY = 'true';
-    fetchMock.mockResolvedValueOnce(jsonResponse(200, {}));
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { openidLoginEnabled: true }));
 
-    const result = await checkOpenIdFn();
+    const result = await getStartupConfigFn();
 
-    expect(result).toEqual({ available: true, ssoOnly: true });
+    expect(result).toEqual({
+      providers: [{ id: 'openid', label: undefined, imageUrl: undefined }],
+      ssoOnly: true,
+    });
   });
 
-  it('hides the SSO button without calling the backend when ADMIN_SSO_ENABLED=false', async () => {
+  it('hides every SSO provider without calling the backend when ADMIN_SSO_ENABLED=false', async () => {
     process.env.ADMIN_SSO_ENABLED = 'false';
 
-    const result = await checkOpenIdFn();
+    const result = await getStartupConfigFn();
 
-    expect(result).toEqual({ available: false, ssoOnly: false });
+    expect(result).toEqual({ providers: [], ssoOnly: false });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -167,17 +187,17 @@ describe('checkOpenIdFn', () => {
     process.env.ADMIN_SSO_ENABLED = 'false';
     process.env.ADMIN_SSO_ONLY = 'true';
 
-    const result = await checkOpenIdFn();
+    const result = await getStartupConfigFn();
 
-    expect(result).toEqual({ available: false, ssoOnly: false });
+    expect(result).toEqual({ providers: [], ssoOnly: false });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('reports SSO unavailable when the backend check fails', async () => {
+  it('returns an empty provider list when the startup config request fails', async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse(503, {}));
 
-    const result = await checkOpenIdFn();
+    const result = await getStartupConfigFn();
 
-    expect(result).toEqual({ available: false, ssoOnly: false });
+    expect(result).toEqual({ providers: [], ssoOnly: false });
   });
 });
