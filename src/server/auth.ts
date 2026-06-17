@@ -474,6 +474,17 @@ export const oauthExchangeFn = createServerFn({ method: 'POST' })
       }
 
       const exchangeData = responseData as t.OAuthExchangeResponse;
+      /**
+       * Non-openid OAuth admin sessions (currently `google`) arrive without a
+       * refresh token: LibreChat's `googleAdmin` passport strategy does not
+       * request `access_type=offline`, and `createOAuthHandler` in
+       * `api/server/controllers/auth/oauth.js` only forwards refresh tokens
+       * when `provider === 'openid' && OPENID_REUSE_TOKENS=true`. As a result,
+       * `verifyAdminTokenFn` cannot transparently refresh these sessions and
+       * the user is re-prompted at JWT expiry. Resolving this requires an
+       * upstream LibreChat change to capture and expose a refresh token for
+       * Google admin exchanges.
+       */
       const now = Date.now();
       await session.update({
         user: exchangeData.user,
