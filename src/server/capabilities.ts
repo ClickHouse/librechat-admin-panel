@@ -19,6 +19,7 @@ import {
   AUDIT_SEVERITIES,
   AUDIT_ACTOR_TYPES,
   READ_AUDIT_LOG_CAPABILITY,
+  isAuditEntryId,
 } from '@/constants';
 import { apiFetch, extractApiError } from './utils/api';
 
@@ -400,16 +401,13 @@ export const getAuditLogEntryFn = createServerFn({ method: 'GET' })
     },
   );
 
-/** Matches the backend's audit-entry ObjectId shape. */
-const AUDIT_ENTRY_ID_RE = /^[a-f0-9]{24}$/i;
-
 export const auditLogEntryQueryOptions = (id: string | undefined) =>
   queryOptions({
     queryKey: ['auditLogEntry', id] as const,
     queryFn: () => getAuditLogEntryFn({ data: { id: id ?? '' } }),
     /** Only fire for a well-formed id so a crafted `?entryId=` deep link can't
      * reach the server fn (which would reject it anyway). */
-    enabled: !!id && AUDIT_ENTRY_ID_RE.test(id),
+    enabled: isAuditEntryId(id),
     staleTime: 60_000,
   });
 

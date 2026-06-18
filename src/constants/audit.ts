@@ -57,3 +57,11 @@ export const AUDIT_ACTOR_TYPES = [
   'webhook',
   'api',
 ] as const satisfies readonly AuditActorType[];
+
+/** Backend audit-entry id shape (Mongo ObjectId). Shared by the BFF validator
+ * and the client query guard so a crafted `?entryId=` deep link is rejected. */
+const AUDIT_ENTRY_ID_RE = /^[a-f0-9]{24}$/i;
+
+export function isAuditEntryId(id: string | undefined | null): id is string {
+  return typeof id === 'string' && AUDIT_ENTRY_ID_RE.test(id);
+}

@@ -31,7 +31,7 @@ import {
 } from '@/components/shared';
 import { useAnnouncement, useDebouncedFilter, useLocalize } from '@/hooks';
 import { AuditLogDetailDrawer } from './AuditLogDetailDrawer';
-import { getScopeTypeConfig } from '@/constants';
+import { getScopeTypeConfig, isAuditEntryId } from '@/constants';
 import { cn } from '@/utils';
 
 const AUDIT_ACTIONS: readonly AuditAction[] = ['grant.assigned', 'grant.removed'] as const;
@@ -272,7 +272,9 @@ export function AuditLogTab() {
   // loaded yet). Skip the round-trip whenever the row is already in `pageEntries`.
   const entryFetch = useQuery({
     ...auditLogEntryQueryOptions(entryId),
-    enabled: !!entryId && !entryOnPage,
+    /** Keep the option's id-validity guard (a malformed `?entryId=` must not
+     * reach the server fn) AND skip the round-trip when the row is on-page. */
+    enabled: isAuditEntryId(entryId) && !entryOnPage,
   });
 
   const selectedEntry: t.AuditLogEntryWithDiff | null =
