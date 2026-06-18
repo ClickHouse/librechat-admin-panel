@@ -11,11 +11,11 @@ import {
   TrashButton,
 } from '@/components/shared';
 import { deleteGroupFn, groupsQueryOptions, GROUPS_PAGE_SIZE } from '@/server';
+import { cn, notifySuccess, notifyError } from '@/utils';
 import { useCapabilities, useLocalize } from '@/hooks';
 import { EditGroupDialog } from './EditGroupDialog';
 import { SystemCapabilities } from '@/constants';
 import { ConfirmDialog } from './ConfirmDialog';
-import { cn } from '@/utils';
 
 export function GroupsTab({ onCreateGroup }: t.GroupsTabProps) {
   const localize = useLocalize();
@@ -52,17 +52,19 @@ export function GroupsTab({ onCreateGroup }: t.GroupsTabProps) {
   const totalPages = Math.ceil(total / GROUPS_PAGE_SIZE);
 
   const deleteMutation = useMutation({
-    mutationFn: (id: string) => deleteGroupFn({ data: { id } }),
-    onSuccess: () => {
+    mutationFn: (group: AdminGroup) => deleteGroupFn({ data: { id: group.id } }),
+    onSuccess: (_data, group) => {
       queryClient.invalidateQueries({ queryKey: ['groups'] });
       queryClient.invalidateQueries({ queryKey: ['availableScopes'] });
       queryClient.invalidateQueries({ queryKey: ['groupAssignments'] });
       queryClient.invalidateQueries({ queryKey: ['groupMembers'] });
+      notifySuccess(localize('com_toast_group_deleted', { name: group.name }));
       setDeleteTarget(null);
       if (groups.length === 1) {
         setPage((prev) => (prev > 1 ? prev - 1 : prev));
       }
     },
+    onError: (err: Error) => notifyError(err.message),
   });
 
   if (isLoading && !data) {
@@ -151,7 +153,7 @@ export function GroupsTab({ onCreateGroup }: t.GroupsTabProps) {
         confirmLabel={localize('com_ui_delete')}
         saving={deleteMutation.isPending}
         onConfirm={() => {
-          if (deleteTarget) deleteMutation.mutate(deleteTarget.id);
+          if (deleteTarget) deleteMutation.mutate(deleteTarget);
         }}
         onCancel={() => setDeleteTarget(null)}
       />

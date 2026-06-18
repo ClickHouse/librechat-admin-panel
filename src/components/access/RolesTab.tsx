@@ -11,6 +11,7 @@ import {
 } from '@/components/shared';
 import { deleteRoleFn, allRolesQueryOptions, ROLES_PAGE_SIZE } from '@/server';
 import { useCapabilities, useLocalize } from '@/hooks';
+import { notifySuccess, notifyError } from '@/utils';
 import { EditRoleDialog } from './EditRoleDialog';
 import { SystemCapabilities } from '@/constants';
 import { ConfirmDialog } from './ConfirmDialog';
@@ -22,7 +23,6 @@ export function RolesTab({ onCreateRole }: t.RolesTabProps) {
   const canManage = hasCapability(SystemCapabilities.MANAGE_ROLES);
   const [editTarget, setEditTarget] = useState<t.Role | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<t.Role | null>(null);
-  const [deleteError, setDeleteError] = useState('');
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
 
@@ -48,19 +48,19 @@ export function RolesTab({ onCreateRole }: t.RolesTabProps) {
   };
 
   const deleteMutation = useMutation({
-    mutationFn: (id: string) => deleteRoleFn({ data: { id } }),
-    onSuccess: () => {
+    mutationFn: (role: t.Role) => deleteRoleFn({ data: { id: role.id } }),
+    onSuccess: (_data, role) => {
       queryClient.invalidateQueries({ queryKey: ['roles'] });
       queryClient.invalidateQueries({ queryKey: ['availableScopes'] });
       queryClient.invalidateQueries({ queryKey: ['roleAssignments'] });
       queryClient.invalidateQueries({ queryKey: ['roleMembers'] });
+      notifySuccess(localize('com_toast_role_deleted', { name: role.name }));
       setDeleteTarget(null);
-      setDeleteError('');
       if (paged.length === 1) {
         setPage((prev) => (prev > 1 ? prev - 1 : prev));
       }
     },
-    onError: (err: Error) => setDeleteError(err.message),
+    onError: (err: Error) => notifyError(err.message),
   });
 
   if (isLoading) {
@@ -96,11 +96,7 @@ export function RolesTab({ onCreateRole }: t.RolesTabProps) {
 
       {paged.length === 0 ? (
         <EmptyState
-          message={
-            search
-              ? localize('com_access_no_results')
-              : localize('com_access_roles_empty')
-          }
+          message={search ? localize('com_access_no_results') : localize('com_access_roles_empty')}
         />
       ) : (
         <div className="flex flex-col">
@@ -157,15 +153,10 @@ export function RolesTab({ onCreateRole }: t.RolesTabProps) {
         description={localize('com_access_delete_role_desc', { name: deleteTarget?.name ?? '' })}
         confirmLabel={localize('com_ui_delete')}
         saving={deleteMutation.isPending}
-        error={deleteError}
         onConfirm={() => {
-          setDeleteError('');
-          if (deleteTarget) deleteMutation.mutate(deleteTarget.id);
+          if (deleteTarget) deleteMutation.mutate(deleteTarget);
         }}
-        onCancel={() => {
-          setDeleteTarget(null);
-          setDeleteError('');
-        }}
+        onCancel={() => setDeleteTarget(null)}
       />
     </div>
   );

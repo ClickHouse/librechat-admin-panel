@@ -18,9 +18,9 @@ import {
   allRolesQueryOptions,
 } from '@/server';
 import { Avatar, TrashButton } from '@/components/shared';
+import { cn, notifySuccess, notifyError } from '@/utils';
 import { ConfirmDialog } from '@/components/access';
 import { useLocalize } from '@/hooks';
-import { cn } from '@/utils';
 
 const CONFIRM_TITLE_KEYS: Record<t.RemoveTarget['kind'], string> = {
   role: 'com_users_remove_role_title',
@@ -89,57 +89,73 @@ export function UserDetailDialog({
     queryClient.invalidateQueries({ queryKey: ['availableScopes'] });
   };
 
+  const handleError = (err: Error) => notifyError(err.message);
+
   const addRoleMutation = useMutation({
-    mutationFn: (roleId: string) => {
+    mutationFn: (role: { id: string; name: string }) => {
       if (!userId) throw new Error('No user selected');
-      return addRoleMemberFn({ data: { roleId, userId } });
+      return addRoleMemberFn({ data: { roleId: role.id, userId } });
     },
-    onSuccess: invalidateAll,
+    onSuccess: (_data, role) => {
+      invalidateAll();
+      notifySuccess(localize('com_toast_role_assigned', { name: role.name }));
+    },
+    onError: handleError,
   });
 
   const removeRoleMutation = useMutation({
-    mutationFn: (roleId: string) => {
+    mutationFn: (role: { id: string; name: string }) => {
       if (!userId) throw new Error('No user selected');
-      return removeRoleMemberFn({ data: { roleId, userId } });
+      return removeRoleMemberFn({ data: { roleId: role.id, userId } });
     },
-    onSuccess: () => {
+    onSuccess: (_data, role) => {
       invalidateAll();
+      notifySuccess(localize('com_toast_role_unassigned', { name: role.name }));
       setRemoveTarget(null);
     },
+    onError: handleError,
   });
 
   const addGroupMutation = useMutation({
-    mutationFn: (groupId: string) => {
+    mutationFn: (group: { id: string; name: string }) => {
       if (!userId) throw new Error('No user selected');
-      return addGroupMemberFn({ data: { groupId, userId } });
+      return addGroupMemberFn({ data: { groupId: group.id, userId } });
     },
-    onSuccess: invalidateAll,
+    onSuccess: (_data, group) => {
+      invalidateAll();
+      notifySuccess(localize('com_toast_group_assigned', { name: group.name }));
+    },
+    onError: handleError,
   });
 
   const removeGroupMutation = useMutation({
-    mutationFn: (groupId: string) => {
+    mutationFn: (group: { id: string; name: string }) => {
       if (!userId) throw new Error('No user selected');
-      return removeGroupMemberFn({ data: { groupId, userId } });
+      return removeGroupMemberFn({ data: { groupId: group.id, userId } });
     },
-    onSuccess: () => {
+    onSuccess: (_data, group) => {
       invalidateAll();
+      notifySuccess(localize('com_toast_group_unassigned', { name: group.name }));
       setRemoveTarget(null);
     },
+    onError: handleError,
   });
 
   const createProfileMutation = useMutation({
-    mutationFn: () => {
-      if (!userId) throw new Error('No user selected');
-      return createScopeFn({
+    mutationFn: (vars: { userId: string; name: string }) =>
+      createScopeFn({
         data: {
           principalType: PrincipalType.USER,
-          name: userName,
+          name: vars.name,
           priority: 100,
-          principalId: userId,
+          principalId: vars.userId,
         },
-      });
+      }),
+    onSuccess: (_data, vars) => {
+      invalidateAll();
+      notifySuccess(localize('com_toast_user_profile_created', { name: vars.name }));
     },
-    onSuccess: invalidateAll,
+    onError: handleError,
   });
 
   const deleteProfileMutation = useMutation({
@@ -149,8 +165,10 @@ export function UserDetailDialog({
       }),
     onSuccess: () => {
       invalidateAll();
+      notifySuccess(localize('com_toast_user_profile_deleted'));
       setRemoveTarget(null);
     },
+    onError: handleError,
   });
 
   const busy =
@@ -166,9 +184,13 @@ export function UserDetailDialog({
 
   const handleConfirmRemove = () => {
     if (!removeTarget) return;
-    if (removeTarget.kind === 'role') removeRoleMutation.mutate(removeTarget.ref.id);
-    else if (removeTarget.kind === 'group') removeGroupMutation.mutate(removeTarget.ref.id);
-    else if (removeTarget.kind === 'profile') deleteProfileMutation.mutate(removeTarget.scope);
+    if (removeTarget.kind === 'role') {
+      removeRoleMutation.mutate({ id: removeTarget.ref.id, name: removeTarget.ref.name });
+    } else if (removeTarget.kind === 'group') {
+      removeGroupMutation.mutate({ id: removeTarget.ref.id, name: removeTarget.ref.name });
+    } else if (removeTarget.kind === 'profile') {
+      deleteProfileMutation.mutate(removeTarget.scope);
+    }
   };
 
   const confirmTitle = removeTarget ? localize(CONFIRM_TITLE_KEYS[removeTarget.kind]) : '';
@@ -240,9 +262,20 @@ export function UserDetailDialog({
               canManageRoles={canManageRoles}
               canManageGroups={canManageGroups}
               canAssignConfigs={canAssignConfigs}
-              onAddRole={(id) => addRoleMutation.mutate(id)}
-              onAddGroup={(id) => addGroupMutation.mutate(id)}
-              onCreateUserProfile={() => createProfileMutation.mutate()}
+              onAddRole={(id) => {
+                if (addRoleMutation.isPending) return;
+                const role = availableRoles.find((r) => r.id === id);
+                if (role) addRoleMutation.mutate({ id: role.id, name: role.name });
+              }}
+              onAddGroup={(id) => {
+                if (addGroupMutation.isPending) return;
+                const group = availableGroups.find((g) => g.id === id);
+                if (group) addGroupMutation.mutate({ id: group.id, name: group.name });
+              }}
+              onCreateUserProfile={() => {
+                if (createProfileMutation.isPending || !userId) return;
+                createProfileMutation.mutate({ userId, name: userName });
+              }}
               onDone={() => setView('main')}
             />
           )}

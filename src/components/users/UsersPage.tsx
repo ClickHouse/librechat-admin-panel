@@ -20,11 +20,11 @@ import {
   SearchInput,
 } from '@/components/shared';
 import { useAnnouncement, useCapabilities, useLocalize } from '@/hooks';
+import { cn, notifySuccess, notifyError } from '@/utils';
 import { CreateUserDialog } from './CreateUserDialog';
 import { UserDetailDialog } from './UserDetailDialog';
 import { ConfirmDialog } from '@/components/access';
 import { SystemCapabilities } from '@/constants';
-import { cn } from '@/utils';
 
 const ROLE_FILTER_LABELS: Record<t.RoleFilter, string> = {
   all: 'com_ui_all',
@@ -61,16 +61,18 @@ export function UsersPage() {
   }, [allScopes]);
 
   const deleteMutation = useMutation({
-    mutationFn: (id: string) => deleteUserFn({ data: { id } }),
-    onSuccess: () => {
+    mutationFn: (user: TUser) => deleteUserFn({ data: { id: user.id } }),
+    onSuccess: (_data, user) => {
       queryClient.invalidateQueries({ queryKey: ['users'] });
       queryClient.invalidateQueries({ queryKey: ['roleAssignments'] });
       queryClient.invalidateQueries({ queryKey: ['groupAssignments'] });
       queryClient.invalidateQueries({ queryKey: ['roleMembers'] });
       queryClient.invalidateQueries({ queryKey: ['groupMembers'] });
       queryClient.invalidateQueries({ queryKey: ['availableScopes'] });
+      notifySuccess(localize('com_toast_user_deleted', { name: user.name }));
       setDeleteTarget(null);
     },
+    onError: (err: Error) => notifyError(err.message),
   });
 
   const applyFilters = (list: TUser[], q: string, role: t.RoleFilter) =>
@@ -221,7 +223,7 @@ export function UsersPage() {
         confirmLabel={localize('com_ui_delete')}
         saving={deleteMutation.isPending}
         onConfirm={() => {
-          if (deleteTarget) deleteMutation.mutate(deleteTarget.id);
+          if (deleteTarget) deleteMutation.mutate(deleteTarget);
         }}
         onCancel={() => setDeleteTarget(null)}
       />

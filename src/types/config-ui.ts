@@ -48,12 +48,6 @@ export interface ConfigPageProps {
   initialScope?: string;
 }
 
-export type ToastState =
-  | { type: 'saving' }
-  | { type: 'saved' }
-  | { type: 'error'; message: string }
-  | null;
-
 export interface ConfigTabBarProps {
   tabs: ConfigTab[];
   activeTab: string;

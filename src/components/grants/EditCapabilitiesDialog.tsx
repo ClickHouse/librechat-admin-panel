@@ -6,10 +6,10 @@ import type { AdminSystemGrant } from '@librechat/data-schemas';
 import type * as t from '@/types';
 import { grantCapabilityFn, principalGrantsQueryOptions, revokeCapabilityFn } from '@/server';
 import { getScopeTypeConfig, SystemCapabilities } from '@/constants';
+import { cn, notifySuccess, notifyError } from '@/utils';
 import { CapabilityPanel } from './CapabilityPanel';
 import { LoadingState } from '@/components/shared';
 import { useLocalize } from '@/hooks';
-import { cn } from '@/utils';
 
 function grantsToRecord(grants: AdminSystemGrant[]): Record<string, boolean> {
   const record: Record<string, boolean> = {};
@@ -51,8 +51,10 @@ export function EditCapabilitiesDialog({
   }, [open, isLoading, grants]);
 
   const saveMutation = useMutation({
-    mutationFn: async () => {
-      if (!principalType || !principalId) return;
+    mutationFn: async (vars: { name: string }) => {
+      if (!principalType || !principalId) {
+        throw new Error(localize('com_cap_principal_unavailable'));
+      }
       const toGrant: string[] = [];
       const toRevoke: string[] = [];
       for (const [cap, enabled] of Object.entries(capabilities)) {
@@ -66,22 +68,25 @@ export function EditCapabilitiesDialog({
       for (const cap of toRevoke) {
         await revokeCapabilityFn({ data: { ...shared, capability: cap } });
       }
+      return vars;
     },
-    onSuccess: () => {
+    onSuccess: (_data, vars) => {
       queryClient.invalidateQueries({ queryKey: ['systemGrants'] });
       queryClient.invalidateQueries({ queryKey: ['effectiveCapabilities'] });
       queryClient.invalidateQueries({ queryKey: ['auditLog'] });
+      notifySuccess(localize('com_toast_capabilities_saved', { name: vars.name }));
       onClose();
     },
-    onError: (err: Error) => setError(err.message),
+    onError: (err: Error) => notifyError(err.message),
   });
 
   const hasChanges = Object.keys(capabilities).some((cap) => capabilities[cap] !== baseline[cap]);
 
   const handleSave = useCallback(() => {
     setError('');
-    saveMutation.mutate();
-  }, [saveMutation]);
+    if (!principalType || !principalId) return;
+    saveMutation.mutate({ name: principalName });
+  }, [saveMutation, principalType, principalId, principalName]);
 
   const dialogTitle = principalType
     ? `${localize('com_cap_edit_title', { name: principalName })}`

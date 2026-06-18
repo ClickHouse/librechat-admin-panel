@@ -18,8 +18,8 @@ import {
   TrashButton,
   UserSearchInline,
 } from '@/components/shared';
+import { cn, notifySuccess, notifyError } from '@/utils';
 import { useLocalize } from '@/hooks';
-import { cn } from '@/utils';
 
 type EditGroupTab = 'details' | 'members';
 
@@ -73,10 +73,10 @@ export function EditGroupDialog({ group, canManage, onClose }: t.EditGroupDialog
   };
 
   const mutation = useMutation({
-    mutationFn: async () => {
-      if (!group) return;
+    mutationFn: async ({ name: submittedName }: { name: string }) => {
+      if (!group) throw new Error(localize('com_access_group_unavailable'));
       if (detailsDirty) {
-        await updateGroupFn({ data: { id: group.id, name, description } });
+        await updateGroupFn({ data: { id: group.id, name: submittedName, description } });
       }
       const memberResults = await Promise.allSettled([
         ...pendingAdditions.map((user) =>
@@ -95,24 +95,27 @@ export function EditGroupDialog({ group, canManage, onClose }: t.EditGroupDialog
         parts.push(localize('com_access_member_ops_failed', { count: failures.length }));
         throw new Error(parts.join(', '));
       }
+      return { name: submittedName };
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['groups'] });
       queryClient.invalidateQueries({ queryKey: ['groupAssignments'] });
       queryClient.invalidateQueries({ queryKey: ['groupMembers', group?.id] });
+      notifySuccess(localize('com_toast_group_updated', { name: data.name }));
       onClose();
     },
-    onError: (err: Error) => setError(err.message),
+    onError: (err: Error) => notifyError(err.message),
   });
 
   const doSubmit = () => {
     setError('');
+    if (!group) return;
     if (!name.trim()) {
       setError(localize('com_access_name_required'));
       setActiveTab('details');
       return;
     }
-    mutation.mutate();
+    mutation.mutate({ name });
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -140,14 +143,15 @@ export function EditGroupDialog({ group, canManage, onClose }: t.EditGroupDialog
             ariaLabel={localize('com_access_edit_group')}
           >
             <Tabs.TriggersList>
-              <Tabs.Trigger value="details">
-                {localize('com_access_tab_details')}
-              </Tabs.Trigger>
-              <Tabs.Trigger value="members">
-                {localize('com_access_tab_members')}
-              </Tabs.Trigger>
+              <Tabs.Trigger value="details">{localize('com_access_tab_details')}</Tabs.Trigger>
+              <Tabs.Trigger value="members">{localize('com_access_tab_members')}</Tabs.Trigger>
             </Tabs.TriggersList>
-            <Tabs.Content value="details" forceMount tabIndex={-1} className={cn(activeTab !== 'details' && 'hidden')}>
+            <Tabs.Content
+              value="details"
+              forceMount
+              tabIndex={-1}
+              className={cn(activeTab !== 'details' && 'hidden')}
+            >
               <div className="flex flex-col gap-5 pt-5">
                 <div className="flex flex-col gap-1.5">
                   <label
@@ -188,7 +192,12 @@ export function EditGroupDialog({ group, canManage, onClose }: t.EditGroupDialog
                 </div>
               </div>
             </Tabs.Content>
-            <Tabs.Content value="members" forceMount tabIndex={-1} className={cn(activeTab !== 'members' && 'hidden')}>
+            <Tabs.Content
+              value="members"
+              forceMount
+              tabIndex={-1}
+              className={cn(activeTab !== 'members' && 'hidden')}
+            >
               <div className="flex flex-col gap-4 pt-5">
                 {canManage && (
                   <UserSearchInline
@@ -216,7 +225,12 @@ export function EditGroupDialog({ group, canManage, onClose }: t.EditGroupDialog
                       {localize('com_access_pending_removals', { count: pendingRemovals.length })}
                     </span>
                     <SelectedMemberList
-                      users={pendingRemovals.map((m) => ({ id: m.userId, name: m.name, email: m.email, avatarUrl: m.avatarUrl }))}
+                      users={pendingRemovals.map((m) => ({
+                        id: m.userId,
+                        name: m.name,
+                        email: m.email,
+                        avatarUrl: m.avatarUrl,
+                      }))}
                       onRemove={unstageRemoval}
                       disabled={mutation.isPending}
                     />
@@ -254,7 +268,9 @@ export function EditGroupDialog({ group, canManage, onClose }: t.EditGroupDialog
             <Button
               type="primary"
               label={localize('com_ui_save')}
-              disabled={!canManage || !name.trim() || (!detailsDirty && !membersDirty) || mutation.isPending}
+              disabled={
+                !canManage || !name.trim() || (!detailsDirty && !membersDirty) || mutation.isPending
+              }
             />
           </div>
         </form>

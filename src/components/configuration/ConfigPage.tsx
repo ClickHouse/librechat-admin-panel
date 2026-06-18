@@ -22,13 +22,16 @@ import {
   unflattenObject,
   serializeKVPairs,
   deepSerializeKVPairs,
-  cn,
   normalizeImportConfig,
   hasConfigCapability,
   getTabsWithPermission,
+  notifySuccess,
+  notifyError,
 } from '@/utils';
 import { useLocalize, useHighlightRef, useActiveSection, useCapabilities } from '@/hooks';
 import { CONFIG_TABS, OTHER_TAB, SECTION_META, HIDDEN_SECTIONS } from './configMeta';
+import { mergeIndexedArrayEdits, partitionScopeResetPaths } from './utils';
+import { validateMcpCrossField } from './sections/McpServersRenderer';
 import { ScopeSelector, ScopeTriggerButton } from './ScopeSelector';
 import { ConfigTableOfContents } from './ConfigTableOfContents';
 import { ConfirmSaveDialog } from './ConfirmSaveDialog';
@@ -36,8 +39,6 @@ import { StickyActionBar } from '@/components/shared';
 import { ConfigTabContent } from './ConfigTabContent';
 import { ImportYamlDialog } from './ImportYamlDialog';
 import { ContentToolbar } from './ContentToolbar';
-import { validateMcpCrossField } from './sections/McpServersRenderer';
-import { mergeIndexedArrayEdits, partitionScopeResetPaths } from './utils';
 import { SystemCapabilities } from '@/constants';
 import { ConfigTabBar } from './ConfigTabBar';
 import { InfoBanner } from './InfoBanner';
@@ -192,18 +193,6 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
   const [importSuccess, setImportSuccess] = useState(false);
   const dismissTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => () => clearTimeout(dismissTimer.current), []);
-
-  const [toast, setToast] = useState<t.ToastState>(null);
-  const toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  useEffect(() => () => clearTimeout(toastTimer.current), []);
-
-  const showToast = useCallback((state: t.ToastState, autoHideMs?: number) => {
-    setToast(state);
-    clearTimeout(toastTimer.current);
-    if (autoHideMs) {
-      toastTimer.current = setTimeout(() => setToast(null), autoHideMs);
-    }
-  }, []);
 
   const [showConfiguredOnly, setShowConfiguredOnly] = useState(false);
 
@@ -477,8 +466,8 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
     setConfirmSaveOpen(false);
     setSaving(false);
     setSaveError(null);
-    showToast({ type: 'saved' }, 3000);
-  }, [showToast]);
+    notifySuccess(localize('com_config_saved'));
+  }, [localize]);
 
   const invalidateAndResetBase = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: ['baseConfig'] });
@@ -494,8 +483,7 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
 
   const importMutation = useMutation({
     mutationFn: (config: Record<string, t.ConfigValue>) => importBaseConfigFn({ data: { config } }),
-    onMutate: () => showToast({ type: 'saving' }),
-    onError: (err: Error) => showToast({ type: 'error', message: err.message }, 5000),
+    onError: (err: Error) => notifyError(err.message),
     onSuccess: invalidateAndResetBase,
   });
 
@@ -544,7 +532,7 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
           field: missingField,
         });
         setSaveError(message);
-        showToast({ type: 'error', message }, 5000);
+        notifyError(message);
         return;
       }
     }
@@ -568,7 +556,6 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
 
     setSaving(true);
     setSaveError(null);
-    showToast({ type: 'saving' });
 
     try {
       /** Resets must land before saves so a delete-then-recreate at the same path (e.g. MCP entry replaced with different fields) wipes stale fields first and the new leaf PATCHes don't race against the DELETE. */
@@ -629,7 +616,7 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
       const message = err instanceof Error ? err.message : String(err);
       setSaving(false);
       setSaveError(message);
-      showToast({ type: 'error', message }, 5000);
+      notifyError(message);
     }
   }, [
     touchedPaths,
@@ -640,7 +627,6 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
     configValues,
     baseConfigData,
     localize,
-    showToast,
     editingScope,
     invalidateAndResetScope,
     invalidateAndResetBase,
@@ -718,7 +704,7 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
       const normalized = normalizeImportConfig(appConfig);
       if (isEditingScope && editingScope) {
         handleImportAsProfile(normalized, editingScope).catch((err: Error) => {
-          showToast({ type: 'error', message: err.message }, 5000);
+          notifyError(err.message);
         });
       } else {
         importMutation.mutate(normalized, { onSuccess: () => showImportSuccess() });
@@ -954,7 +940,7 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
               showConfiguredOnly={showConfiguredOnly}
               isEditingScope={isEditingScope}
               baseRecordKeys={baseRecordKeys}
-              onValidationError={(message) => showToast({ type: 'error', message }, 5000)}
+              onValidationError={(message) => notifyError(message)}
             />
           </div>
         </div>
@@ -978,38 +964,6 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
         />
       )}
 
-      {toast &&
-        createPortal(
-          <div
-            className={cn(
-              'config-toast',
-              toast.type === 'saving' && 'config-toast-info',
-              toast.type === 'saved' && 'config-toast-success',
-              toast.type === 'error' && 'config-toast-error',
-            )}
-          >
-            {toast.type === 'saving' && (
-              <>
-                <span className="config-toast-spinner" />
-                {localize('com_config_saving')}
-              </>
-            )}
-            {toast.type === 'saved' && (
-              <>
-                <Icon name="check" size="sm" />
-                {localize('com_config_saved')}
-              </>
-            )}
-            {toast.type === 'error' && (
-              <>
-                <Icon name="warning" size="sm" />
-                {toast.message}
-              </>
-            )}
-          </div>,
-          document.body,
-        )}
-
       <ConfirmSaveDialog
         open={confirmSaveOpen}
         editedValues={serializedEditedValues}
@@ -1026,7 +980,7 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
         currentSelection={selectedScope}
         onSelect={handleScopeChange}
         permissions={permissions}
-        onError={(msg) => showToast({ type: 'error', message: msg }, 5000)}
+        onError={(msg) => notifyError(msg)}
       />
 
       <ImportYamlDialog

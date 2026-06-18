@@ -5,8 +5,8 @@ import type { AdminUserSearchResult } from '@librechat/data-schemas';
 import type * as t from '@/types';
 import { SelectedMemberList, UserSearchInline } from '@/components/shared';
 import { addGroupMemberFn, createGroupFn } from '@/server';
+import { cn, notifySuccess, notifyError } from '@/utils';
 import { useLocalize } from '@/hooks';
-import { cn } from '@/utils';
 
 export function CreateGroupDialog({ open, onClose }: t.CreateGroupDialogProps) {
   const localize = useLocalize();
@@ -27,20 +27,24 @@ export function CreateGroupDialog({ open, onClose }: t.CreateGroupDialogProps) {
   };
 
   const mutation = useMutation({
-    mutationFn: async () => {
-      const { group } = await createGroupFn({ data: { name, description } });
+    mutationFn: async ({ name: submittedName }: { name: string }) => {
+      const { group } = await createGroupFn({
+        data: { name: submittedName, description },
+      });
       for (const user of selectedUsers) {
         await addGroupMemberFn({ data: { groupId: group.id, userId: user.id } });
       }
+      return { name: submittedName };
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['groups'] });
       queryClient.invalidateQueries({ queryKey: ['groupMembers'] });
       queryClient.invalidateQueries({ queryKey: ['availableScopes'] });
       queryClient.invalidateQueries({ queryKey: ['groupAssignments'] });
+      notifySuccess(localize('com_toast_group_created', { name: data.name }));
       resetAndClose();
     },
-    onError: (err: Error) => setError(err.message),
+    onError: (err: Error) => notifyError(err.message),
   });
 
   const doSubmit = () => {
@@ -50,7 +54,7 @@ export function CreateGroupDialog({ open, onClose }: t.CreateGroupDialogProps) {
       setActiveTab('details');
       return;
     }
-    mutation.mutate();
+    mutation.mutate({ name });
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -89,14 +93,15 @@ export function CreateGroupDialog({ open, onClose }: t.CreateGroupDialogProps) {
             ariaLabel={localize('com_access_create_group')}
           >
             <Tabs.TriggersList>
-              <Tabs.Trigger value="details">
-                {localize('com_access_tab_details')}
-              </Tabs.Trigger>
-              <Tabs.Trigger value="members">
-                {localize('com_access_tab_members')}
-              </Tabs.Trigger>
+              <Tabs.Trigger value="details">{localize('com_access_tab_details')}</Tabs.Trigger>
+              <Tabs.Trigger value="members">{localize('com_access_tab_members')}</Tabs.Trigger>
             </Tabs.TriggersList>
-            <Tabs.Content value="details" forceMount tabIndex={-1} className={cn(activeTab !== 'details' && 'hidden')}>
+            <Tabs.Content
+              value="details"
+              forceMount
+              tabIndex={-1}
+              className={cn(activeTab !== 'details' && 'hidden')}
+            >
               <div className="flex flex-col gap-5 pt-5">
                 <div className="flex flex-col gap-1.5">
                   <label
@@ -133,7 +138,12 @@ export function CreateGroupDialog({ open, onClose }: t.CreateGroupDialogProps) {
                 </div>
               </div>
             </Tabs.Content>
-            <Tabs.Content value="members" forceMount tabIndex={-1} className={cn(activeTab !== 'members' && 'hidden')}>
+            <Tabs.Content
+              value="members"
+              forceMount
+              tabIndex={-1}
+              className={cn(activeTab !== 'members' && 'hidden')}
+            >
               <div className="flex flex-col gap-4 pt-5">
                 <UserSearchInline
                   existingIds={selectedUsers.map((u) => u.id)}

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { SystemRoles } from 'librechat-data-provider';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import type * as t from '@/types';
+import { notifySuccess, notifyError } from '@/utils';
 import { FormDialog } from '@/components/shared';
 import { createUserFn } from '@/server';
 import { useLocalize } from '@/hooks';
@@ -15,12 +16,16 @@ export function CreateUserDialog({ open, onClose }: t.CreateUserDialogProps) {
   const [error, setError] = useState('');
 
   const mutation = useMutation({
-    mutationFn: () => createUserFn({ data: { name, email, role } }),
-    onSuccess: () => {
+    mutationFn: async ({ name: submittedName }: { name: string }) => {
+      await createUserFn({ data: { name: submittedName, email, role } });
+      return { name: submittedName };
+    },
+    onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['users'] });
+      notifySuccess(localize('com_toast_user_invited', { name: data.name }));
       resetAndClose();
     },
-    onError: (err: Error) => setError(err.message),
+    onError: (err: Error) => notifyError(err.message),
   });
 
   const resetAndClose = () => {
@@ -41,7 +46,7 @@ export function CreateUserDialog({ open, onClose }: t.CreateUserDialogProps) {
       setError(localize('com_users_email_required'));
       return;
     }
-    mutation.mutate();
+    mutation.mutate({ name });
   };
 
   return (
