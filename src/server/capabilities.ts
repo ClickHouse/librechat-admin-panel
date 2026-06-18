@@ -348,7 +348,13 @@ export const getAuditLogPageFn = createServerFn({ method: 'GET' })
   .inputValidator(auditFilterSchema)
   .handler(async ({ data }: { data: AuditFilters }): Promise<AuditLogPage> => {
     await requireCapability(READ_AUDIT_LOG_CAPABILITY);
-    const withDefaults: AuditFilters = { limit: AUDIT_LOG_PAGE_SIZE, ...data };
+    /**
+     * The LibreChat `/api/admin/audit-log` endpoint is a general-purpose event
+     * log, but this UI only renders (and `adminAuditLogEntrySchema` only parses)
+     * grant rows. Force `category=grant` so a non-grant event can never reach
+     * the strict parser and error the whole tab.
+     */
+    const withDefaults: AuditFilters = { limit: AUDIT_LOG_PAGE_SIZE, ...data, category: ['grant'] };
     const response = await apiFetch(`/api/admin/audit-log${buildAuditLogQuery(withDefaults)}`);
     if (!response.ok) {
       await extractApiError(response, 'Failed to fetch audit log');
@@ -411,10 +417,15 @@ export const exportAuditLogServerFn = createServerFn({ method: 'POST' })
   .inputValidator(auditFilterSchema)
   .handler(async ({ data }: { data: AuditFilters }): Promise<{ csv: string }> => {
     await requireCapability(READ_AUDIT_LOG_CAPABILITY);
-    const response = await apiFetch(`/api/admin/audit-log/export.csv${buildAuditLogQuery(data)}`, {
-      method: 'GET',
-      headers: { Accept: 'text/csv' },
-    });
+    /** Grant-scoped like the page fetch — this UI only deals with grant events. */
+    const scoped: AuditFilters = { ...data, category: ['grant'] };
+    const response = await apiFetch(
+      `/api/admin/audit-log/export.csv${buildAuditLogQuery(scoped)}`,
+      {
+        method: 'GET',
+        headers: { Accept: 'text/csv' },
+      },
+    );
     if (!response.ok) {
       await extractApiError(response, 'Failed to export audit log');
     }

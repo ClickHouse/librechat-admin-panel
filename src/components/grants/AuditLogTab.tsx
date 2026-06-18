@@ -290,7 +290,10 @@ export function AuditLogTab() {
   const closeEntry = useCallback(() => {
     void navigate({
       search: (prev: Record<string, unknown>) => {
-        const next = { ...prev };
+        /** Keep the audit-log tab explicit so closing a bare `?entryId=`
+         * permalink (which has no `tab`) returns to the audit list rather than
+         * falling back to the Management tab. */
+        const next: Record<string, unknown> = { ...prev, tab: 'audit-log' };
         delete next.entryId;
         return next;
       },

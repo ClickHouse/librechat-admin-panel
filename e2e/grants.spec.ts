@@ -148,7 +148,7 @@ test.describe('Grants page - Audit Log tab', () => {
   });
 
   test('export button is present', async ({ page }) => {
-    const exportBtn = page.getByRole('button', { name: /export as csv/i });
+    const exportBtn = page.getByRole('button', { name: /export all matching/i });
     await expect(exportBtn).toBeVisible();
   });
 
@@ -180,7 +180,7 @@ test.describe('Grants page - Tab switching', () => {
     await page.waitForTimeout(300);
 
     await expect(page).toHaveURL(/tab=audit-log/);
-    await expect(page.getByRole('button', { name: /export as csv/i })).toBeVisible();
+    await expect(page.getByRole('button', { name: /export all matching/i })).toBeVisible();
 
     const mgmtTab = page.getByRole('tab', { name: /management/i });
     await mgmtTab.click();
