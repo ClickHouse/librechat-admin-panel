@@ -210,8 +210,6 @@
   "com_config_field_optional": "Optional",
   "com_config_field_version": "Version",
   "com_config_field_cache": "Cache",
-  "com_config_field_pinned": "Pinned",
-  "com_config_field_promptCacheTtl": "Prompt cache TTL",
   "com_config_field_ocr": "OCR",
   "com_config_field_webSearch": "Web search",
   "com_config_field_memory": "Memory",
