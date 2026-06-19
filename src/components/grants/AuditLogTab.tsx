@@ -10,6 +10,7 @@ import {
   ACTION_BADGE_STATE,
   ACTION_LABEL_KEY,
   auditCapability,
+  buildEntryPermalink,
   capabilityLabel,
   dateToIsoDate,
   formatTimestamp,
@@ -30,8 +31,8 @@ import {
   SearchInput,
 } from '@/components/shared';
 import { useAnnouncement, useDebouncedFilter, useLocalize } from '@/hooks';
-import { AuditLogDetailDrawer } from './AuditLogDetailDrawer';
 import { getScopeTypeConfig, isAuditEntryId } from '@/constants';
+import { AuditLogDetailDrawer } from './AuditLogDetailDrawer';
 import { cn } from '@/utils';
 
 const AUDIT_ACTIONS: readonly AuditAction[] = ['grant.assigned', 'grant.removed'] as const;
@@ -313,7 +314,7 @@ export function AuditLogTab() {
         announce(localize('com_a11y_copy_failed'));
         return false;
       }
-      const url = `${window.location.origin}/grants?tab=audit-log&entryId=${encodeURIComponent(id)}`;
+      const url = buildEntryPermalink(id, window.location.origin, import.meta.env.VITE_BASE_PATH || '');
       try {
         await navigator.clipboard.writeText(url);
         return true;

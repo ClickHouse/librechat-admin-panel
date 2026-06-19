@@ -73,3 +73,11 @@ export function capabilityLabel(cap: string, localize: (key: string) => string):
   const label = localize(key);
   return label !== key ? label : cap;
 }
+
+/** Build a deep-link to a single audit-log entry, preserving any configured
+ * `VITE_BASE_PATH` so the link resolves under subpath deployments (e.g.
+ * `/adminpanel`). `basePath` is normalized to drop a trailing slash. */
+export function buildEntryPermalink(id: string, origin: string, basePath: string): string {
+  const base = basePath.replace(/\/$/, '');
+  return `${origin}${base}/grants?tab=audit-log&entryId=${encodeURIComponent(id)}`;
+}

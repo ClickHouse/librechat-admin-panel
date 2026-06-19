@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   ACTION_BADGE_STATE,
   auditCapability,
+  buildEntryPermalink,
   capabilityLabel,
   dateToIsoDate,
   formatTimestamp,
@@ -120,5 +121,29 @@ describe('localDayBoundaryIso', () => {
     expect(parsed.getMinutes()).toBe(59);
     expect(parsed.getSeconds()).toBe(59);
     expect(parsed.getMilliseconds()).toBe(999);
+  });
+});
+
+describe('buildEntryPermalink', () => {
+  it('builds a root-mounted permalink when no base path is configured', () => {
+    expect(buildEntryPermalink('abc', 'https://host', '')).toBe(
+      'https://host/grants?tab=audit-log&entryId=abc',
+    );
+  });
+
+  it('preserves a configured base path for subpath deployments', () => {
+    expect(buildEntryPermalink('abc', 'https://host', '/adminpanel')).toBe(
+      'https://host/adminpanel/grants?tab=audit-log&entryId=abc',
+    );
+  });
+
+  it('normalizes a trailing slash on the base path', () => {
+    expect(buildEntryPermalink('abc', 'https://host', '/adminpanel/')).toBe(
+      'https://host/adminpanel/grants?tab=audit-log&entryId=abc',
+    );
+  });
+
+  it('encodes the entry id', () => {
+    expect(buildEntryPermalink('a/b c', 'https://host', '')).toContain('entryId=a%2Fb%20c');
   });
 });
