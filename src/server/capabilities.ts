@@ -413,7 +413,7 @@ export const auditLogEntryQueryOptions = (id: string | undefined) =>
 
 export const exportAuditLogServerFn = createServerFn({ method: 'POST' })
   .inputValidator(auditFilterSchema)
-  .handler(async ({ data }: { data: AuditFilters }): Promise<{ csv: string }> => {
+  .handler(async ({ data }: { data: AuditFilters }): Promise<Response> => {
     await requireCapability(READ_AUDIT_LOG_CAPABILITY);
     /** Grant-scoped like the page fetch — this UI only deals with grant events. */
     const scoped: AuditFilters = { ...data, category: ['grant'] };
@@ -427,6 +427,21 @@ export const exportAuditLogServerFn = createServerFn({ method: 'POST' })
     if (!response.ok) {
       await extractApiError(response, 'Failed to export audit log');
     }
-    const csv = await response.text();
-    return { csv };
+    /**
+     * Stream the backend's CSV straight through rather than buffering the whole
+     * file into a string + JSON server-function payload. This preserves the
+     * backend's streaming/backpressure/cancellation and avoids exhausting BFF
+     * memory or hitting server-function payload limits on large exports. A
+     * server fn that returns a `Response` is passed through verbatim, so the
+     * client receives this streamed body to turn into a download.
+     */
+    const filename = `audit-log-${new Date().toISOString().slice(0, 10)}.csv`;
+    return new Response(response.body, {
+      status: 200,
+      headers: {
+        'Content-Type': 'text/csv; charset=utf-8',
+        'Content-Disposition': `attachment; filename="${filename}"`,
+        'Cache-Control': 'no-store',
+      },
+    });
   });

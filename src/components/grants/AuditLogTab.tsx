@@ -87,8 +87,7 @@ function DatePickerCell({
   );
 }
 
-function downloadCsv(csv: string): void {
-  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+function downloadBlob(blob: Blob): void {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
@@ -351,8 +350,10 @@ export function AuditLogTab() {
         targetIdFilter.value,
         capabilityFilter.value,
       );
-      const { csv } = await exportAuditLogServerFn({ data: exportFilters });
-      downloadCsv(csv);
+      /** The server fn streams the backend CSV through as a `Response`; turn its
+       * body into a Blob for the browser download (no BFF-side buffering). */
+      const response = await exportAuditLogServerFn({ data: exportFilters });
+      downloadBlob(await response.blob());
     } catch {
       /**
        * Surface the failure to screen readers — without this branch the
