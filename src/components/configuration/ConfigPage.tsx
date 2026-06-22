@@ -913,7 +913,7 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
             </div>
           )}
           <div
-            className="h-full overflow-auto pl-4 [scrollbar-gutter:stable]"
+            className="h-full overflow-auto pl-4 scrollbar-gutter-stable"
             ref={scrollCallbackRef}
           >
             <ConfigTabContent
