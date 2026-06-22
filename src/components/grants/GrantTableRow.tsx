@@ -1,3 +1,4 @@
+import { Badge } from '@clickhouse/click-ui';
 import type * as t from '@/types';
 import { useLocalize } from '@/hooks';
 import { cn } from '@/utils';
@@ -25,14 +26,11 @@ export function GrantTableRow({ row, isLast, onClick, onKeyDown, rowRef }: t.Gra
           : localize('com_grants_capability_count', { count: row.grantCount })}
       </td>
       <td className="px-4 py-3">
-        <span
-          className={cn(
-            'inline-block rounded-full px-2 py-0.5 text-[10px] font-medium',
-            row.isActive ? 'badge-success' : 'badge-danger',
-          )}
-        >
-          {row.isActive ? localize('com_ui_active') : localize('com_ui_paused')}
-        </span>
+        <Badge
+          size="sm"
+          state={row.isActive ? 'success' : 'danger'}
+          text={row.isActive ? localize('com_ui_active') : localize('com_ui_paused')}
+        />
       </td>
     </tr>
   );

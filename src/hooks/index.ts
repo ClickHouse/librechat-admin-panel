@@ -2,6 +2,7 @@ export * from './useActiveSection';
 export * from './useAnnouncement';
 export * from './useCapabilities';
 export * from './useCommandMenu';
+export * from './useDebouncedFilter';
 export * from './useHighlightRef';
 export * from './useLocalize';
 export * from './useProfileMutations';

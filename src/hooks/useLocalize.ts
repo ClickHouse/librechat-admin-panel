@@ -1,3 +1,4 @@
+import { useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import type * as t from '@/types';
 
@@ -7,8 +8,9 @@ export function useLocalize(): (
 ) => string {
   const { t: translate } = useTranslation();
 
-  const localize = (phraseKey: t.TranslationKeys, options?: Record<string, string | number>) =>
-    translate(phraseKey, options ?? {});
-
-  return localize;
+  return useCallback(
+    (phraseKey: t.TranslationKeys, options?: Record<string, string | number>) =>
+      translate(phraseKey, options ?? {}),
+    [translate],
+  );
 }
