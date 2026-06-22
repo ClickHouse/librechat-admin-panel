@@ -14,6 +14,7 @@ import {
   resetBaseConfigFieldFn,
   getResolvedConfigFn,
   importBaseConfigFn,
+  resetBaseConfigFn,
   baseConfigOptions,
   saveBaseConfigFn,
 } from '@/server';
@@ -33,9 +34,10 @@ import { CONFIG_TABS, OTHER_TAB, SECTION_META, HIDDEN_SECTIONS } from './configM
 import { mergeIndexedArrayEdits, partitionScopeResetPaths } from './utils';
 import { validateMcpCrossField } from './sections/McpServersRenderer';
 import { ScopeSelector, ScopeTriggerButton } from './ScopeSelector';
+import { StickyActionBar, Hovercard } from '@/components/shared';
 import { ConfigTableOfContents } from './ConfigTableOfContents';
+import { ResetBaseConfigDialog } from './ResetBaseConfigDialog';
 import { ConfirmSaveDialog } from './ConfirmSaveDialog';
-import { StickyActionBar } from '@/components/shared';
 import { ConfigTabContent } from './ConfigTabContent';
 import { ImportYamlDialog } from './ImportYamlDialog';
 import { ContentToolbar } from './ContentToolbar';
@@ -487,6 +489,30 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
     onSuccess: invalidateAndResetBase,
   });
 
+  const [resetBaseOpen, setResetBaseOpen] = useState(false);
+  const [resettingBase, setResettingBase] = useState(false);
+  const [resetBaseError, setResetBaseError] = useState<string | null>(null);
+
+  const handleResetBaseConfig = useCallback(async () => {
+    if (resettingBase) return;
+    setResettingBase(true);
+    setResetBaseError(null);
+    try {
+      await resetBaseConfigFn();
+      await queryClient.invalidateQueries({ queryKey: ['baseConfig'] });
+      setEditedValues({});
+      setTouchedPaths(new Set());
+      setResettingBase(false);
+      setResetBaseOpen(false);
+      notifySuccess(localize('com_config_reset_base_success'));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setResettingBase(false);
+      setResetBaseError(message);
+      notifyError(message);
+    }
+  }, [resettingBase, queryClient, localize]);
+
   const handleResetField = useCallback((fieldPath: string) => {
     startTransition(() => {
       setTouchedPaths((prev) => {
@@ -875,6 +901,14 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
 
   const banner = renderBanner();
 
+  const resetBaseTitle = (() => {
+    if (!canManageConfig) {
+      return localize('com_cap_no_permission', { cap: SystemCapabilities.MANAGE_CONFIGS });
+    }
+    if (isDirty) return localize('com_config_reset_base_dirty');
+    return undefined;
+  })();
+
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden pt-2">
       <div className="shrink-0 px-4">
@@ -888,6 +922,13 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
               : undefined
           }
           onImportClick={() => setImportOpen(true)}
+          showReset={!isEditingScope && dbOverridePaths.size > 0}
+          resetDisabled={isDirty || !canManageConfig}
+          resetTitle={resetBaseTitle}
+          onResetClick={() => {
+            setResetBaseError(null);
+            setResetBaseOpen(true);
+          }}
           showScope={permissions.canView}
           scopeSelection={selectedScope}
           onScopeClick={() => setScopeSelectorOpen(true)}
@@ -913,7 +954,7 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
             </div>
           )}
           <div
-            className="h-full overflow-auto pl-4 scrollbar-gutter-stable"
+            className="h-full scrollbar-gutter-stable overflow-auto pl-4"
             ref={scrollCallbackRef}
           >
             <ConfigTabContent
@@ -989,6 +1030,19 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
         onImport={handleImport}
         onImportAsProfile={handleImportAsProfile}
       />
+
+      <ResetBaseConfigDialog
+        open={resetBaseOpen}
+        overrideCount={dbOverridePaths.size}
+        resetting={resettingBase}
+        error={resetBaseError}
+        onConfirm={handleResetBaseConfig}
+        onCancel={() => {
+          if (resettingBase) return;
+          setResetBaseOpen(false);
+          setResetBaseError(null);
+        }}
+      />
     </div>
   );
 }
@@ -998,6 +1052,10 @@ function HeaderActions({
   importDisabled,
   importTitle,
   onImportClick,
+  showReset,
+  resetDisabled,
+  resetTitle,
+  onResetClick,
   showScope,
   scopeSelection,
   onScopeClick,
@@ -1006,6 +1064,10 @@ function HeaderActions({
   importDisabled: boolean;
   importTitle?: string;
   onImportClick: () => void;
+  showReset: boolean;
+  resetDisabled: boolean;
+  resetTitle?: string;
+  onResetClick: () => void;
   showScope: boolean;
   scopeSelection: t.ScopeSelection;
   onScopeClick: () => void;
@@ -1033,6 +1095,31 @@ function HeaderActions({
           </span>
           {localize('com_config_import_yaml')}
         </button>
+      )}
+      {showReset && (
+        <div className="flex shrink-0 items-center gap-1.5">
+          <button
+            type="button"
+            onClick={onResetClick}
+            disabled={resetDisabled}
+            aria-disabled={resetDisabled || undefined}
+            title={resetTitle}
+            className="flex shrink-0 cursor-pointer items-center gap-1.5 rounded-lg border border-(--cui-color-stroke-default) bg-transparent px-3 py-1.5 text-sm text-(--cui-color-text-default) transition-colors hover:border-(--cui-color-accent-danger) hover:text-(--cui-color-accent-danger) disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-(--cui-color-stroke-default) disabled:hover:text-(--cui-color-text-default)"
+          >
+            <span aria-hidden="true">
+              <Icon name="refresh" size="xs" />
+            </span>
+            {localize('com_config_reset_base')}
+          </button>
+          <Hovercard
+            label={localize('com_config_reset_base_info_label')}
+            heading={localize('com_config_reset_base')}
+            placement="bottom-end"
+            trigger={<Icon name="information" size="sm" />}
+          >
+            {localize('com_config_reset_base_info')}
+          </Hovercard>
+        </div>
       )}
       {showScope && <ScopeTriggerButton currentSelection={scopeSelection} onClick={onScopeClick} />}
     </>

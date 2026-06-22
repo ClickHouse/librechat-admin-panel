@@ -22,6 +22,7 @@
     "format:check": "prettier --check 'src/**/*.{ts,tsx,css,json}'"
   },
   "dependencies": {
+    "@ariakit/react": "^0.4.29",
     "@clickhouse/click-ui": "0.2.0-rc.4",
     "@librechat/data-schemas": "^0.0.55",
     "@radix-ui/react-dialog": "1.1.15",

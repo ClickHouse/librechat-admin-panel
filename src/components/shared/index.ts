@@ -4,6 +4,7 @@ export { Avatar } from './Avatar';
 export { EditButton } from './EditButton';
 export { EmptyState } from './EmptyState';
 export { FormDialog } from './FormDialog';
+export { Hovercard } from './Hovercard';
 export { KebabMenu } from './KebabMenu';
 export { LoadingState } from './LoadingState';
 export { Pagination } from './Pagination';
