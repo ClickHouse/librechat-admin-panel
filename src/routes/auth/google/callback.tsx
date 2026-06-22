@@ -36,7 +36,7 @@ export const Route = createFileRoute('/auth/google/callback')({
       if (result.error) {
         return { error: 'exchange_failed' as const, message: result.message };
       }
-      throw redirect({ to: '/' });
+      throw redirect({ to: result.redirectTo ?? '/' });
     } catch (e) {
       if (e instanceof Response || (e && typeof e === 'object' && 'to' in e)) throw e;
       return { error: 'exchange_failed' as const };

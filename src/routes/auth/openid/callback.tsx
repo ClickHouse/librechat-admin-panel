@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { createFileRoute, redirect, Link } from '@tanstack/react-router';
+import { Link, createFileRoute, redirect } from '@tanstack/react-router';
 import { oauthExchangeFn } from '@/server';
 import { useLocalize } from '@/hooks';
 
@@ -34,7 +34,7 @@ export const Route = createFileRoute('/auth/openid/callback')({
       if (result.error) {
         return { error: 'exchange_failed' as const, message: result.message };
       }
-      throw redirect({ to: '/' });
+      throw redirect({ to: result.redirectTo ?? '/' });
     } catch (e) {
       if (e instanceof Response || (e && typeof e === 'object' && 'to' in e)) throw e;
       return { error: 'exchange_failed' as const };

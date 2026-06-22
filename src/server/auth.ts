@@ -10,6 +10,7 @@ import { getApiBaseUrl, getServerApiUrl } from './utils/url';
 import { refreshAdminTokenDeduped } from './utils/refresh';
 import { buildOAuthExchangePayload } from './utils/oauth';
 import { useAppSession, SESSION_CONFIG } from './session';
+import { sanitizeInternalRedirect } from '@/utils';
 import { OAUTH_PROVIDERS } from '@/constants';
 
 /** Extract a named cookie value from `set-cookie` response headers. */
@@ -361,6 +362,7 @@ export const getStartupConfigFn = createServerFn({ method: 'GET' }).handler(
       const response = await fetch(`${getServerApiUrl()}/api/config`, { headers });
       if (!response.ok) return { providers: [], ssoOnly };
       const config = (await response.json()) as t.StartupConfigResponse;
+      const socialLogins = Array.isArray(config.socialLogins) ? config.socialLogins : undefined;
       const providers: t.ResolvedProvider[] = [];
       for (const def of OAUTH_PROVIDERS) {
         if (config[def.enabledKey as keyof t.StartupConfigResponse] !== true) continue;
@@ -372,6 +374,13 @@ export const getStartupConfigFn = createServerFn({ method: 'GET' }).handler(
          * OpenID has its own registration path and is unaffected.
          */
         if (def.social && config.socialLoginEnabled !== true) continue;
+        /**
+         * Honor the deployer's `socialLogins` allowlist the chat client uses to
+         * decide which buttons to render: a provider omitted from that list is
+         * hidden even when its *LoginEnabled flag is set. When the list is
+         * absent the upstream default allows every enabled provider.
+         */
+        if (socialLogins && !socialLogins.includes(def.id)) continue;
         providers.push({
           id: def.id,
           label: def.labelKey
@@ -396,7 +405,10 @@ export const startupConfigOptions = queryOptions({
   staleTime: 60_000,
 });
 
-async function buildOAuthLoginUrl(provider: t.OAuthProvider): Promise<string> {
+async function buildOAuthLoginUrl(
+  provider: t.OAuthProvider,
+  redirectTo: string | undefined,
+): Promise<string> {
   const def = OAUTH_PROVIDERS.find((p) => p.id === provider);
   if (!def) throw new Error(`Unknown OAuth provider: ${provider}`);
 
@@ -406,17 +418,23 @@ async function buildOAuthLoginUrl(provider: t.OAuthProvider): Promise<string> {
   const codeChallenge = crypto.createHash('sha256').update(codeVerifier).digest('hex');
   authUrl.searchParams.set('code_challenge', codeChallenge);
 
+  /**
+   * Stash the post-login destination in the admin session so the callback can
+   * restore it after the provider round-trip, the same way `codeVerifier` rides
+   * through. Sanitized to a same-origin path to avoid an open redirect.
+   */
+  const postLoginRedirect = sanitizeInternalRedirect(redirectTo);
   const session = await useAppSession();
-  await session.update({ codeVerifier });
+  await session.update({ codeVerifier, postLoginRedirect });
 
   return authUrl.toString();
 }
 
 export const oauthLoginFn = createServerFn({ method: 'POST' })
-  .inputValidator(z.object({ provider: oauthProviderSchema }))
+  .inputValidator(z.object({ provider: oauthProviderSchema, redirectTo: z.string().optional() }))
   .handler(async ({ data }) => {
     try {
-      const authUrl = await buildOAuthLoginUrl(data.provider);
+      const authUrl = await buildOAuthLoginUrl(data.provider, data.redirectTo);
       return { error: false as const, authUrl };
     } catch (error) {
       console.error(`[oauthLoginFn] ${data.provider} initiation error:`, error);
@@ -438,7 +456,7 @@ export const oauthExchangeFn = createServerFn({ method: 'POST' })
       if (requestOrigin) headers['Origin'] = requestOrigin;
 
       const session = await useAppSession();
-      const { codeVerifier } = session.data;
+      const { codeVerifier, postLoginRedirect } = session.data;
       const exchangePayload = buildOAuthExchangePayload(data.code, codeVerifier);
       if (!exchangePayload.ok) {
         console.warn(
@@ -495,9 +513,14 @@ export const oauthExchangeFn = createServerFn({ method: 'POST' })
         lastVerified: now,
         lastActivity: now,
         codeVerifier: undefined,
+        postLoginRedirect: undefined,
       });
 
-      return { error: false, user: exchangeData.user };
+      return {
+        error: false,
+        user: exchangeData.user,
+        redirectTo: sanitizeInternalRedirect(postLoginRedirect),
+      };
     } catch (error) {
       console.error('OAuth exchange error:', error);
       return { error: true, message: 'Failed to complete authentication. Please try again.' };

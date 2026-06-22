@@ -60,18 +60,14 @@ export function AuthCard({
     autoRedirectAttempted.current = true;
 
     setPendingProvider(autoRedirectProvider);
-    oauthLoginFn({ data: { provider: autoRedirectProvider } })
+    oauthLoginFn({ data: { provider: autoRedirectProvider, redirectTo } })
       .then((result) => {
         if (result.error || !result.authUrl) {
           setAutoRedirectFailed(true);
           setGeneralError(result.message || localize('com_auth_sso_redirect_failed'));
           return;
         }
-        const authUrl = new URL(result.authUrl);
-        if (redirectTo && redirectTo !== '/') {
-          authUrl.searchParams.set('redirectTo', redirectTo);
-        }
-        window.location.href = authUrl.toString();
+        window.location.href = result.authUrl;
       })
       .catch(() => {
         setAutoRedirectFailed(true);
@@ -200,7 +196,7 @@ export function AuthCard({
     if (pendingProvider) return;
     setPendingProvider(provider);
     try {
-      const result = await oauthLoginFn({ data: { provider } });
+      const result = await oauthLoginFn({ data: { provider, redirectTo } });
       if (result.error) {
         setGeneralError(result.message || localize('com_auth_login_failed'));
         return;

@@ -13,6 +13,8 @@ export interface SessionData {
   lastVerified?: number;
   lastActivity?: number;
   codeVerifier?: string;
+  /** In-app path to return to after a successful OAuth exchange, captured at login start. */
+  postLoginRedirect?: string;
 }
 
 export interface StartupConfigResponse {
@@ -24,6 +26,7 @@ export interface StartupConfigResponse {
   appleLoginEnabled?: boolean;
   samlLoginEnabled?: boolean;
   socialLoginEnabled?: boolean;
+  socialLogins?: string[];
   openidLabel?: string;
   openidImageUrl?: string;
   openidAutoRedirect?: boolean;
