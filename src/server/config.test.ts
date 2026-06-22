@@ -693,6 +693,14 @@ describe('validateFieldValue', () => {
     expect(result).toEqual({ success: true });
   });
 
+  it('rejects numeric values in enum arrays (not forward-compatible)', () => {
+    const result = validateFieldValue('endpoints.agents.capabilities', [
+      'execute_code',
+      123,
+    ]);
+    expect(result.success).toBe(false);
+  });
+
   it('still rejects type errors even alongside enum arrays', () => {
     const result = validateFieldValue('version', 123);
     expect(result.success).toBe(false);
