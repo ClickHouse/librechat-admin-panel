@@ -34,7 +34,7 @@ import { CONFIG_TABS, OTHER_TAB, SECTION_META, HIDDEN_SECTIONS } from './configM
 import { mergeIndexedArrayEdits, partitionScopeResetPaths } from './utils';
 import { validateMcpCrossField } from './sections/McpServersRenderer';
 import { ScopeSelector, ScopeTriggerButton } from './ScopeSelector';
-import { StickyActionBar, Hovercard } from '@/components/shared';
+import { StickyActionBar } from '@/components/shared';
 import { ConfigTableOfContents } from './ConfigTableOfContents';
 import { ResetBaseConfigDialog } from './ResetBaseConfigDialog';
 import { ConfirmSaveDialog } from './ConfirmSaveDialog';
@@ -1103,29 +1103,19 @@ function HeaderActions({
         </button>
       )}
       {showReset && (
-        <div className="flex shrink-0 items-center gap-1.5">
-          <button
-            type="button"
-            onClick={onResetClick}
-            disabled={resetDisabled}
-            aria-disabled={resetDisabled || undefined}
-            title={resetTitle}
-            className="flex shrink-0 cursor-pointer items-center gap-1.5 rounded-lg border border-(--cui-color-stroke-default) bg-transparent px-3 py-1.5 text-sm text-(--cui-color-text-default) transition-colors hover:border-(--cui-color-accent-danger) hover:text-(--cui-color-accent-danger) disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-(--cui-color-stroke-default) disabled:hover:text-(--cui-color-text-default)"
-          >
-            <span aria-hidden="true">
-              <Icon name="refresh" size="xs" />
-            </span>
-            {localize('com_config_reset_base')}
-          </button>
-          <Hovercard
-            label={localize('com_config_reset_base_info_label')}
-            heading={localize('com_config_reset_base')}
-            placement="bottom-end"
-            trigger={<Icon name="information" size="sm" />}
-          >
-            {localize('com_config_reset_base_info')}
-          </Hovercard>
-        </div>
+        <button
+          type="button"
+          onClick={onResetClick}
+          disabled={resetDisabled}
+          aria-disabled={resetDisabled || undefined}
+          title={resetTitle}
+          className="flex shrink-0 cursor-pointer items-center gap-1.5 rounded-lg border border-(--cui-color-stroke-default) bg-transparent px-3 py-1.5 text-sm text-(--cui-color-text-default) transition-colors hover:border-(--cui-color-accent-danger) hover:text-(--cui-color-accent-danger) disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-(--cui-color-stroke-default) disabled:hover:text-(--cui-color-text-default)"
+        >
+          <span aria-hidden="true">
+            <Icon name="refresh" size="xs" />
+          </span>
+          {localize('com_config_reset_base')}
+        </button>
       )}
       {showScope && <ScopeTriggerButton currentSelection={scopeSelection} onClick={onScopeClick} />}
     </>

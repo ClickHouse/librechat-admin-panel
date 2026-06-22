@@ -110,8 +110,6 @@
   "com_config_reset_base_resetting": "Resetting...",
   "com_config_reset_base_success": "Base configuration reset to librechat.yaml",
   "com_config_reset_base_dirty": "Save or discard your changes before resetting",
-  "com_config_reset_base_info_label": "About resetting the base configuration",
-  "com_config_reset_base_info": "Resets only the base configuration: it discards the base-config changes saved in the database and restores this instance's librechat.yaml file (or the built-in defaults if no file is configured). Role, group, and user profiles are not affected.",
   "com_config_section_configured_count": "{{count}} of {{total}} configured",
   "com_config_default_hint": "(default: {{value}})",
   "com_config_entry_n": "Entry {{n}}",

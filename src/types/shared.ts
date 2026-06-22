@@ -70,36 +70,6 @@ export interface LoadingStateProps {
   className?: string;
 }
 
-export type HovercardPlacement =
-  | 'top'
-  | 'bottom'
-  | 'left'
-  | 'right'
-  | 'top-start'
-  | 'top-end'
-  | 'bottom-start'
-  | 'bottom-end'
-  | 'left-start'
-  | 'left-end'
-  | 'right-start'
-  | 'right-end';
-
-export interface HovercardProps {
-  /** Visible anchor content, rendered inside a focusable button that reveals the
-   *  card on hover and on keyboard focus. */
-  trigger: ReactNode;
-  children: ReactNode;
-  /** Accessible name for the trigger button — required when the trigger is icon-only. */
-  label?: string;
-  /** Optional bold heading rendered at the top of the card. */
-  heading?: string;
-  placement?: HovercardPlacement;
-  /** Distance in px between the trigger and the card. */
-  gutter?: number;
-  triggerClassName?: string;
-  className?: string;
-}
-
 export interface ScreenReaderAnnouncerProps {
   message: string;
 }
