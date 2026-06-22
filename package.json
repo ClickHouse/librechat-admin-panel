@@ -83,7 +83,7 @@
     "typescript": "^5.7.2",
     "vite": "^8.0.16",
     "vite-tsconfig-paths": "^6.1.1",
-    "vitest": "^3.0.5"
+    "vitest": "^4.1.9"
   },
   "overrides": {
     "@radix-ui/react-dialog": "1.1.15",
