@@ -7,6 +7,7 @@
   },
   "scripts": {
     "postinstall": "patch-package",
+    "reinstall": "rm -rf node_modules && bun pm cache rm && bun install && bun run build",
     "dev": "vite dev --port 3000",
     "build": "vite build",
     "start": "bun server.ts",
@@ -80,7 +81,7 @@
     "prettier": "^3.8.1",
     "prettier-plugin-tailwindcss": "^0.7.2",
     "typescript": "^5.7.2",
-    "vite": "^8.0.3",
+    "vite": "^8.0.16",
     "vite-tsconfig-paths": "^6.1.1",
     "vitest": "^3.0.5"
   },
