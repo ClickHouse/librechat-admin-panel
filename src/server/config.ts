@@ -552,6 +552,8 @@ export function resolveSubSchema(
   return current;
 }
 
+const ENUM_ERROR_CODE = 'invalid_enum_value';
+
 export function validateFieldValue(
   fieldPath: string,
   value: unknown,
@@ -570,12 +572,18 @@ export function validateFieldValue(
       subSchema as {
         safeParse: (v: unknown) => {
           success: boolean;
-          error?: { issues: Array<{ message: string; path: (string | number)[] }> };
+          error?: {
+            issues: Array<{ code?: string; message: string; path: (string | number)[] }>;
+          };
         };
       }
     ).safeParse(value);
     if (!result.success && result.error) {
-      const messages = result.error.issues.map((i) => i.message);
+      const nonEnumIssues = result.error.issues.filter(
+        (i) => i.code !== ENUM_ERROR_CODE,
+      );
+      if (nonEnumIssues.length === 0) return { success: true };
+      const messages = nonEnumIssues.map((i) => i.message);
       return { success: false, error: messages.join('; ') || 'Validation failed' };
     }
   }
@@ -610,6 +618,18 @@ export const getConfigSchemaFields = createServerFn({ method: 'GET' }).handler(a
   }
 });
 
+/**
+ * Returns true when every Zod issue is an enum validation failure.
+ * These failures indicate that the config uses values not yet known to this
+ * admin panel build (e.g. new agent capabilities, new endpoint types) but
+ * that are valid in the corresponding LibreChat version.
+ */
+function isOnlyEnumErrors(
+  errors: Array<{ code?: string; message: string; path: (string | number)[] }>,
+): boolean {
+  return errors.length > 0 && errors.every((e) => e.code === ENUM_ERROR_CODE);
+}
+
 export const parseImportedYaml = createServerFn({ method: 'POST' })
   .inputValidator(z.object({ yamlContent: z.string() }))
   .handler(async ({ data }: { data: { yamlContent: string } }) => {
@@ -638,15 +658,28 @@ export const parseImportedYaml = createServerFn({ method: 'POST' })
     const result = configSchema.safeParse(rawConfig);
 
     if (!result.success) {
+      const errors = result.error.errors as Array<{
+        code?: string;
+        message: string;
+        path: (string | number)[];
+      }>;
+
+      if (isOnlyEnumErrors(errors)) {
+        return {
+          success: true,
+          error: undefined,
+          validationErrors: undefined,
+          appConfig: rawConfig as Record<string, t.ConfigValue>,
+        };
+      }
+
       return {
         success: false,
         error: 'Config validation failed',
-        validationErrors: result.error.errors.map(
-          (e: { path: (string | number)[]; message: string }) => ({
-            path: e.path.join('.'),
-            message: e.message,
-          }),
-        ),
+        validationErrors: errors.map((e) => ({
+          path: e.path.join('.'),
+          message: e.message,
+        })),
         appConfig: null,
       };
     }
