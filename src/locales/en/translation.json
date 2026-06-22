@@ -105,7 +105,7 @@
   "com_config_reset_confirm": "Reset \"{{field}}\" to its default value? This removes the DB override.",
   "com_config_reset_base": "Reset to default",
   "com_config_reset_base_title": "Reset base configuration",
-  "com_config_reset_base_confirm": "By default, the base configuration starts from this instance's librechat.yaml file — or the built-in defaults if no file is configured — and is overridden by changes you make here in the admin panel. This resets the base configuration back to that starting point. This can't be undone.",
+  "com_config_reset_base_confirm": "By default, the base configuration starts from this instance's librechat.yaml file (or the built-in defaults if no file is configured) and is overridden by changes you make here in the admin panel. This resets the base configuration back to that starting point. This can't be undone.",
   "com_config_reset_base_action": "Reset to default",
   "com_config_reset_base_resetting": "Resetting...",
   "com_config_reset_base_success": "Base configuration reset to librechat.yaml",
