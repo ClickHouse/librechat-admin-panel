@@ -7,8 +7,8 @@ import { createServerFn } from '@tanstack/react-start';
 import { getRequestHeader } from '@tanstack/react-start/server';
 import type * as t from '@/types';
 import { getApiBaseUrl, getServerApiUrl } from './utils/url';
-import { buildOAuthExchangePayload } from './utils/oauth';
 import { refreshAdminTokenDeduped } from './utils/refresh';
+import { buildOAuthExchangePayload } from './utils/oauth';
 import { useAppSession, SESSION_CONFIG } from './session';
 
 /** Extract a named cookie value from `set-cookie` response headers. */
@@ -320,11 +320,16 @@ export const adminLogoutFn = createServerFn({ method: 'POST' }).handler(async ()
 });
 
 export const getCurrentUserFn = createServerFn({ method: 'GET' }).handler(async () => {
-  const session = await useAppSession();
-  return {
-    user: session.data.user ?? null,
-    isAuthenticated: !!session.data.token,
-  };
+  try {
+    const session = await useAppSession();
+    return {
+      user: session.data.user ?? null,
+      isAuthenticated: !!session.data.token,
+    };
+  } catch (error) {
+    console.error('[getCurrentUserFn] Failed to read session, treating as logged out:', error);
+    return { user: null, isAuthenticated: false };
+  }
 });
 
 /** Shared queryOptions so consumers deduplicate the OpenID availability check. */

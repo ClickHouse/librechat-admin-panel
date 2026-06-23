@@ -29,15 +29,9 @@ export function GrantManagementTab() {
 
   const roleNames = useMemo(() => buildRoleNames(roles), [roles]);
 
-  const principals = useMemo(
-    () => aggregatePrincipals(grants, roleNames),
-    [grants, roleNames],
-  );
+  const principals = useMemo(() => aggregatePrincipals(grants, roleNames), [grants, roleNames]);
 
-  const filtered = useMemo(
-    () => filterPrincipals(principals, search),
-    [principals, search],
-  );
+  const filtered = useMemo(() => filterPrincipals(principals, search), [principals, search]);
 
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
   const paged = useMemo(
@@ -75,6 +69,9 @@ export function GrantManagementTab() {
         />
       </div>
 
+      {/* Raw <table> kept (not click-ui Table): rows act as buttons with tabIndex,
+          role, aria-label, onKeyDown, and a ref for focus restoration — semantics
+          the click-ui Table API does not expose. Matches AuditLogTab's choice. */}
       <div className="overflow-x-auto rounded-lg border border-(--cui-color-stroke-default)">
         <table className="w-full text-left text-sm">
           <caption className="sr-only">{localize('com_grants_title')}</caption>

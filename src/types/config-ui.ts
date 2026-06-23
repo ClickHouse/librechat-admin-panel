@@ -156,6 +156,14 @@ export interface DeleteProfileValueModalProps {
   onCancel: () => void;
 }
 
+export interface ResetBaseConfigDialogProps {
+  open: boolean;
+  resetting: boolean;
+  error?: string | null;
+  onConfirm: () => void;
+  onCancel: () => void;
+}
+
 export interface FieldProfilePopoverProps {
   fieldPath: string;
   fieldLabel: string;

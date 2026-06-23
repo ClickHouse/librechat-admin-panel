@@ -11,7 +11,16 @@ import { queryOptions } from '@tanstack/react-query';
 import { createServerFn } from '@tanstack/react-start';
 import { PrincipalType } from 'librechat-data-provider';
 import { hasImpliedCapability, SystemCapabilities } from '@librechat/data-schemas/capabilities';
-import type { AdminAuditLogEntry, AdminSystemGrant } from '@librechat/data-schemas';
+import type { AdminSystemGrant } from '@librechat/data-schemas';
+import {
+  AUDIT_ACTIONS,
+  AUDIT_CATEGORIES,
+  AUDIT_OUTCOMES,
+  AUDIT_SEVERITIES,
+  AUDIT_ACTOR_TYPES,
+  READ_AUDIT_LOG_CAPABILITY,
+  isAuditEntryId,
+} from '@/constants';
 import { apiFetch, extractApiError } from './utils/api';
 
 // ── Helpers ──────────────────────────────────────────────────────────
@@ -115,17 +124,24 @@ export async function requireCapability(capability: string): Promise<void> {
   }
 }
 
-/** Require at least one of the given capabilities.
- * @throws if `required` is empty — callers must provide at least one capability. */
-export async function requireAnyCapability(required: string[]): Promise<void> {
+/** Check `requireAnyCapability` against an already-fetched capability set.
+ * Lets handlers reuse a single effective-capabilities lookup across the guard
+ * and any follow-up backend call instead of hitting `/effective` twice. */
+export function checkAnyCapability(held: string[], required: readonly string[]): void {
   if (required.length === 0) {
     throw new Error('No capabilities provided for check');
   }
-  const { capabilities } = await getEffectiveCapabilitiesFn();
   for (const cap of required) {
-    if (hasImpliedCapability(capabilities, cap)) return;
+    if (hasImpliedCapability(held, cap)) return;
   }
   throw new Error(`Insufficient permissions: requires one of ${required.join(', ')}`);
+}
+
+/** Require at least one of the given capabilities.
+ * @throws if `required` is empty — callers must provide at least one capability. */
+export async function requireAnyCapability(required: string[]): Promise<void> {
+  const { capabilities } = await getEffectiveCapabilitiesFn();
+  checkAnyCapability(capabilities, required);
 }
 
 /**
@@ -219,28 +235,213 @@ export const revokeCapabilityFn = createServerFn({ method: 'POST' })
     },
   );
 
-// ── Audit Log (stubbed -- no backend endpoint yet) ───────────────────
+// ── Audit Log ────────────────────────────────────────────────────────
 
+const isoDate = z
+  .string()
+  .regex(
+    /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d{1,3})?)?(Z|[+-]\d{2}:\d{2}))?$/,
+    'Expected ISO 8601 date',
+  );
+
+/**
+ * Wire format for `/api/admin/audit-log` filters, mirroring the LibreChat
+ * backend's general-purpose audit query. `actorQuery` / `targetQuery` are
+ * case-insensitive substring matches on the denormalized actor/target names;
+ * `category` / `action` / `outcome` / `severity` / `actorType` / `targetType`
+ * are exact facet filters. `cursor` (the `seq` of the last row seen) drives
+ * keyset pagination; `offset` remains for page-number navigation.
+ */
 const auditFilterSchema = z.object({
-  search: z.string().optional(),
-  action: z.enum(['grant_assigned', 'grant_removed']).optional(),
-  from: z.string().optional(),
-  to: z.string().optional(),
+  search: z.string().max(200).optional(),
+  category: z.array(z.enum(AUDIT_CATEGORIES)).optional(),
+  action: z.array(z.enum(AUDIT_ACTIONS)).optional(),
+  outcome: z.array(z.enum(AUDIT_OUTCOMES)).optional(),
+  severity: z.array(z.enum(AUDIT_SEVERITIES)).optional(),
+  actorType: z.enum(AUDIT_ACTOR_TYPES).optional(),
+  actorQuery: z.string().max(128).optional(),
+  targetType: z.string().max(128).optional(),
+  targetQuery: z.string().max(128).optional(),
+  capability: z.string().max(128).optional(),
+  from: isoDate.optional(),
+  to: isoDate.optional(),
+  offset: z.number().int().min(0).optional(),
+  limit: z.number().int().min(1).max(500).optional(),
+  cursor: z.number().int().min(1).optional(),
 });
 
-type AuditFilters = z.infer<typeof auditFilterSchema>;
+export type AuditFilters = z.infer<typeof auditFilterSchema>;
 
-export const getAuditLogFn = createServerFn({ method: 'GET' })
+const adminAuditLogEntrySchema = z.object({
+  id: z.string(),
+  schemaVersion: z.number(),
+  category: z.enum(AUDIT_CATEGORIES),
+  action: z.enum(AUDIT_ACTIONS),
+  outcome: z.enum(AUDIT_OUTCOMES),
+  severity: z.enum(AUDIT_SEVERITIES),
+  actor: z.object({
+    type: z.enum(AUDIT_ACTOR_TYPES),
+    id: z.string().optional(),
+    name: z.string(),
+  }),
+  target: z.object({
+    type: z.string(),
+    id: z.string().optional(),
+    name: z.string().optional(),
+  }),
+  metadata: z
+    .record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()]))
+    .optional(),
+  context: z
+    .object({
+      requestId: z.string().optional(),
+      ip: z.string().optional(),
+      userAgent: z.string().optional(),
+      sessionId: z.string().optional(),
+    })
+    .optional(),
+  tenantId: z.string().optional(),
+  integrity: z.object({
+    seq: z.number(),
+    hash: z.string(),
+    prevHash: z.string(),
+  }),
+  timestamp: z.string(),
+  before: z.array(z.string()).optional(),
+  after: z.array(z.string()).optional(),
+});
+
+const auditLogPageResponseSchema = z.object({
+  entries: z.array(adminAuditLogEntrySchema),
+  total: z.number().int().min(0),
+  nextCursor: z.number().int().nullable(),
+});
+
+export type AuditLogPage = z.infer<typeof auditLogPageResponseSchema>;
+
+export const AUDIT_LOG_PAGE_SIZE = 50;
+
+/**
+ * Defense-in-depth: the LibreChat backend `/api/admin/audit-log` route gates
+ * on `ACCESS_ADMIN` + `READ_AUDIT_LOG`, but the BFF still calls
+ * `requireCapability(READ_AUDIT_LOG_CAPABILITY)` so an authenticated admin
+ * without `READ_AUDIT_LOG` is rejected at the proxy rather than relying on
+ * the backend to return 403. This keeps the policy consistent with the UI
+ * gate in `GrantsPage` and matches the established mutation-side pattern
+ * (`requireAllSectionCapabilities`, etc.). The extra `/effective` round-trip
+ * is amortized against React Query's per-user cache.
+ */
+function buildAuditLogQuery(filters: AuditFilters): string {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(filters)) {
+    if (value === undefined || value === null || value === '') continue;
+    if (Array.isArray(value)) {
+      for (const v of value) params.append(key, String(v));
+    } else {
+      params.set(key, String(value));
+    }
+  }
+  const qs = params.toString();
+  return qs ? `?${qs}` : '';
+}
+
+export const getAuditLogPageFn = createServerFn({ method: 'GET' })
   .inputValidator(auditFilterSchema)
-  .handler(async (): Promise<{ entries: AdminAuditLogEntry[] }> => ({ entries: [] }));
-
-export const auditLogQueryOptions = (filters: AuditFilters = {}) =>
-  queryOptions<AdminAuditLogEntry[]>({
-    queryKey: ['auditLog', filters],
-    queryFn: () => getAuditLogFn({ data: filters }).then((r) => r.entries),
-    staleTime: 30_000,
+  .handler(async ({ data }: { data: AuditFilters }): Promise<AuditLogPage> => {
+    await requireCapability(READ_AUDIT_LOG_CAPABILITY);
+    /**
+     * The LibreChat `/api/admin/audit-log` endpoint is a general-purpose event
+     * log, but this UI only renders (and `adminAuditLogEntrySchema` only parses)
+     * grant rows. Force `category=grant` so a non-grant event can never reach
+     * the strict parser and error the whole tab.
+     */
+    const withDefaults: AuditFilters = { limit: AUDIT_LOG_PAGE_SIZE, ...data, category: ['grant'] };
+    const response = await apiFetch(`/api/admin/audit-log${buildAuditLogQuery(withDefaults)}`);
+    if (!response.ok) {
+      await extractApiError(response, 'Failed to fetch audit log');
+    }
+    return auditLogPageResponseSchema.parse(await response.json());
   });
 
-export const exportAuditLogCsvFn = createServerFn({ method: 'POST' })
+export const auditLogQueryOptions = (
+  page: number,
+  filters: Omit<AuditFilters, 'offset' | 'limit'> = {},
+) =>
+  queryOptions({
+    queryKey: ['auditLog', page, filters] as const,
+    queryFn: () =>
+      getAuditLogPageFn({
+        data: {
+          ...filters,
+          offset: (Math.max(1, page) - 1) * AUDIT_LOG_PAGE_SIZE,
+          limit: AUDIT_LOG_PAGE_SIZE,
+        },
+      }),
+    staleTime: 60_000,
+  });
+
+export const getAuditLogEntryFn = createServerFn({ method: 'GET' })
+  /** Constrain to the backend's ObjectId shape so a crafted `entryId` (e.g.
+   * `export.csv`) can't be proxied as a sibling audit-log sub-route. */
+  .inputValidator(z.object({ id: z.string().regex(/^[a-f0-9]{24}$/i) }))
+  .handler(
+    async ({
+      data,
+    }: {
+      data: { id: string };
+    }): Promise<{ entry: z.infer<typeof adminAuditLogEntrySchema> | null }> => {
+      await requireCapability(READ_AUDIT_LOG_CAPABILITY);
+      const response = await apiFetch(`/api/admin/audit-log/${encodeURIComponent(data.id)}`);
+      if (response.status === 404) return { entry: null };
+      if (!response.ok) {
+        await extractApiError(response, 'Failed to fetch audit log entry');
+      }
+      const json = (await response.json()) as { entry: unknown };
+      return { entry: adminAuditLogEntrySchema.parse(json.entry) };
+    },
+  );
+
+export const auditLogEntryQueryOptions = (id: string | undefined) =>
+  queryOptions({
+    queryKey: ['auditLogEntry', id] as const,
+    queryFn: () => getAuditLogEntryFn({ data: { id: id ?? '' } }),
+    /** Only fire for a well-formed id so a crafted `?entryId=` deep link can't
+     * reach the server fn (which would reject it anyway). */
+    enabled: isAuditEntryId(id),
+    staleTime: 60_000,
+  });
+
+export const exportAuditLogServerFn = createServerFn({ method: 'POST' })
   .inputValidator(auditFilterSchema)
-  .handler(async () => ({ csv: '' }));
+  .handler(async ({ data }: { data: AuditFilters }): Promise<Response> => {
+    await requireCapability(READ_AUDIT_LOG_CAPABILITY);
+    /** Grant-scoped like the page fetch — this UI only deals with grant events. */
+    const scoped: AuditFilters = { ...data, category: ['grant'] };
+    const response = await apiFetch(
+      `/api/admin/audit-log/export.csv${buildAuditLogQuery(scoped)}`,
+      {
+        method: 'GET',
+        headers: { Accept: 'text/csv' },
+      },
+    );
+    if (!response.ok) {
+      await extractApiError(response, 'Failed to export audit log');
+    }
+    /**
+     * Stream the backend's CSV straight through rather than buffering the whole
+     * file into a string + JSON server-function payload. This preserves the
+     * backend's streaming/backpressure/cancellation and avoids exhausting BFF
+     * memory or hitting server-function payload limits on large exports. A
+     * server fn that returns a `Response` is passed through verbatim, so the
+     * client receives this streamed body to turn into a download.
+     */
+    const filename = `audit-log-${new Date().toISOString().slice(0, 10)}.csv`;
+    return new Response(response.body, {
+      status: 200,
+      headers: {
+        'Content-Type': 'text/csv; charset=utf-8',
+        'Content-Disposition': `attachment; filename="${filename}"`,
+        'Cache-Control': 'no-store',
+      },
+    });
+  });

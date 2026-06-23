@@ -1023,3 +1023,23 @@ export const resetBaseConfigFieldFn = createServerFn({ method: 'POST' })
 
     return { success: true };
   });
+
+/** Deletes the entire base config DB override, reverting every value back to
+ *  what librechat.yaml defines. Removes the `__base__` config document outright;
+ *  scope (role/group/user) profiles are untouched. A 404 means there was no
+ *  override to begin with, which is treated as success. */
+export const resetBaseConfigFn = createServerFn({ method: 'POST' }).handler(async () => {
+  await requireCapability(SystemCapabilities.MANAGE_CONFIGS);
+  const response = await apiFetch(`/api/admin/config/role/${BASE_CONFIG_PRINCIPAL_ID}`, {
+    method: 'DELETE',
+  });
+
+  if (!response.ok && response.status !== 404) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(
+      (err as { error?: string }).error ?? `Failed to reset base config: ${response.status}`,
+    );
+  }
+
+  return { success: true };
+});
