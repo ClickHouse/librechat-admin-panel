@@ -97,7 +97,12 @@ The Lambda serves both the server routes and the static client assets, so no CDN
 bun run build:lambda     # outputs dist/lambda/{index.mjs, client/}
 ```
 
-Zip the contents of `dist/lambda/` and deploy with handler `index.handler` on a Node.js runtime. Set the same environment variables as the Docker deployment (`SESSION_SECRET`, `VITE_API_BASE_URL`, etc.). A `GET /health` route returns `200 ok` for health checks.
+Zip the contents of `dist/lambda/` and deploy with handler `index.handler` on a Node.js runtime. Set the runtime environment variables used by the Docker deployment (`SESSION_SECRET`, `VITE_API_BASE_URL`, `ADMIN_SSO_*`, `SESSION_COOKIE_SECURE`, etc.). A `GET /health` route returns `200 ok` for health checks.
+
+> **Note:** The Prometheus `/metrics` endpoint (and `ADMIN_PANEL_METRICS_SECRET`)
+> is specific to the long-running `server.ts` deployment and is **not** exposed by
+> the Lambda — in-process pull-model metrics don't fit Lambda's ephemeral, horizontally
+> scaled instances. Use CloudWatch (or another push-based exporter) for Lambda metrics.
 
 > **ALB targets:** enable multi-value headers on the target group so multiple
 > `Set-Cookie` headers (required for the session/PKCE flow) survive. ALB caps
