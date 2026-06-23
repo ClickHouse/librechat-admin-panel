@@ -88,6 +88,11 @@ The panel can also run as a single AWS Lambda. The handler in `lambda.ts` detect
 
 The Lambda serves both the server routes and the static client assets, so no CDN or S3 bucket is needed.
 
+> **Note:** Returning static files from a Lambda is not what Lambdas are designed
+> for — in production you would normally put a CDN (or S3 + CloudFront) in front
+> and let it serve `dist/client` directly. The handler does it inline purely for
+> simplicity, so a single self-contained zip deploys with no extra infrastructure.
+
 ```bash
 bun run build:lambda     # outputs dist/lambda/{index.mjs, client/}
 ```
