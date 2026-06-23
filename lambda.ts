@@ -78,6 +78,37 @@ const NO_CACHE = 'no-cache, no-store, must-revalidate';
 const IMMUTABLE = 'public, max-age=31536000, immutable';
 const NEVER_CACHE = new Set(['/manifest.json', '/robots.txt', '/sw.js']);
 
+// Mirrors server.ts. Shipped report-only by default because TanStack Start's SSR
+// injects an inline boot script; set ADMIN_PANEL_CSP_ENFORCE=true to enforce once
+// a per-request nonce is wired up.
+const CSP_VALUE = [
+  "default-src 'self'",
+  "script-src 'self'",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob:",
+  "font-src 'self' data:",
+  "connect-src 'self'",
+  "object-src 'none'",
+  "frame-ancestors 'none'",
+  "base-uri 'self'",
+  "form-action 'self'",
+].join('; ');
+const CSP_HEADER_NAME =
+  process.env.ADMIN_PANEL_CSP_ENFORCE === 'true'
+    ? 'content-security-policy'
+    : 'content-security-policy-report-only';
+
+function applySecurityHeaders(headers: Record<string, string>): void {
+  if (!(headers['content-type'] ?? '').toLowerCase().startsWith('text/html')) return;
+  headers[CSP_HEADER_NAME] = CSP_VALUE;
+  headers['x-content-type-options'] = 'nosniff';
+  headers['referrer-policy'] = 'strict-origin-when-cross-origin';
+  headers['x-frame-options'] = 'DENY';
+  if (process.env.NODE_ENV === 'production') {
+    headers['strict-transport-security'] = 'max-age=31536000; includeSubDomains';
+  }
+}
+
 // ALB requires statusDescription to be a "<code> <reason>" line; a bare code
 // (e.g. "307") makes the ALB return 502 Bad Gateway.
 const REASON_PHRASES: Record<number, string> = {
@@ -260,15 +291,25 @@ async function route(path: string, request: Request, gzip: boolean): Promise<Res
     };
   }
 
+  // Redirect the bare base path to its trailing-slash form, matching server.ts.
+  if (BASE_PATH && path === BASE_PATH) {
+    return {
+      status: 302,
+      headers: { location: `${BASE_PATH}/` },
+      cookies: [],
+      body: '',
+      isBase64Encoded: false,
+    };
+  }
+
   // Assets live on disk without the base prefix; strip it (matching server.ts)
   // before the static lookup, but hand the app the original request — its router
-  // is configured with the base path.
-  const assetPath =
-    BASE_PATH && (path === BASE_PATH || path.startsWith(`${BASE_PATH}/`))
-      ? path.slice(BASE_PATH.length) || '/'
-      : path;
+  // is configured with the base path. When a base path is set, only serve assets
+  // under it (server.ts exposes client files only at `${BASE_PATH}/…`).
+  const hasBase = BASE_PATH ? path.startsWith(`${BASE_PATH}/`) : true;
+  const assetPath = hasBase && BASE_PATH ? path.slice(BASE_PATH.length) : path;
 
-  if (isStaticPath(assetPath)) {
+  if (hasBase && isStaticPath(assetPath)) {
     const asset = await serveStatic(assetPath, gzip);
     if (asset) return asset;
   }
@@ -304,5 +345,6 @@ export async function handler(event: LambdaEvent): Promise<AlbResult | HttpResul
   const request = buildRequest(event);
   const gzip = (request.headers.get('accept-encoding') ?? '').includes('gzip');
   const result = await route(path, request, gzip);
+  applySecurityHeaders(result.headers);
   return isAlb(event) ? toAlbResult(result) : toHttpResult(result);
 }
