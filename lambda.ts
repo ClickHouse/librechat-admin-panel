@@ -73,6 +73,7 @@ type FetchHandler = { default: { fetch: (request: Request) => Promise<Response> 
 const { default: app } = (await import('./dist/server/server.js')) as FetchHandler;
 
 const CLIENT_DIR = join(fileURLToPath(new URL('.', import.meta.url)), 'client');
+const BASE_PATH = (process.env.VITE_BASE_PATH || '').replace(/\/$/, '');
 const NO_CACHE = 'no-cache, no-store, must-revalidate';
 const IMMUTABLE = 'public, max-age=31536000, immutable';
 const NEVER_CACHE = new Set(['/manifest.json', '/robots.txt', '/sw.js']);
@@ -259,8 +260,16 @@ async function route(path: string, request: Request, gzip: boolean): Promise<Res
     };
   }
 
-  if (isStaticPath(path)) {
-    const asset = await serveStatic(path, gzip);
+  // Assets live on disk without the base prefix; strip it (matching server.ts)
+  // before the static lookup, but hand the app the original request — its router
+  // is configured with the base path.
+  const assetPath =
+    BASE_PATH && (path === BASE_PATH || path.startsWith(`${BASE_PATH}/`))
+      ? path.slice(BASE_PATH.length) || '/'
+      : path;
+
+  if (isStaticPath(assetPath)) {
+    const asset = await serveStatic(assetPath, gzip);
     if (asset) return asset;
   }
 
