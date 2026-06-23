@@ -78,3 +78,13 @@ docker run -p 3000:3000 \
   -e VITE_BASE_PATH=/adminpanel \
   librechat-admin-panel
 ```
+
+### Serverless (AWS Lambda)
+
+The panel can also run as a single AWS Lambda behind a [Lambda Function URL](https://docs.aws.amazon.com/lambda/latest/dg/lambda-urls.html) or an API Gateway HTTP API (payload format 2.0). The handler in `lambda.ts` serves both the server routes and the static client assets, so no CDN or S3 bucket is needed.
+
+```bash
+bun run build:lambda     # outputs dist/lambda/{index.mjs, client/}
+```
+
+Zip the contents of `dist/lambda/` and deploy with handler `index.handler` on a Node.js runtime. Set the same environment variables as the Docker deployment (`SESSION_SECRET`, `VITE_API_BASE_URL`, etc.). A `GET /health` route returns `200 ok` for load-balancer health checks.
