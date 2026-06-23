@@ -81,10 +81,20 @@ docker run -p 3000:3000 \
 
 ### Serverless (AWS Lambda)
 
-The panel can also run as a single AWS Lambda behind a [Lambda Function URL](https://docs.aws.amazon.com/lambda/latest/dg/lambda-urls.html) or an API Gateway HTTP API (payload format 2.0). The handler in `lambda.ts` serves both the server routes and the static client assets, so no CDN or S3 bucket is needed.
+The panel can also run as a single AWS Lambda. The handler in `lambda.ts` detects the incoming event shape and supports both:
+
+- a [Lambda Function URL](https://docs.aws.amazon.com/lambda/latest/dg/lambda-urls.html) or API Gateway HTTP API (payload format 2.0)
+- an [Application Load Balancer target](https://docs.aws.amazon.com/elasticloadbalancing/latest/application/lambda-functions.html) (`target_type = lambda`)
+
+The Lambda serves both the server routes and the static client assets, so no CDN or S3 bucket is needed.
 
 ```bash
 bun run build:lambda     # outputs dist/lambda/{index.mjs, client/}
 ```
 
-Zip the contents of `dist/lambda/` and deploy with handler `index.handler` on a Node.js runtime. Set the same environment variables as the Docker deployment (`SESSION_SECRET`, `VITE_API_BASE_URL`, etc.). A `GET /health` route returns `200 ok` for load-balancer health checks.
+Zip the contents of `dist/lambda/` and deploy with handler `index.handler` on a Node.js runtime. Set the same environment variables as the Docker deployment (`SESSION_SECRET`, `VITE_API_BASE_URL`, etc.). A `GET /health` route returns `200 ok` for health checks.
+
+> **ALB targets:** enable multi-value headers on the target group so multiple
+> `Set-Cookie` headers (required for the session/PKCE flow) survive. ALB caps
+> Lambda responses at 1 MB; the handler gzips compressible assets to stay under
+> it. With plain-HTTP listeners, also set `SESSION_COOKIE_SECURE=false` (see above).

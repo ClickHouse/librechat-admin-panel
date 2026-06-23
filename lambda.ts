@@ -4,28 +4,66 @@ import { join, sep } from 'node:path';
 import { gzipSync } from 'node:zlib';
 
 /**
- * AWS Lambda entry point for running the admin panel serverlessly behind a
- * Lambda Function URL or an API Gateway HTTP API (payload format 2.0).
+ * AWS Lambda entry point for running the admin panel serverlessly. It supports
+ * both event shapes a Lambda can receive from an HTTP front end:
  *
- * The same Lambda also serves the static client assets (`dist/client`, bundled
- * next to the handler as `client/`), so no CDN or S3 bucket is required — the
- * deployed zip is self-contained. Build it with `bun run build:lambda`.
+ *   - Lambda Function URL / API Gateway HTTP API (payload format 2.0)
+ *   - Application Load Balancer target (`target_type = lambda`)
+ *
+ * The handler detects the shape from the event and replies in the matching
+ * format. The same Lambda also serves the static client assets (`dist/client`,
+ * bundled next to the handler as `client/`), so no CDN or S3 bucket is required
+ * — the deployed zip is self-contained. Build it with `bun run build:lambda`.
+ *
+ * For ALB targets, enable multi-value headers on the target group so multiple
+ * `Set-Cookie` headers survive.
  */
 
-type LambdaEvent = {
-  rawPath: string;
-  rawQueryString: string;
-  cookies?: string[];
+type AlbEvent = {
+  requestContext: { elb: { targetGroupArn: string } };
+  httpMethod: string;
+  path: string;
+  queryStringParameters?: Record<string, string>;
+  multiValueQueryStringParameters?: Record<string, string[]>;
   headers?: Record<string, string>;
-  requestContext: { http: { method: string } };
+  multiValueHeaders?: Record<string, string[]>;
   body?: string;
   isBase64Encoded?: boolean;
 };
 
-type LambdaResult = {
+type HttpEvent = {
+  requestContext: { http: { method: string } };
+  rawPath: string;
+  rawQueryString: string;
+  cookies?: string[];
+  headers?: Record<string, string>;
+  body?: string;
+  isBase64Encoded?: boolean;
+};
+
+type LambdaEvent = AlbEvent | HttpEvent;
+
+type AlbResult = {
+  statusCode: number;
+  statusDescription: string;
+  multiValueHeaders: Record<string, string[]>;
+  body: string;
+  isBase64Encoded: boolean;
+};
+
+type HttpResult = {
   statusCode: number;
   headers: Record<string, string>;
   cookies?: string[];
+  body: string;
+  isBase64Encoded: boolean;
+};
+
+type Result = {
+  status: number;
+  statusText?: string;
+  headers: Record<string, string>;
+  cookies: string[];
   body: string;
   isBase64Encoded: boolean;
 };
@@ -38,6 +76,27 @@ const CLIENT_DIR = join(fileURLToPath(new URL('.', import.meta.url)), 'client');
 const NO_CACHE = 'no-cache, no-store, must-revalidate';
 const IMMUTABLE = 'public, max-age=31536000, immutable';
 const NEVER_CACHE = new Set(['/manifest.json', '/robots.txt', '/sw.js']);
+
+// ALB requires statusDescription to be a "<code> <reason>" line; a bare code
+// (e.g. "307") makes the ALB return 502 Bad Gateway.
+const REASON_PHRASES: Record<number, string> = {
+  200: 'OK',
+  204: 'No Content',
+  301: 'Moved Permanently',
+  302: 'Found',
+  303: 'See Other',
+  304: 'Not Modified',
+  307: 'Temporary Redirect',
+  308: 'Permanent Redirect',
+  400: 'Bad Request',
+  401: 'Unauthorized',
+  403: 'Forbidden',
+  404: 'Not Found',
+  429: 'Too Many Requests',
+  500: 'Internal Server Error',
+  502: 'Bad Gateway',
+  503: 'Service Unavailable',
+};
 
 const CONTENT_TYPES: Record<string, string> = {
   js: 'text/javascript',
@@ -56,6 +115,10 @@ const CONTENT_TYPES: Record<string, string> = {
   map: 'application/json',
 };
 
+function isAlb(event: LambdaEvent): event is AlbEvent {
+  return 'elb' in event.requestContext;
+}
+
 function contentType(pathname: string): string {
   const ext = pathname.split('.').pop()?.toLowerCase() ?? '';
   return CONTENT_TYPES[ext] ?? 'application/octet-stream';
@@ -70,16 +133,13 @@ function isStaticPath(pathname: string): boolean {
   );
 }
 
-function acceptsGzip(event: LambdaEvent): boolean {
-  return (event.headers?.['accept-encoding'] ?? '').includes('gzip');
-}
-
 function isCompressible(contentType: string): boolean {
   return /javascript|css|json|html|svg|text|xml|manifest/.test(contentType);
 }
 
-// Lambda response payloads are capped at 6 MB. Gzipping compressible assets
-// keeps large chunks (e.g. the icons bundle) well under it and cuts transfer.
+// ALB Lambda targets cap the response at 1 MB (Function URLs and API Gateway
+// allow ~6 MB). Gzipping compressible assets keeps large chunks (e.g. the icons
+// bundle) under the cap and cuts transfer overall.
 function encodeBody(
   buffer: Buffer,
   contentType: string,
@@ -91,19 +151,43 @@ function encodeBody(
   return { body: buffer.toString('base64') };
 }
 
+function albQueryString(event: AlbEvent): string {
+  const params = new URLSearchParams();
+  if (event.multiValueQueryStringParameters) {
+    for (const [key, values] of Object.entries(event.multiValueQueryStringParameters)) {
+      for (const value of values) params.append(key, value);
+    }
+  } else if (event.queryStringParameters) {
+    for (const [key, value] of Object.entries(event.queryStringParameters)) params.append(key, value);
+  }
+  return params.toString();
+}
+
 function buildRequest(event: LambdaEvent): Request {
   const headers = new Headers();
-  if (event.headers) {
-    for (const [name, value] of Object.entries(event.headers)) headers.set(name, value);
+  if (isAlb(event)) {
+    if (event.multiValueHeaders) {
+      for (const [name, values] of Object.entries(event.multiValueHeaders)) {
+        for (const value of values) headers.append(name, value);
+      }
+    } else if (event.headers) {
+      for (const [name, value] of Object.entries(event.headers)) headers.set(name, value);
+    }
+  } else {
+    if (event.headers) {
+      for (const [name, value] of Object.entries(event.headers)) headers.set(name, value);
+    }
+    if (event.cookies?.length) headers.set('cookie', event.cookies.join('; '));
   }
-  if (event.cookies?.length) headers.set('cookie', event.cookies.join('; '));
+
+  const method = isAlb(event) ? event.httpMethod : event.requestContext.http.method;
+  const path = isAlb(event) ? event.path : event.rawPath;
+  const rawQuery = isAlb(event) ? albQueryString(event) : event.rawQueryString;
 
   const host = headers.get('x-forwarded-host') ?? headers.get('host') ?? 'localhost';
   const proto = headers.get('x-forwarded-proto') ?? 'https';
-  const query = event.rawQueryString ? `?${event.rawQueryString}` : '';
-  const url = `${proto}://${host}${event.rawPath}${query}`;
+  const url = `${proto}://${host}${path}${rawQuery ? `?${rawQuery}` : ''}`;
 
-  const method = event.requestContext.http.method;
   const hasBody = event.body != null && method !== 'GET' && method !== 'HEAD';
   const body = hasBody
     ? event.isBase64Encoded
@@ -114,7 +198,7 @@ function buildRequest(event: LambdaEvent): Request {
   return new Request(url, { method, headers, body });
 }
 
-async function serveStatic(pathname: string, gzip: boolean): Promise<LambdaResult | null> {
+async function serveStatic(pathname: string, gzip: boolean): Promise<Result | null> {
   const filePath = join(CLIENT_DIR, pathname);
   if (filePath !== CLIENT_DIR && !filePath.startsWith(CLIENT_DIR + sep)) return null;
   try {
@@ -128,17 +212,16 @@ async function serveStatic(pathname: string, gzip: boolean): Promise<LambdaResul
       headers['content-encoding'] = encoded.contentEncoding;
       headers['vary'] = 'accept-encoding';
     }
-    return { statusCode: 200, headers, body: encoded.body, isBase64Encoded: true };
+    return { status: 200, headers, cookies: [], body: encoded.body, isBase64Encoded: true };
   } catch {
     return null;
   }
 }
 
-async function toLambdaResult(response: Response, gzip: boolean): Promise<LambdaResult> {
+async function toResult(response: Response, gzip: boolean): Promise<Result> {
   const headers: Record<string, string> = {};
   response.headers.forEach((value, key) => {
-    if (key === 'set-cookie') return;
-    headers[key] = value;
+    if (key !== 'set-cookie') headers[key] = value;
   });
   if (!headers['cache-control']) headers['cache-control'] = NO_CACHE;
 
@@ -156,31 +239,61 @@ async function toLambdaResult(response: Response, gzip: boolean): Promise<Lambda
   }
 
   return {
-    statusCode: response.status,
+    status: response.status,
+    statusText: response.statusText,
     headers,
-    cookies: cookies.length ? cookies : undefined,
+    cookies,
     body: encoded.body,
     isBase64Encoded: true,
   };
 }
 
-export async function handler(event: LambdaEvent): Promise<LambdaResult> {
-  if (event.rawPath === '/health') {
+async function route(path: string, request: Request, gzip: boolean): Promise<Result> {
+  if (path === '/health') {
     return {
-      statusCode: 200,
+      status: 200,
       headers: { 'content-type': 'text/plain' },
+      cookies: [],
       body: 'ok',
       isBase64Encoded: false,
     };
   }
 
-  const gzip = acceptsGzip(event);
-
-  if (isStaticPath(event.rawPath)) {
-    const asset = await serveStatic(event.rawPath, gzip);
+  if (isStaticPath(path)) {
+    const asset = await serveStatic(path, gzip);
     if (asset) return asset;
   }
 
-  const response = await app.fetch(buildRequest(event));
-  return toLambdaResult(response, gzip);
+  return toResult(await app.fetch(request), gzip);
+}
+
+function toAlbResult(result: Result): AlbResult {
+  const multiValueHeaders: Record<string, string[]> = {};
+  for (const [name, value] of Object.entries(result.headers)) multiValueHeaders[name] = [value];
+  if (result.cookies.length) multiValueHeaders['set-cookie'] = result.cookies;
+  return {
+    statusCode: result.status,
+    statusDescription: `${result.status} ${result.statusText || REASON_PHRASES[result.status] || 'OK'}`,
+    multiValueHeaders,
+    body: result.body,
+    isBase64Encoded: result.isBase64Encoded,
+  };
+}
+
+function toHttpResult(result: Result): HttpResult {
+  return {
+    statusCode: result.status,
+    headers: result.headers,
+    cookies: result.cookies.length ? result.cookies : undefined,
+    body: result.body,
+    isBase64Encoded: result.isBase64Encoded,
+  };
+}
+
+export async function handler(event: LambdaEvent): Promise<AlbResult | HttpResult> {
+  const path = isAlb(event) ? event.path : event.rawPath;
+  const request = buildRequest(event);
+  const gzip = (request.headers.get('accept-encoding') ?? '').includes('gzip');
+  const result = await route(path, request, gzip);
+  return isAlb(event) ? toAlbResult(result) : toHttpResult(result);
 }
