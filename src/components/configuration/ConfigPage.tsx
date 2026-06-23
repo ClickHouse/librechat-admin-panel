@@ -755,8 +755,10 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
     const a = document.createElement('a');
     a.href = url;
     a.download = 'librechat.yaml';
+    document.body.appendChild(a);
     a.click();
-    URL.revokeObjectURL(url);
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 100);
   }, [dbOverrides, configValues]);
 
   const highlightRef = useHighlightRef(highlightField);
@@ -942,6 +944,7 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
               : undefined
           }
           onImportClick={() => setImportOpen(true)}
+          exportDisabled={!configValues}
           onExportClick={handleExport}
           showReset={!isEditingScope && dbOverridePaths.size > 0}
           resetDisabled={isDirty || !canManageConfig}
@@ -1072,6 +1075,7 @@ function HeaderActions({
   importDisabled,
   importTitle,
   onImportClick,
+  exportDisabled,
   onExportClick,
   showReset,
   resetDisabled,
@@ -1085,6 +1089,7 @@ function HeaderActions({
   importDisabled: boolean;
   importTitle?: string;
   onImportClick: () => void;
+  exportDisabled: boolean;
   onExportClick: () => void;
   showReset: boolean;
   resetDisabled: boolean;
@@ -1108,7 +1113,7 @@ function HeaderActions({
     <>
       {showImport && (
         <>
-          <button type="button" onClick={onExportClick} className={btnClass}>
+          <button type="button" onClick={onExportClick} disabled={exportDisabled} aria-disabled={exportDisabled || undefined} className={btnClass}>
             <span aria-hidden="true">
               <Icon name="download" size="xs" />
             </span>
