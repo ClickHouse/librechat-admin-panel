@@ -886,12 +886,14 @@ export const baseConfigOptions = queryOptions({
   staleTime: 30_000,
 });
 
-async function mergeIndexedArrayEntries(
+export function mergeIndexedArrayEntriesIntoBase(
   entries: Array<{ fieldPath: string; value: unknown }>,
+  baseConfig: Record<string, t.ConfigValue>,
   mergedPaths?: Set<string>,
-): Promise<Array<{ fieldPath: string; value: unknown }>> {
+): Array<{ fieldPath: string; value: unknown }> {
   const indexed = new Map<string, Map<number, unknown>>();
   const rest: Array<{ fieldPath: string; value: unknown }> = [];
+  const normalizedBaseConfig = normalizeAppServiceKeys(baseConfig);
 
   for (const entry of entries) {
     const parsed = parseIndexedArrayPath(entry.fieldPath);
@@ -906,15 +908,9 @@ async function mergeIndexedArrayEntries(
 
   if (indexed.size === 0) return entries;
 
-  const baseResponse = await apiFetch('/api/admin/config/base');
-  if (!baseResponse.ok) throw new Error(`Failed to fetch base config: ${baseResponse.status}`);
-  const { config: baseConfig } = (await baseResponse.json()) as {
-    config: Record<string, unknown>;
-  };
-
   for (const [arrayPath, updates] of indexed) {
     const segments = arrayPath.split('.');
-    let current: unknown = baseConfig;
+    let current: unknown = normalizedBaseConfig;
     for (const seg of segments) {
       if (current == null || typeof current !== 'object') {
         current = undefined;
@@ -931,6 +927,18 @@ async function mergeIndexedArrayEntries(
   }
 
   return rest;
+}
+
+async function mergeIndexedArrayEntries(
+  entries: Array<{ fieldPath: string; value: unknown }>,
+  mergedPaths?: Set<string>,
+): Promise<Array<{ fieldPath: string; value: unknown }>> {
+  const baseResponse = await apiFetch('/api/admin/config/base');
+  if (!baseResponse.ok) throw new Error(`Failed to fetch base config: ${baseResponse.status}`);
+  const { config: baseConfig } = (await baseResponse.json()) as {
+    config: Record<string, t.ConfigValue>;
+  };
+  return mergeIndexedArrayEntriesIntoBase(entries, baseConfig, mergedPaths);
 }
 
 export const saveBaseConfigFn = createServerFn({ method: 'POST' })

@@ -16,6 +16,7 @@ import {
   validateFieldValue,
   parseIndexedArrayPath,
   normalizeAppServiceKeys,
+  mergeIndexedArrayEntriesIntoBase,
 } from './config';
 
 interface ZodV3Schema extends t.ZodSchemaLike {
@@ -1050,6 +1051,24 @@ describe('parseIndexedArrayPath', () => {
 });
 
 describe('normalizeAppServiceKeys', () => {
+  it('maps MCP AppService output to canonical mcpServers records', () => {
+    const normalized = normalizeAppServiceKeys({
+      mcpConfig: {
+        filesystem: {
+          type: 'stdio',
+          args: ['server.js', '--root', '/tmp'],
+        },
+      },
+    });
+    expect(normalized).not.toHaveProperty('mcpConfig');
+    expect(normalized.mcpServers).toEqual({
+      filesystem: {
+        type: 'stdio',
+        args: ['server.js', '--root', '/tmp'],
+      },
+    });
+  });
+
   it('maps Azure groupMap output to canonical groups arrays', () => {
     const normalized = normalizeAppServiceKeys({
       endpoints: {
@@ -1072,6 +1091,32 @@ describe('normalizeAppServiceKeys', () => {
         ],
       },
     });
+  });
+});
+
+describe('mergeIndexedArrayEntriesIntoBase', () => {
+  it('merges indexed MCP array edits from AppService fallback aliases', () => {
+    const mergedPaths = new Set<string>();
+    const result = mergeIndexedArrayEntriesIntoBase(
+      [{ fieldPath: 'mcpServers.filesystem.args.1', value: '--workspace' }],
+      {
+        mcpConfig: {
+          filesystem: {
+            type: 'stdio',
+            args: ['server.js', '--root', '/tmp'],
+          },
+        },
+      },
+      mergedPaths,
+    );
+
+    expect(result).toEqual([
+      {
+        fieldPath: 'mcpServers.filesystem.args',
+        value: ['server.js', '--workspace', '/tmp'],
+      },
+    ]);
+    expect(mergedPaths.has('mcpServers.filesystem.args')).toBe(true);
   });
 });
 
