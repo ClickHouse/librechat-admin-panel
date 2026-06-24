@@ -12,6 +12,7 @@ const KNOWN_APP_ROUTES = new Map<string, string>([
   ['/help', '/help'],
   ['/users', '/users'],
   ['/auth/openid/callback', '/auth/openid/callback'],
+  ['/auth/google/callback', '/auth/google/callback'],
 ]);
 
 const STATIC_ASSET_RE =

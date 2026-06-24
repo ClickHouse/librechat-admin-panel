@@ -44,7 +44,7 @@ vi.mock('./utils/refresh', () => ({
   refreshAdminTokenDeduped: vi.fn(),
 }));
 
-import { checkOpenIdFn, oauthExchangeFn } from './auth';
+import { getStartupConfigFn, oauthExchangeFn, oauthLoginFn } from './auth';
 
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -75,11 +75,14 @@ describe('oauthExchangeFn', () => {
       }),
     );
 
-    const result = await oauthExchangeFn({ data: { code: 'a'.repeat(64) } });
+    const result = await oauthExchangeFn({
+      data: { code: 'a'.repeat(64), provider: 'openid' },
+    });
 
     expect(result).toEqual({
       error: false,
       user: { id: 'user-1', role: 'ADMIN', email: 'admin@example.com' },
+      redirectTo: '/',
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock).toHaveBeenCalledWith('http://librechat.test/api/admin/oauth/exchange', {
@@ -100,10 +103,60 @@ describe('oauthExchangeFn', () => {
     );
   });
 
+  it('returns the post-login redirect captured at login start and clears it from the session', async () => {
+    sessionState.data = { codeVerifier: 'verifier-123', postLoginRedirect: '/users' };
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(200, {
+        token: 'jwt-token',
+        expiresAt: 123456,
+        user: { id: 'user-1', role: 'ADMIN', email: 'admin@example.com' },
+      }),
+    );
+
+    const result = await oauthExchangeFn({
+      data: { code: 'a'.repeat(64), provider: 'openid' },
+    });
+
+    expect(result).toMatchObject({ error: false, redirectTo: '/users' });
+    expect(updateSession).toHaveBeenCalledWith(
+      expect.objectContaining({ postLoginRedirect: undefined }),
+    );
+  });
+
+  it('sanitizes an unsafe stored redirect back to the dashboard', async () => {
+    sessionState.data = { codeVerifier: 'verifier-123', postLoginRedirect: '//evil.com' };
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(200, {
+        token: 'jwt-token',
+        expiresAt: 123456,
+        user: { id: 'user-1', role: 'ADMIN', email: 'admin@example.com' },
+      }),
+    );
+
+    const result = await oauthExchangeFn({
+      data: { code: 'a'.repeat(64), provider: 'openid' },
+    });
+
+    expect(result).toMatchObject({ error: false, redirectTo: '/' });
+  });
+
+  it('stores the sanitized post-login redirect in the session when starting login', async () => {
+    await oauthLoginFn({ data: { provider: 'google', redirectTo: '/access' } });
+    expect(updateSession).toHaveBeenCalledWith(
+      expect.objectContaining({ postLoginRedirect: '/access' }),
+    );
+
+    updateSession.mockClear();
+    await oauthLoginFn({ data: { provider: 'google', redirectTo: 'https://evil.com' } });
+    expect(updateSession).toHaveBeenCalledWith(expect.objectContaining({ postLoginRedirect: '/' }));
+  });
+
   it('does not consume the one-time LibreChat exchange code when the PKCE verifier was lost', async () => {
     sessionState.data = {};
 
-    const result = await oauthExchangeFn({ data: { code: 'b'.repeat(64) } });
+    const result = await oauthExchangeFn({
+      data: { code: 'b'.repeat(64), provider: 'openid' },
+    });
 
     expect(result).toEqual({
       error: true,
@@ -117,7 +170,7 @@ describe('oauthExchangeFn', () => {
   });
 });
 
-describe('checkOpenIdFn', () => {
+describe('getStartupConfigFn', () => {
   const originalSsoEnabled = process.env.ADMIN_SSO_ENABLED;
   const originalSsoOnly = process.env.ADMIN_SSO_ONLY;
 
@@ -136,30 +189,93 @@ describe('checkOpenIdFn', () => {
     else process.env.ADMIN_SSO_ONLY = originalSsoOnly;
   });
 
-  it('reports SSO available with auto-redirect off by default', async () => {
-    fetchMock.mockResolvedValueOnce(jsonResponse(200, {}));
+  it('lists each LibreChat-enabled provider with branding overrides', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(200, {
+        openidLoginEnabled: true,
+        googleLoginEnabled: true,
+        socialLoginEnabled: true,
+        openidLabel: 'Corp SSO',
+        openidImageUrl: 'https://corp.example/logo.png',
+      }),
+    );
 
-    const result = await checkOpenIdFn();
+    const result = await getStartupConfigFn();
 
-    expect(result).toEqual({ available: true, ssoOnly: false });
-    expect(fetchMock).toHaveBeenCalledWith('http://librechat.test/api/admin/oauth/openid/check');
+    expect(result).toEqual({
+      providers: [
+        { id: 'openid', label: 'Corp SSO', imageUrl: 'https://corp.example/logo.png' },
+        { id: 'google', label: undefined, imageUrl: undefined },
+      ],
+      ssoOnly: false,
+    });
+    expect(fetchMock).toHaveBeenCalledWith('http://librechat.test/api/config', { headers: {} });
   });
 
   it('marks the session SSO-only when ADMIN_SSO_ONLY=true', async () => {
     process.env.ADMIN_SSO_ONLY = 'true';
-    fetchMock.mockResolvedValueOnce(jsonResponse(200, {}));
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { openidLoginEnabled: true }));
 
-    const result = await checkOpenIdFn();
+    const result = await getStartupConfigFn();
 
-    expect(result).toEqual({ available: true, ssoOnly: true });
+    expect(result).toEqual({
+      providers: [{ id: 'openid', label: undefined, imageUrl: undefined }],
+      ssoOnly: true,
+    });
   });
 
-  it('hides the SSO button without calling the backend when ADMIN_SSO_ENABLED=false', async () => {
+  it('hides social providers when LibreChat has not enabled social login', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(200, {
+        openidLoginEnabled: true,
+        googleLoginEnabled: true,
+        socialLoginEnabled: false,
+      }),
+    );
+
+    const result = await getStartupConfigFn();
+
+    expect(result).toEqual({
+      providers: [{ id: 'openid', label: undefined, imageUrl: undefined }],
+      ssoOnly: false,
+    });
+  });
+
+  it('hides a provider omitted from the socialLogins allowlist even when enabled', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(200, {
+        openidLoginEnabled: true,
+        googleLoginEnabled: true,
+        socialLoginEnabled: true,
+        socialLogins: ['openid'],
+      }),
+    );
+
+    const result = await getStartupConfigFn();
+
+    expect(result).toEqual({
+      providers: [{ id: 'openid', label: undefined, imageUrl: undefined }],
+      ssoOnly: false,
+    });
+  });
+
+  it('forwards X-Tenant-Id to the LibreChat startup config request', async () => {
+    requestHeaders.set('x-tenant-id', 'tenant-42');
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { openidLoginEnabled: true }));
+
+    await getStartupConfigFn();
+
+    expect(fetchMock).toHaveBeenCalledWith('http://librechat.test/api/config', {
+      headers: { 'X-Tenant-Id': 'tenant-42' },
+    });
+  });
+
+  it('hides every SSO provider without calling the backend when ADMIN_SSO_ENABLED=false', async () => {
     process.env.ADMIN_SSO_ENABLED = 'false';
 
-    const result = await checkOpenIdFn();
+    const result = await getStartupConfigFn();
 
-    expect(result).toEqual({ available: false, ssoOnly: false });
+    expect(result).toEqual({ providers: [], ssoOnly: false });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -167,17 +283,17 @@ describe('checkOpenIdFn', () => {
     process.env.ADMIN_SSO_ENABLED = 'false';
     process.env.ADMIN_SSO_ONLY = 'true';
 
-    const result = await checkOpenIdFn();
+    const result = await getStartupConfigFn();
 
-    expect(result).toEqual({ available: false, ssoOnly: false });
+    expect(result).toEqual({ providers: [], ssoOnly: false });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('reports SSO unavailable when the backend check fails', async () => {
+  it('returns an empty provider list when the startup config request fails', async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse(503, {}));
 
-    const result = await checkOpenIdFn();
+    const result = await getStartupConfigFn();
 
-    expect(result).toEqual({ available: false, ssoOnly: false });
+    expect(result).toEqual({ providers: [], ssoOnly: false });
   });
 });

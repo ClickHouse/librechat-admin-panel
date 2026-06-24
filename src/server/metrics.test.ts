@@ -7,6 +7,7 @@ describe('normalizeMetricsPath', () => {
     ['/login', '/login'],
     ['/configuration/', '/configuration'],
     ['/auth/openid/callback', '/auth/openid/callback'],
+    ['/auth/google/callback', '/auth/google/callback'],
   ])('keeps known app route %s bounded as %s', (input, expected) => {
     expect(normalizeMetricsPath(input)).toBe(expected);
   });

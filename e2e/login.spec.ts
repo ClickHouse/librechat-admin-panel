@@ -21,7 +21,7 @@ test.describe('Login page accessibility', () => {
   });
 
   test('has zero violations after showing validation errors', async ({ page }) => {
-    const signInButton = page.getByRole('button', { name: 'Sign In', exact: true });
+    const signInButton = page.getByRole('button', { name: 'Sign in', exact: true });
     await signInButton.click();
 
     await expect(page.getByText(/required/i).first()).toBeVisible({ timeout: 5000 });
@@ -34,7 +34,7 @@ test.describe('Login page accessibility', () => {
   });
 
   test('validation errors are announced via live region', async ({ page }) => {
-    const signInButton = page.getByRole('button', { name: 'Sign In', exact: true });
+    const signInButton = page.getByRole('button', { name: 'Sign in', exact: true });
     await signInButton.click();
 
     const liveRegion = page.locator('.auth-card [role="status"][aria-live="polite"]');
@@ -111,7 +111,7 @@ test.describe('Login page functionality', () => {
   test('shows validation error for invalid email format', async ({ page }) => {
     await page.locator('input:not([type="password"])').first().fill('notanemail');
     await page.locator('input[type="password"]').first().fill('somepassword');
-    await page.getByRole('button', { name: 'Sign In', exact: true }).click();
+    await page.getByRole('button', { name: 'Sign in', exact: true }).click();
 
     await expect(page.getByText(/valid email/i).first()).toBeVisible({ timeout: 5000 });
   });
@@ -126,7 +126,7 @@ test.describe('Login page functionality', () => {
   test('successful login redirects away from /login', async ({ page }) => {
     await page.locator('input:not([type="password"])').first().fill('admin@test.com');
     await page.locator('input[type="password"]').first().fill('password');
-    await page.getByRole('button', { name: 'Sign In', exact: true }).click();
+    await page.getByRole('button', { name: 'Sign in', exact: true }).click();
 
     await page.waitForURL('**/', { timeout: 15_000 });
     expect(page.url()).not.toContain('/login');
@@ -135,7 +135,7 @@ test.describe('Login page functionality', () => {
   test('shows error banner when server rejects credentials', async ({ page }) => {
     await page.locator('input:not([type="password"])').first().fill('rejected@test.com');
     await page.locator('input[type="password"]').first().fill('wrongpass');
-    await page.getByRole('button', { name: 'Sign In', exact: true }).click();
+    await page.getByRole('button', { name: 'Sign in', exact: true }).click();
 
     await expect(
       page.getByText(/invalid|failed|credentials/i).first(),
@@ -152,7 +152,7 @@ test.describe('2FA verification flow', () => {
   async function triggerTwoFAStep(page: import('@playwright/test').Page) {
     await page.locator('input:not([type="password"])').first().fill('2fa@test.com');
     await page.locator('input[type="password"]').first().fill('password');
-    await page.getByRole('button', { name: 'Sign In', exact: true }).click();
+    await page.getByRole('button', { name: 'Sign in', exact: true }).click();
     await expect(page.getByText(/authenticator/i)).toBeVisible({ timeout: 5000 });
   }
 
@@ -206,18 +206,18 @@ test.describe('2FA verification flow', () => {
 
     await page.getByText(/back to login/i).click();
 
-    await expect(page.getByRole('button', { name: 'Sign In', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Sign in', exact: true })).toBeVisible();
     await expect(page.getByText(/two-factor/i)).not.toBeVisible();
   });
 });
 
 test.describe('SSO availability', () => {
-  test('shows SSO button when OpenID is available', async ({ page }) => {
+  test('shows OpenID button when OpenID is available', async ({ page }) => {
     await page.goto('/login');
     await page.waitForLoadState('networkidle');
 
     await expect(
-      page.getByRole('button', { name: /sso/i }),
+      page.getByRole('button', { name: /openid/i }),
     ).toBeVisible({ timeout: 10_000 });
   });
 
@@ -225,7 +225,7 @@ test.describe('SSO availability', () => {
     await page.goto('/login');
     await page.waitForLoadState('networkidle');
 
-    await expect(page.getByRole('button', { name: /sso/i })).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByRole('button', { name: /openid/i })).toBeVisible({ timeout: 10_000 });
 
     const results = await new AxeBuilder({ page })
       .withTags(WCAG_TAGS)
@@ -238,8 +238,20 @@ test.describe('SSO availability', () => {
     await page.goto('/login');
     await page.waitForLoadState('networkidle');
 
-    await expect(page.getByRole('button', { name: 'Sign In', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Sign in', exact: true })).toBeVisible();
     await expect(page.locator('input:not([type="password"])')).toBeVisible();
     await expect(page.locator('input[type="password"]')).toBeVisible();
+  });
+
+  test('shows Google button alongside OpenID when both are configured', async ({ page }) => {
+    await page.goto('/login');
+    await page.waitForLoadState('networkidle');
+
+    await expect(
+      page.getByRole('button', { name: /google/i }),
+    ).toBeVisible({ timeout: 10_000 });
+    await expect(
+      page.getByRole('button', { name: /openid/i }),
+    ).toBeVisible({ timeout: 10_000 });
   });
 });

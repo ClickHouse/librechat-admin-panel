@@ -36,7 +36,7 @@ export default defineConfig({
     },
     {
       command: 'node e2e/mock-backend.mjs',
-      url: 'http://localhost:3081/api/admin/oauth/openid/check',
+      url: 'http://localhost:3081/api/config',
       reuseExistingServer: true,
       timeout: 10_000,
     },

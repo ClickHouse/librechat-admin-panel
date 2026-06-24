@@ -25,7 +25,7 @@ setup('authenticate as admin', async ({ page }) => {
 
   await page.locator('input:not([type="password"])').first().fill(email);
   await page.locator('input[type="password"]').first().fill(password);
-  await page.getByRole('button', { name: 'Sign In', exact: true }).click();
+  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
 
   const errorBanner = page.locator('[role="alert"]');
   await expect(errorBanner).not.toBeVisible({ timeout: 5_000 });

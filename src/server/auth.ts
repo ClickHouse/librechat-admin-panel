@@ -10,6 +10,8 @@ import { getApiBaseUrl, getServerApiUrl } from './utils/url';
 import { refreshAdminTokenDeduped } from './utils/refresh';
 import { buildOAuthExchangePayload } from './utils/oauth';
 import { useAppSession, SESSION_CONFIG } from './session';
+import { sanitizeInternalRedirect } from '@/utils';
+import { OAUTH_PROVIDERS } from '@/constants';
 
 /** Extract a named cookie value from `set-cookie` response headers. */
 function extractCookieValue(response: Response, name: string): string | undefined {
@@ -332,54 +334,125 @@ export const getCurrentUserFn = createServerFn({ method: 'GET' }).handler(async 
   }
 });
 
-/** Shared queryOptions so consumers deduplicate the OpenID availability check. */
-export const openIdCheckOptions = queryOptions({
-  queryKey: ['openIdCheck'],
-  queryFn: () => checkOpenIdFn(),
+const oauthProviderSchema = z.enum(['openid', 'google']);
+
+/**
+ * Resolve which OAuth providers LibreChat has configured by reading the public
+ * /api/config startup payload — the same endpoint LibreChat's own client uses to
+ * decide which social-login buttons to render. Provider availability is derived
+ * from the boolean *LoginEnabled flags; deployer-supplied label/imageUrl
+ * overrides are forwarded for the providers that support them (openid, saml).
+ *
+ * ssoOnly is independent of LibreChat: it remains an admin-panel-side knob
+ * (`ADMIN_SSO_ONLY`) so admins can keep a password fallback even when chat
+ * users are auto-redirected.
+ */
+export const getStartupConfigFn = createServerFn({ method: 'GET' }).handler(
+  async (): Promise<t.AdminStartupConfig> => {
+    if (process.env.ADMIN_SSO_ENABLED === 'false') {
+      return { providers: [], ssoOnly: false };
+    }
+    const ssoOnly = process.env.ADMIN_SSO_ONLY === 'true';
+    try {
+      /**
+       * Forward the tenant header so LibreChat's `/api/config` route
+       * (mounted behind `preAuthTenantMiddleware`) resolves tenant-scoped
+       * `registration.socialLogins` instead of falling back to base config.
+       */
+      const headers: Record<string, string> = {};
+      const tenantId = getRequestHeader('x-tenant-id');
+      if (typeof tenantId === 'string' && tenantId.trim().length > 0) {
+        headers['X-Tenant-Id'] = tenantId.trim();
+      }
+      const response = await fetch(`${getServerApiUrl()}/api/config`, { headers });
+      if (!response.ok) return { providers: [], ssoOnly };
+      const config = (await response.json()) as t.StartupConfigResponse;
+      const socialLogins = Array.isArray(config.socialLogins) ? config.socialLogins : undefined;
+      const providers: t.ResolvedProvider[] = [];
+      for (const def of OAUTH_PROVIDERS) {
+        if (config[def.enabledKey as keyof t.StartupConfigResponse] !== true) continue;
+        /**
+         * Providers whose LibreChat strategy is registered inside
+         * `configureSocialLogins` (e.g. google) are only available when the
+         * upstream `ALLOW_SOCIAL_LOGIN` env is true. Surfacing the button
+         * otherwise lands users on an "Unknown authentication strategy" 500.
+         * OpenID has its own registration path and is unaffected.
+         */
+        if (def.social && config.socialLoginEnabled !== true) continue;
+        /**
+         * Honor the deployer's `socialLogins` allowlist the chat client uses to
+         * decide which buttons to render: a provider omitted from that list is
+         * hidden even when its *LoginEnabled flag is set. When the list is
+         * absent the upstream default allows every enabled provider.
+         */
+        if (socialLogins && !socialLogins.includes(def.id)) continue;
+        providers.push({
+          id: def.id,
+          label: def.labelKey
+            ? (config[def.labelKey as keyof t.StartupConfigResponse] as string | undefined)
+            : undefined,
+          imageUrl: def.imageKey
+            ? (config[def.imageKey as keyof t.StartupConfigResponse] as string | undefined)
+            : undefined,
+        });
+      }
+      return { providers, ssoOnly };
+    } catch {
+      return { providers: [], ssoOnly };
+    }
+  },
+);
+
+/** Shared queryOptions so consumers deduplicate the startup-config fetch. */
+export const startupConfigOptions = queryOptions({
+  queryKey: ['adminStartupConfig'],
+  queryFn: () => getStartupConfigFn(),
   staleTime: 60_000,
 });
 
-export const checkOpenIdFn = createServerFn({ method: 'GET' }).handler(async () => {
-  if (process.env.ADMIN_SSO_ENABLED === 'false') {
-    return { available: false, ssoOnly: false };
-  }
-  const checkUrl = `${getServerApiUrl()}/api/admin/oauth/openid/check`;
-  try {
-    const response = await fetch(checkUrl);
-    if (!response.ok) {
-      console.warn('[checkOpenIdFn] OpenID check failed:', response.status, checkUrl);
-      return { available: false, ssoOnly: false };
+async function buildOAuthLoginUrl(
+  provider: t.OAuthProvider,
+  redirectTo: string | undefined,
+): Promise<string> {
+  const def = OAUTH_PROVIDERS.find((p) => p.id === provider);
+  if (!def) throw new Error(`Unknown OAuth provider: ${provider}`);
+
+  const authUrl = new URL(`${getApiBaseUrl()}${def.startPath}`);
+
+  const codeVerifier = crypto.randomBytes(32).toString('hex');
+  const codeChallenge = crypto.createHash('sha256').update(codeVerifier).digest('hex');
+  authUrl.searchParams.set('code_challenge', codeChallenge);
+
+  /**
+   * Stash the post-login destination in the admin session so the callback can
+   * restore it after the provider round-trip, the same way `codeVerifier` rides
+   * through. Sanitized to a same-origin path to avoid an open redirect.
+   */
+  const postLoginRedirect = sanitizeInternalRedirect(redirectTo);
+  const session = await useAppSession();
+  await session.update({ codeVerifier, postLoginRedirect });
+
+  return authUrl.toString();
+}
+
+export const oauthLoginFn = createServerFn({ method: 'POST' })
+  .inputValidator(z.object({ provider: oauthProviderSchema, redirectTo: z.string().optional() }))
+  .handler(async ({ data }) => {
+    try {
+      const authUrl = await buildOAuthLoginUrl(data.provider, data.redirectTo);
+      return { error: false as const, authUrl };
+    } catch (error) {
+      console.error(`[oauthLoginFn] ${data.provider} initiation error:`, error);
+      return { error: true as const, message: 'Failed to initiate SSO login' };
     }
-    const ssoOnly = process.env.ADMIN_SSO_ONLY === 'true';
-    return { available: true, ssoOnly };
-  } catch (error) {
-    console.warn('[checkOpenIdFn] OpenID check request failed:', checkUrl, error);
-    return { available: false, ssoOnly: false };
-  }
-});
-
-export const openidLoginFn = createServerFn({ method: 'GET' }).handler(async () => {
-  try {
-    const baseUrl = getApiBaseUrl();
-    const authUrl = new URL(`${baseUrl}/api/admin/oauth/openid`);
-
-    const codeVerifier = crypto.randomBytes(32).toString('hex');
-    const codeChallenge = crypto.createHash('sha256').update(codeVerifier).digest('hex');
-    authUrl.searchParams.set('code_challenge', codeChallenge);
-
-    const session = await useAppSession();
-    await session.update({ codeVerifier });
-
-    return { error: false, authUrl: authUrl.toString() };
-  } catch (error) {
-    console.error('OpenID login initiation error:', error);
-    return { error: true, message: 'Failed to initiate SSO login' };
-  }
-});
+  });
 
 export const oauthExchangeFn = createServerFn({ method: 'POST' })
   .inputValidator(
-    z.object({ code: z.string().regex(/^[a-f0-9]{64}$/, 'Invalid exchange code format') }),
+    z.object({
+      code: z.string().regex(/^[a-f0-9]{64}$/, 'Invalid exchange code format'),
+      provider: oauthProviderSchema,
+    }),
   )
   .handler(async ({ data }) => {
     try {
@@ -388,7 +461,7 @@ export const oauthExchangeFn = createServerFn({ method: 'POST' })
       if (requestOrigin) headers['Origin'] = requestOrigin;
 
       const session = await useAppSession();
-      const { codeVerifier } = session.data;
+      const { codeVerifier, postLoginRedirect } = session.data;
       const exchangePayload = buildOAuthExchangePayload(data.code, codeVerifier);
       if (!exchangePayload.ok) {
         console.warn(
@@ -424,19 +497,35 @@ export const oauthExchangeFn = createServerFn({ method: 'POST' })
       }
 
       const exchangeData = responseData as t.OAuthExchangeResponse;
+      /**
+       * Non-openid OAuth admin sessions (currently `google`) arrive without a
+       * refresh token: LibreChat's `googleAdmin` passport strategy does not
+       * request `access_type=offline`, and `createOAuthHandler` in
+       * `api/server/controllers/auth/oauth.js` only forwards refresh tokens
+       * when `provider === 'openid' && OPENID_REUSE_TOKENS=true`. As a result,
+       * `verifyAdminTokenFn` cannot transparently refresh these sessions and
+       * the user is re-prompted at JWT expiry. Resolving this requires an
+       * upstream LibreChat change to capture and expose a refresh token for
+       * Google admin exchanges.
+       */
       const now = Date.now();
       await session.update({
         user: exchangeData.user,
         token: exchangeData.token,
         refreshToken: exchangeData.refreshToken ?? extractCookieValue(response, 'refreshToken'),
-        tokenProvider: 'openid',
+        tokenProvider: data.provider,
         expiresAt: exchangeData.expiresAt,
         lastVerified: now,
         lastActivity: now,
         codeVerifier: undefined,
+        postLoginRedirect: undefined,
       });
 
-      return { error: false, user: exchangeData.user };
+      return {
+        error: false,
+        user: exchangeData.user,
+        redirectTo: sanitizeInternalRedirect(postLoginRedirect),
+      };
     } catch (error) {
       console.error('OAuth exchange error:', error);
       return { error: true, message: 'Failed to complete authentication. Please try again.' };

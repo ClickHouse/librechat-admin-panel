@@ -9,7 +9,7 @@ const searchSchema = z.object({
   error_description: z.string().optional(),
 });
 
-export const Route = createFileRoute('/auth/openid/callback')({
+export const Route = createFileRoute('/auth/google/callback')({
   validateSearch: searchSchema,
   loaderDeps: ({ search }) => ({
     code: search.code,
@@ -18,9 +18,11 @@ export const Route = createFileRoute('/auth/openid/callback')({
   }),
   loader: async ({ deps: { code, error, error_description } }) => {
     /**
-     * LibreChat's admin OpenID route redirects passport/PKCE/auth failures
-     * back with `error` + `error_description` query params. Surface those
-     * instead of falling back to a generic "code may have expired" message.
+     * LibreChat's admin Google route redirects passport/PKCE/auth failures
+     * back with `error` + `error_description` query params (see
+     * `api/server/routes/admin/auth.js` `/oauth/google` and
+     * `/oauth/google/callback`). Surface those instead of falling back to a
+     * generic "code may have expired" message.
      */
     if (error) {
       return { error: 'upstream_error' as const, message: error_description ?? error };
@@ -30,7 +32,7 @@ export const Route = createFileRoute('/auth/openid/callback')({
     }
 
     try {
-      const result = await oauthExchangeFn({ data: { code, provider: 'openid' } });
+      const result = await oauthExchangeFn({ data: { code, provider: 'google' } });
       if (result.error) {
         return { error: 'exchange_failed' as const, message: result.message };
       }
@@ -40,10 +42,10 @@ export const Route = createFileRoute('/auth/openid/callback')({
       return { error: 'exchange_failed' as const };
     }
   },
-  component: OpenIdCallback,
+  component: GoogleCallback,
 });
 
-function OpenIdCallback() {
+function GoogleCallback() {
   const loaderData = Route.useLoaderData();
   const localize = useLocalize();
 
