@@ -17,6 +17,7 @@ import {
   parseIndexedArrayPath,
   toConfigArraySource,
   normalizeAppServiceKeys,
+  mergeConfigArraySources,
   mergeIndexedArrayEntriesIntoBase,
 } from './config';
 
@@ -1063,6 +1064,40 @@ describe('toConfigArraySource', () => {
 
   it('rejects non-index object keys', () => {
     expect(toConfigArraySource({ 0: 'zero', current: 'not-array' })).toBeUndefined();
+  });
+});
+
+describe('mergeConfigArraySources', () => {
+  it('overlays legacy numeric-key overrides onto inherited arrays', () => {
+    expect(
+      mergeConfigArraySources(
+        [
+          { name: 'base-a', baseURL: 'https://a.example.com' },
+          { name: 'base-b', baseURL: 'https://b.example.com' },
+          { name: 'base-c', baseURL: 'https://c.example.com' },
+        ],
+        {
+          1: { name: 'scope-b', baseURL: 'https://scope.example.com' },
+        },
+        undefined,
+      ),
+    ).toEqual([
+      { name: 'base-a', baseURL: 'https://a.example.com' },
+      { name: 'scope-b', baseURL: 'https://scope.example.com' },
+      { name: 'base-c', baseURL: 'https://c.example.com' },
+    ]);
+  });
+
+  it('treats real arrays as complete overrides', () => {
+    expect(mergeConfigArraySources(['base-a', 'base-b'], ['scope-only'], undefined)).toEqual([
+      'scope-only',
+    ]);
+  });
+
+  it('applies pending numeric-key entries after scoped overlays', () => {
+    expect(
+      mergeConfigArraySources(['base-a', 'base-b', 'base-c'], { 1: 'scope-b' }, { 2: 'pending-c' }),
+    ).toEqual(['base-a', 'scope-b', 'pending-c']);
   });
 });
 

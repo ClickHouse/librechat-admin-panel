@@ -601,7 +601,12 @@ export function parseIndexedArrayPath(
 
 export function toConfigArraySource(value: unknown): unknown[] | undefined {
   if (Array.isArray(value)) return [...value];
+  return toIndexedArrayObjectSource(value);
+}
+
+export function toIndexedArrayObjectSource(value: unknown): unknown[] | undefined {
   if (!value || typeof value !== 'object') return undefined;
+  if (Array.isArray(value)) return undefined;
   const arrayValue: unknown[] = [];
   for (const [key, entryValue] of Object.entries(value as Record<string, t.ConfigValue>)) {
     if (!ARRAY_INDEX_KEY_RE.test(key)) return undefined;
@@ -610,6 +615,31 @@ export function toConfigArraySource(value: unknown): unknown[] | undefined {
     arrayValue[index] = entryValue;
   }
   return arrayValue;
+}
+
+function overlayArraySource(source: unknown[], overlay: unknown[]): unknown[] {
+  const result = [...source];
+  for (const key of Object.keys(overlay)) {
+    const index = Number(key);
+    result[index] = overlay[index];
+  }
+  return result;
+}
+
+function mergeConfigArraySource(source: unknown[], value: unknown): unknown[] {
+  if (Array.isArray(value)) return [...value];
+  const overlay = toIndexedArrayObjectSource(value);
+  return overlay ? overlayArraySource(source, overlay) : source;
+}
+
+export function mergeConfigArraySources(
+  baseValue: unknown,
+  overrideValue: unknown,
+  pendingValue: unknown,
+): unknown[] {
+  const baseSource = toConfigArraySource(baseValue) ?? [];
+  const overrideSource = mergeConfigArraySource(baseSource, overrideValue);
+  return mergeConfigArraySource(overrideSource, pendingValue);
 }
 
 /** Shared queryOptions for the schema tree used by command palette search. */

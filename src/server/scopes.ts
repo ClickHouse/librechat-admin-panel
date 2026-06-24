@@ -21,7 +21,7 @@ import { BASE_CONFIG_PRINCIPAL_ID } from './constants';
 import { requireAnyCapability } from './capabilities';
 import { safeFieldPath } from './utils/validation';
 import { apiFetch } from './utils/api';
-import { normalizeAppServiceKeys, parseIndexedArrayPath, toConfigArraySource } from './config';
+import { normalizeAppServiceKeys, parseIndexedArrayPath, mergeConfigArraySources } from './config';
 
 // ── Dot-path helpers ─────────────────────────────────────────────────
 
@@ -88,12 +88,7 @@ async function mergeIndexedArrayEntriesForScope(
     const pending = restIndex === undefined ? undefined : rest[restIndex]?.value;
     const scopeValue = deepGet(scopeOverrides, arrayPath);
     const baseValue = deepGet(baseConfig, arrayPath);
-    let source = toConfigArraySource(baseValue);
-    const scopeSource = toConfigArraySource(scopeValue);
-    const pendingSource = toConfigArraySource(pending);
-    if (scopeSource) source = scopeSource;
-    if (pendingSource) source = pendingSource;
-    const arr = source ?? [];
+    const arr = mergeConfigArraySources(baseValue, scopeValue, pending);
     for (const [idx, value] of updates) {
       arr[idx] = value;
     }
