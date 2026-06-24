@@ -44,7 +44,13 @@ vi.mock('./utils/refresh', () => ({
   refreshAdminTokenDeduped: vi.fn(),
 }));
 
-import { checkOpenIdFn, oauthExchangeFn } from './auth';
+import {
+  adminLoginFn,
+  adminVerify2FAFn,
+  checkOpenIdFn,
+  oauthExchangeFn,
+  verifyAdminTokenFn,
+} from './auth';
 
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -52,6 +58,120 @@ function jsonResponse(status: number, body: unknown): Response {
     headers: { 'Content-Type': 'application/json' },
   });
 }
+
+describe('adminLoginFn', () => {
+  beforeEach(() => {
+    fetchMock.mockReset();
+    updateSession.mockReset();
+    sessionState.data = {};
+    vi.stubGlobal('fetch', fetchMock);
+  });
+
+  it('accepts a backend-approved delegated admin without requiring the ADMIN role', async () => {
+    const user = { id: 'user-1', role: 'department-admin', email: 'delegate@example.com' };
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { token: 'jwt-token', user }));
+
+    const result = await adminLoginFn({
+      data: { email: 'delegate@example.com', password: 'password' },
+    });
+
+    expect(result).toEqual({ error: false, user });
+    expect(fetchMock).toHaveBeenCalledWith('http://librechat.test/api/admin/login/local', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'delegate@example.com', password: 'password' }),
+    });
+    expect(updateSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        user,
+        token: 'jwt-token',
+        tokenProvider: 'librechat',
+      }),
+    );
+  });
+});
+
+describe('adminVerify2FAFn', () => {
+  beforeEach(() => {
+    fetchMock.mockReset();
+    updateSession.mockReset();
+    sessionState.data = {};
+    vi.stubGlobal('fetch', fetchMock);
+  });
+
+  it('accepts a backend-approved delegated admin after 2FA verification', async () => {
+    const user = { id: 'user-2', role: 'department-admin', email: 'delegate2@example.com' };
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { token: 'jwt-token-2', user }));
+
+    const result = await adminVerify2FAFn({
+      data: { tempToken: 'temp-token', totpCode: '123456' },
+    });
+
+    expect(result).toEqual({ error: false, user });
+    expect(fetchMock).toHaveBeenCalledWith('http://librechat.test/api/auth/2fa/verify-temp', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tempToken: 'temp-token', token: '123456' }),
+    });
+    expect(updateSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        user,
+        token: 'jwt-token-2',
+        tokenProvider: 'librechat',
+      }),
+    );
+  });
+});
+
+describe('verifyAdminTokenFn', () => {
+  beforeEach(() => {
+    fetchMock.mockReset();
+    updateSession.mockReset();
+    sessionState.data = {};
+    vi.stubGlobal('fetch', fetchMock);
+  });
+
+  it('keeps a fresh delegated admin session without requiring the ADMIN role', async () => {
+    const user = { id: 'user-3', role: 'department-admin', email: 'delegate3@example.com' };
+    sessionState.data = {
+      user,
+      token: 'jwt-token-3',
+      lastVerified: Date.now(),
+      lastActivity: Date.now(),
+    };
+
+    const result = await verifyAdminTokenFn();
+
+    expect(result).toEqual({ valid: true, user });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(updateSession).toHaveBeenCalledWith({ lastActivity: expect.any(Number) });
+  });
+
+  it('clears a delegated admin session when backend capability revalidation is denied', async () => {
+    const user = { id: 'user-4', role: 'department-admin', email: 'delegate4@example.com' };
+    sessionState.data = {
+      user,
+      token: 'jwt-token-4',
+      lastVerified: 0,
+      lastActivity: Date.now(),
+    };
+    fetchMock.mockResolvedValueOnce(jsonResponse(403, {}));
+
+    const result = await verifyAdminTokenFn();
+
+    expect(result).toEqual({ valid: false, error: 'Admin privileges have been revoked' });
+    expect(fetchMock).toHaveBeenCalledWith('http://librechat.test/api/admin/verify', {
+      headers: { Authorization: 'Bearer jwt-token-4' },
+    });
+    expect(updateSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        token: undefined,
+        user: undefined,
+        refreshToken: undefined,
+      }),
+    );
+  });
+});
 
 describe('oauthExchangeFn', () => {
   beforeEach(() => {

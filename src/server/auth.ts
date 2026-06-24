@@ -2,7 +2,6 @@ import { z } from 'zod';
 import crypto from 'crypto';
 import { redirect } from '@tanstack/react-router';
 import { queryOptions } from '@tanstack/react-query';
-import { SystemRoles } from 'librechat-data-provider';
 import { createServerFn } from '@tanstack/react-start';
 import { getRequestHeader } from '@tanstack/react-start/server';
 import type * as t from '@/types';
@@ -84,10 +83,6 @@ export const adminLoginFn = createServerFn({ method: 'POST' })
         };
       }
 
-      if (loginData.user.role !== SystemRoles.ADMIN) {
-        return { error: true, message: 'You do not have admin privileges' };
-      }
-
       const now = Date.now();
       const session = await useAppSession();
       await session.update({
@@ -140,10 +135,6 @@ export const adminVerify2FAFn = createServerFn({ method: 'POST' })
 
       const verifyData = responseData as t.TwoFAVerifyResponse;
 
-      if (verifyData.user.role !== SystemRoles.ADMIN) {
-        return { error: true, message: 'You do not have admin privileges' };
-      }
-
       const now = Date.now();
       const session = await useAppSession();
       await session.update({
@@ -181,11 +172,6 @@ export const verifyAdminTokenFn = createServerFn({ method: 'GET' }).handler(asyn
 
     if (!token || !user) {
       return { valid: false, error: 'No session found' };
-    }
-
-    if (user.role !== SystemRoles.ADMIN) {
-      await clearSession(session);
-      return { valid: false, error: 'Not an admin user' };
     }
 
     const now = Date.now();
