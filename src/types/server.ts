@@ -26,6 +26,10 @@ export interface TwoFAVerifyResponse {
   user: SerializableUser;
 }
 
+export interface AdminVerifyResponse {
+  user: SerializableUser;
+}
+
 export interface OAuthExchangeResponse {
   token: string;
   refreshToken?: string;

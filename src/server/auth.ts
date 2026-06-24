@@ -2,7 +2,6 @@ import { z } from 'zod';
 import crypto from 'crypto';
 import { redirect } from '@tanstack/react-router';
 import { queryOptions } from '@tanstack/react-query';
-import { SystemRoles } from 'librechat-data-provider';
 import { createServerFn } from '@tanstack/react-start';
 import { getRequestHeader } from '@tanstack/react-start/server';
 import type * as t from '@/types';
@@ -84,10 +83,6 @@ export const adminLoginFn = createServerFn({ method: 'POST' })
         };
       }
 
-      if (loginData.user.role !== SystemRoles.ADMIN) {
-        return { error: true, message: 'You do not have admin privileges' };
-      }
-
       const now = Date.now();
       const session = await useAppSession();
       await session.update({
@@ -139,15 +134,26 @@ export const adminVerify2FAFn = createServerFn({ method: 'POST' })
       }
 
       const verifyData = responseData as t.TwoFAVerifyResponse;
+      const adminVerifyResponse = await fetch(`${getServerApiUrl()}/api/admin/verify`, {
+        headers: { Authorization: `Bearer ${verifyData.token}` },
+      });
 
-      if (verifyData.user.role !== SystemRoles.ADMIN) {
-        return { error: true, message: 'You do not have admin privileges' };
+      if (!adminVerifyResponse.ok) {
+        if (adminVerifyResponse.status === 403) {
+          return { error: true, message: 'You do not have admin privileges' };
+        }
+        if (adminVerifyResponse.status === 401) {
+          return { error: true, message: 'Session is no longer valid' };
+        }
+        return { error: true, message: '2FA verification failed' };
       }
+
+      const adminVerifyData = (await adminVerifyResponse.json()) as t.AdminVerifyResponse;
 
       const now = Date.now();
       const session = await useAppSession();
       await session.update({
-        user: verifyData.user,
+        user: adminVerifyData.user,
         token: verifyData.token,
         refreshToken: extractCookieValue(response, 'refreshToken'),
         tokenProvider: 'librechat',
@@ -155,7 +161,7 @@ export const adminVerify2FAFn = createServerFn({ method: 'POST' })
         lastActivity: now,
       });
 
-      return { error: false, user: verifyData.user };
+      return { error: false, user: adminVerifyData.user };
     } catch (error) {
       console.error('2FA verification error:', error);
       return { error: true, message: 'Verification failed. Please try again.' };
@@ -181,11 +187,6 @@ export const verifyAdminTokenFn = createServerFn({ method: 'GET' }).handler(asyn
 
     if (!token || !user) {
       return { valid: false, error: 'No session found' };
-    }
-
-    if (user.role !== SystemRoles.ADMIN) {
-      await clearSession(session);
-      return { valid: false, error: 'Not an admin user' };
     }
 
     const now = Date.now();
