@@ -1,5 +1,7 @@
 import type * as t from '@/types';
 
+const INDEXED_ARRAY_PATH_RE = /^(.+)\.(\d+)$/;
+
 export function inferKVType(v: t.ConfigValue): t.KVValueType {
   if (typeof v === 'boolean') return 'boolean';
   if (typeof v === 'number') return 'number';
@@ -247,6 +249,72 @@ export function partitionScopeResetPaths(
     }
   }
   return { resetPaths, tombstonePaths };
+}
+
+export function applyConfigEdit(
+  prev: t.FlatConfigMap,
+  path: string,
+  value: t.ConfigValue,
+  baseline: t.FlatConfigMap,
+  baselineIntermediates: Set<string>,
+  baselineContainerPaths: Set<string>,
+): t.FlatConfigMap {
+  const indexMatch = INDEXED_ARRAY_PATH_RE.exec(path);
+  if (indexMatch) {
+    const [, arrayPath, indexStr] = indexMatch;
+    const pendingArray = prev[arrayPath];
+    if (Array.isArray(pendingArray)) {
+      const next = { ...prev };
+      const arr = [...pendingArray];
+      arr[Number(indexStr)] = value;
+      next[arrayPath] = arr;
+      for (const existing of Object.keys(next)) {
+        if (existing.startsWith(`${arrayPath}.`)) delete next[existing];
+      }
+      return next;
+    }
+  }
+
+  const baselineValue = baseline[path];
+  const match =
+    value === baselineValue ||
+    (typeof value === 'object' &&
+      typeof baselineValue === 'object' &&
+      JSON.stringify(value) === JSON.stringify(baselineValue));
+  const isContainerDelete =
+    value === undefined && (baselineIntermediates.has(path) || baselineContainerPaths.has(path));
+  const hasPendingAncestorDelete = (() => {
+    let lastDot = path.lastIndexOf('.');
+    while (lastDot > 0) {
+      const ancestor = path.slice(0, lastDot);
+      if (ancestor in prev && prev[ancestor] === undefined) return true;
+      lastDot = ancestor.lastIndexOf('.');
+    }
+    return false;
+  })();
+  if (match && !isContainerDelete && !hasPendingAncestorDelete) {
+    const next = { ...prev };
+    delete next[path];
+    return next;
+  }
+  const next = { ...prev, [path]: value };
+  if (Array.isArray(value)) {
+    const prefix = `${path}.`;
+    for (const k of Object.keys(next)) {
+      if (k.startsWith(prefix) && INDEXED_ARRAY_PATH_RE.test(k)) delete next[k];
+    }
+  }
+  if (indexMatch) delete next[indexMatch[1]];
+  for (const existing of Object.keys(next)) {
+    if (existing === path) continue;
+    const newIsDescendant = path.startsWith(`${existing}.`);
+    const newIsAncestor = existing.startsWith(`${path}.`);
+    if (newIsDescendant && next[existing] === undefined) continue;
+    if (newIsDescendant || newIsAncestor) {
+      delete next[existing];
+    }
+  }
+  return next;
 }
 
 /**
