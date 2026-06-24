@@ -101,25 +101,48 @@ describe('adminVerify2FAFn', () => {
 
   it('accepts a backend-approved delegated admin after 2FA verification', async () => {
     const user = { id: 'user-2', role: 'department-admin', email: 'delegate2@example.com' };
-    fetchMock.mockResolvedValueOnce(jsonResponse(200, { token: 'jwt-token-2', user }));
+    const verifiedUser = { ...user, name: 'Delegated Admin' };
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(200, { token: 'jwt-token-2', user }))
+      .mockResolvedValueOnce(jsonResponse(200, { user: verifiedUser }));
 
     const result = await adminVerify2FAFn({
       data: { tempToken: 'temp-token', totpCode: '123456' },
     });
 
-    expect(result).toEqual({ error: false, user });
+    expect(result).toEqual({ error: false, user: verifiedUser });
     expect(fetchMock).toHaveBeenCalledWith('http://librechat.test/api/auth/2fa/verify-temp', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ tempToken: 'temp-token', token: '123456' }),
     });
+    expect(fetchMock).toHaveBeenCalledWith('http://librechat.test/api/admin/verify', {
+      headers: { Authorization: 'Bearer jwt-token-2' },
+    });
     expect(updateSession).toHaveBeenCalledWith(
       expect.objectContaining({
-        user,
+        user: verifiedUser,
         token: 'jwt-token-2',
         tokenProvider: 'librechat',
       }),
     );
+  });
+
+  it('rejects a 2FA token that does not pass admin capability revalidation', async () => {
+    const user = { id: 'user-2', role: 'regular-user', email: 'user@example.com' };
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(200, { token: 'user-jwt-token', user }))
+      .mockResolvedValueOnce(jsonResponse(403, {}));
+
+    const result = await adminVerify2FAFn({
+      data: { tempToken: 'temp-token', totpCode: '123456' },
+    });
+
+    expect(result).toEqual({ error: true, message: 'You do not have admin privileges' });
+    expect(fetchMock).toHaveBeenCalledWith('http://librechat.test/api/admin/verify', {
+      headers: { Authorization: 'Bearer user-jwt-token' },
+    });
+    expect(updateSession).not.toHaveBeenCalled();
   });
 });
 

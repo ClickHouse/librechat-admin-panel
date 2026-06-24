@@ -134,11 +134,26 @@ export const adminVerify2FAFn = createServerFn({ method: 'POST' })
       }
 
       const verifyData = responseData as t.TwoFAVerifyResponse;
+      const adminVerifyResponse = await fetch(`${getServerApiUrl()}/api/admin/verify`, {
+        headers: { Authorization: `Bearer ${verifyData.token}` },
+      });
+
+      if (!adminVerifyResponse.ok) {
+        if (adminVerifyResponse.status === 403) {
+          return { error: true, message: 'You do not have admin privileges' };
+        }
+        if (adminVerifyResponse.status === 401) {
+          return { error: true, message: 'Session is no longer valid' };
+        }
+        return { error: true, message: '2FA verification failed' };
+      }
+
+      const adminVerifyData = (await adminVerifyResponse.json()) as t.AdminVerifyResponse;
 
       const now = Date.now();
       const session = await useAppSession();
       await session.update({
-        user: verifyData.user,
+        user: adminVerifyData.user,
         token: verifyData.token,
         refreshToken: extractCookieValue(response, 'refreshToken'),
         tokenProvider: 'librechat',
@@ -146,7 +161,7 @@ export const adminVerify2FAFn = createServerFn({ method: 'POST' })
         lastActivity: now,
       });
 
-      return { error: false, user: verifyData.user };
+      return { error: false, user: adminVerifyData.user };
     } catch (error) {
       console.error('2FA verification error:', error);
       return { error: true, message: 'Verification failed. Please try again.' };
