@@ -907,7 +907,6 @@ export function mergeIndexedArrayEntriesIntoBase(
 ): Array<{ fieldPath: string; value: unknown }> {
   const indexed = new Map<string, Map<number, unknown>>();
   const rest: Array<{ fieldPath: string; value: unknown }> = [];
-  const normalizedBaseConfig = normalizeAppServiceKeys(baseConfig);
 
   for (const entry of entries) {
     const parsed = parseIndexedArrayPath(entry.fieldPath);
@@ -921,6 +920,7 @@ export function mergeIndexedArrayEntriesIntoBase(
   }
 
   if (indexed.size === 0) return entries;
+  const normalizedBaseConfig = normalizeAppServiceKeys(baseConfig);
 
   for (const [arrayPath, updates] of indexed) {
     const segments = arrayPath.split('.');
@@ -943,10 +943,18 @@ export function mergeIndexedArrayEntriesIntoBase(
   return rest;
 }
 
+function hasIndexedArrayEntry(entries: Array<{ fieldPath: string; value: unknown }>): boolean {
+  for (const entry of entries) {
+    if (parseIndexedArrayPath(entry.fieldPath)) return true;
+  }
+  return false;
+}
+
 async function mergeIndexedArrayEntries(
   entries: Array<{ fieldPath: string; value: unknown }>,
   mergedPaths?: Set<string>,
 ): Promise<Array<{ fieldPath: string; value: unknown }>> {
+  if (!hasIndexedArrayEntry(entries)) return entries;
   const baseResponse = await apiFetch('/api/admin/config/base');
   if (!baseResponse.ok) throw new Error(`Failed to fetch base config: ${baseResponse.status}`);
   const { config: baseConfig } = (await baseResponse.json()) as {
