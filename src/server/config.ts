@@ -555,6 +555,8 @@ export function resolveSubSchema(
   return current;
 }
 
+const ENUM_ERROR_CODE = 'invalid_enum_value';
+
 export function validateFieldValue(
   fieldPath: string,
   value: unknown,
@@ -573,12 +575,23 @@ export function validateFieldValue(
       subSchema as {
         safeParse: (v: unknown) => {
           success: boolean;
-          error?: { issues: Array<{ message: string; path: (string | number)[] }> };
+          error?: {
+            issues: Array<{
+              code?: string;
+              received?: unknown;
+              message: string;
+              path: (string | number)[];
+            }>;
+          };
         };
       }
     ).safeParse(value);
     if (!result.success && result.error) {
-      const messages = result.error.issues.map((i) => i.message);
+      const nonEnumIssues = result.error.issues.filter(
+        (i) => !(i.code === ENUM_ERROR_CODE && typeof i.received === 'string'),
+      );
+      if (nonEnumIssues.length === 0) return { success: true };
+      const messages = nonEnumIssues.map((i) => i.message);
       return { success: false, error: messages.join('; ') || 'Validation failed' };
     }
   }
@@ -669,6 +682,78 @@ export const getConfigSchemaFields = createServerFn({ method: 'GET' }).handler(a
   }
 });
 
+/**
+ * Returns true when every Zod issue is an enum validation failure with a
+ * string received value. Numeric inputs to z.nativeEnum are also reported as
+ * `invalid_enum_value` but should NOT be bypassed — future enum members are
+ * always strings for config fields.
+ */
+function isOnlyEnumErrors(
+  errors: Array<{ code?: string; received?: unknown; message: string; path: (string | number)[] }>,
+): boolean {
+  return (
+    errors.length > 0 &&
+    errors.every((e) => e.code === ENUM_ERROR_CODE && typeof e.received === 'string')
+  );
+}
+
+/** Re-parses rawConfig with enum-failing paths removed, then overlays the
+ *  original raw values at those paths. This preserves schema defaults, transforms,
+ *  and unknown-key stripping while keeping the forward-compatible enum values. */
+function parseWithEnumBypass(
+  rawConfig: Record<string, unknown>,
+  enumErrors: Array<{ path: (string | number)[] }>,
+): Record<string, t.ConfigValue> {
+  const clone = structuredClone(rawConfig);
+  const savedValues: Array<{ path: (string | number)[]; value: unknown }> = [];
+
+  for (const err of enumErrors) {
+    let parent: Record<string, unknown> | unknown[] = clone;
+    for (let i = 0; i < err.path.length - 1; i++) {
+      const seg = err.path[i];
+      parent = (parent as Record<string, unknown>)[seg as string] as
+        | Record<string, unknown>
+        | unknown[];
+      if (!parent || typeof parent !== 'object') break;
+    }
+    if (parent && typeof parent === 'object') {
+      const lastSeg = err.path[err.path.length - 1];
+      savedValues.push({ path: err.path, value: (parent as Record<string, unknown>)[lastSeg as string] });
+      if (Array.isArray(parent)) {
+        parent[lastSeg as number] = undefined;
+      } else {
+        delete (parent as Record<string, unknown>)[lastSeg as string];
+      }
+    }
+  }
+
+  const reParsed = configSchema.safeParse(clone);
+  const base = (reParsed.success ? reParsed.data : clone) as Record<string, unknown>;
+
+  for (const { path, value } of savedValues) {
+    let target: Record<string, unknown> | unknown[] = base;
+    for (let i = 0; i < path.length - 1; i++) {
+      const seg = path[i];
+      const next = (target as Record<string, unknown>)[seg as string];
+      if (!next || typeof next !== 'object') {
+        const container: Record<string, unknown> = {};
+        (target as Record<string, unknown>)[seg as string] = container;
+        target = container;
+      } else {
+        target = next as Record<string, unknown> | unknown[];
+      }
+    }
+    const lastSeg = path[path.length - 1];
+    if (Array.isArray(target)) {
+      target[lastSeg as number] = value;
+    } else {
+      (target as Record<string, unknown>)[lastSeg as string] = value;
+    }
+  }
+
+  return base as Record<string, t.ConfigValue>;
+}
+
 export const parseImportedYaml = createServerFn({ method: 'POST' })
   .inputValidator(z.object({ yamlContent: z.string() }))
   .handler(async ({ data }: { data: { yamlContent: string } }) => {
@@ -697,15 +782,33 @@ export const parseImportedYaml = createServerFn({ method: 'POST' })
     const result = configSchema.safeParse(rawConfig);
 
     if (!result.success) {
+      const errors = result.error.errors as Array<{
+        code?: string;
+        received?: unknown;
+        message: string;
+        path: (string | number)[];
+      }>;
+
+      if (isOnlyEnumErrors(errors)) {
+        const appConfig = parseWithEnumBypass(
+          rawConfig as Record<string, unknown>,
+          errors,
+        );
+        return {
+          success: true,
+          error: undefined,
+          validationErrors: undefined,
+          appConfig,
+        };
+      }
+
       return {
         success: false,
         error: 'Config validation failed',
-        validationErrors: result.error.errors.map(
-          (e: { path: (string | number)[]; message: string }) => ({
-            path: e.path.join('.'),
-            message: e.message,
-          }),
-        ),
+        validationErrors: errors.map((e) => ({
+          path: e.path.join('.'),
+          message: e.message,
+        })),
         appConfig: null,
       };
     }
