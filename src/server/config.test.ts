@@ -14,6 +14,11 @@ import {
   flattenTree,
   resolveSubSchema,
   validateFieldValue,
+  parseIndexedArrayPath,
+  toConfigArraySource,
+  normalizeAppServiceKeys,
+  mergeConfigArraySources,
+  mergeIndexedArrayEntriesIntoBase,
 } from './config';
 
 interface ZodV3Schema extends t.ZodSchemaLike {
@@ -677,9 +682,9 @@ describe('validateFieldValue', () => {
   });
 
   it('validates a nested field reached through a union (header value must be string)', () => {
-    expect(
-      validateFieldValue('mcpServers.foo.headers.Authorization', 'Bearer xyz'),
-    ).toEqual({ success: true });
+    expect(validateFieldValue('mcpServers.foo.headers.Authorization', 'Bearer xyz')).toEqual({
+      success: true,
+    });
     const bad = validateFieldValue('mcpServers.foo.headers.Authorization', 42);
     expect(bad.success).toBe(false);
   });
@@ -1031,6 +1036,169 @@ describe('resolveSubSchema for endpoints', () => {
       const sub = resolveSubSchema(realConfigSchema, ['endpoints', provider]);
       expect(sub).not.toBeNull();
     }
+  });
+});
+
+describe('parseIndexedArrayPath', () => {
+  it('accepts numeric suffixes when the parent path is an array', () => {
+    expect(parseIndexedArrayPath('endpoints.custom.0')).toEqual({
+      arrayPath: 'endpoints.custom',
+      index: 0,
+    });
+  });
+
+  it('rejects numeric suffixes when the parent path is a record', () => {
+    expect(parseIndexedArrayPath('mcpServers.foo.headers.2024')).toBeNull();
+  });
+});
+
+describe('toConfigArraySource', () => {
+  it('converts legacy numeric-key array objects to arrays', () => {
+    expect(
+      toConfigArraySource({
+        0: { name: 'first' },
+        2: { name: 'third' },
+      }),
+    ).toEqual([{ name: 'first' }, undefined, { name: 'third' }]);
+  });
+
+  it('rejects non-index object keys', () => {
+    expect(toConfigArraySource({ 0: 'zero', current: 'not-array' })).toBeUndefined();
+  });
+});
+
+describe('mergeConfigArraySources', () => {
+  it('overlays legacy numeric-key overrides onto inherited arrays', () => {
+    expect(
+      mergeConfigArraySources(
+        [
+          { name: 'base-a', baseURL: 'https://a.example.com' },
+          { name: 'base-b', baseURL: 'https://b.example.com' },
+          { name: 'base-c', baseURL: 'https://c.example.com' },
+        ],
+        {
+          1: { name: 'scope-b', baseURL: 'https://scope.example.com' },
+        },
+        undefined,
+      ),
+    ).toEqual([
+      { name: 'base-a', baseURL: 'https://a.example.com' },
+      { name: 'scope-b', baseURL: 'https://scope.example.com' },
+      { name: 'base-c', baseURL: 'https://c.example.com' },
+    ]);
+  });
+
+  it('treats real arrays as complete overrides', () => {
+    expect(mergeConfigArraySources(['base-a', 'base-b'], ['scope-only'], undefined)).toEqual([
+      'scope-only',
+    ]);
+  });
+
+  it('applies pending numeric-key entries after scoped overlays', () => {
+    expect(
+      mergeConfigArraySources(['base-a', 'base-b', 'base-c'], { 1: 'scope-b' }, { 2: 'pending-c' }),
+    ).toEqual(['base-a', 'scope-b', 'pending-c']);
+  });
+});
+
+describe('normalizeAppServiceKeys', () => {
+  it('maps MCP AppService output to canonical mcpServers records', () => {
+    const normalized = normalizeAppServiceKeys({
+      mcpConfig: {
+        filesystem: {
+          type: 'stdio',
+          args: ['server.js', '--root', '/tmp'],
+        },
+      },
+    });
+    expect(normalized).not.toHaveProperty('mcpConfig');
+    expect(normalized.mcpServers).toEqual({
+      filesystem: {
+        type: 'stdio',
+        args: ['server.js', '--root', '/tmp'],
+      },
+    });
+  });
+
+  it('maps Azure groupMap output to canonical groups arrays', () => {
+    const normalized = normalizeAppServiceKeys({
+      endpoints: {
+        azureOpenAI: {
+          isValid: true,
+          groupMap: {
+            default: { apiKey: 'key-a', instanceName: 'instance-a' },
+            fallback: { apiKey: 'key-b', instanceName: 'instance-b' },
+          },
+          errors: ['ignored'],
+          modelNames: ['ignored'],
+        },
+      },
+    });
+    expect(normalized.endpoints).toEqual({
+      azureOpenAI: {
+        groups: [
+          { group: 'default', apiKey: 'key-a', instanceName: 'instance-a' },
+          { group: 'fallback', apiKey: 'key-b', instanceName: 'instance-b' },
+        ],
+      },
+    });
+  });
+});
+
+describe('mergeIndexedArrayEntriesIntoBase', () => {
+  it('merges indexed MCP array edits from AppService fallback aliases', () => {
+    const mergedPaths = new Set<string>();
+    const result = mergeIndexedArrayEntriesIntoBase(
+      [{ fieldPath: 'mcpServers.filesystem.args.1', value: '--workspace' }],
+      {
+        mcpConfig: {
+          filesystem: {
+            type: 'stdio',
+            args: ['server.js', '--root', '/tmp'],
+          },
+        },
+      },
+      mergedPaths,
+    );
+
+    expect(result).toEqual([
+      {
+        fieldPath: 'mcpServers.filesystem.args',
+        value: ['server.js', '--workspace', '/tmp'],
+      },
+    ]);
+    expect(mergedPaths.has('mcpServers.filesystem.args')).toBe(true);
+  });
+
+  it('preserves legacy numeric-key array objects while merging', () => {
+    const result = mergeIndexedArrayEntriesIntoBase(
+      [
+        {
+          fieldPath: 'endpoints.custom.1',
+          value: { name: 'edited', baseURL: 'https://edited.example.com' },
+        },
+      ],
+      {
+        endpoints: {
+          custom: {
+            0: { name: 'first', baseURL: 'https://first.example.com' },
+            1: { name: 'second', baseURL: 'https://second.example.com' },
+            2: { name: 'third', baseURL: 'https://third.example.com' },
+          },
+        },
+      },
+    );
+
+    expect(result).toEqual([
+      {
+        fieldPath: 'endpoints.custom',
+        value: [
+          { name: 'first', baseURL: 'https://first.example.com' },
+          { name: 'edited', baseURL: 'https://edited.example.com' },
+          { name: 'third', baseURL: 'https://third.example.com' },
+        ],
+      },
+    ]);
   });
 });
 
