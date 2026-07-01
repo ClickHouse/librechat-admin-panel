@@ -13,12 +13,14 @@ import type React from 'react';
 import type * as t from '@/types';
 import { CustomEndpointsRenderer, ProvidersRenderer } from './EndpointsRenderer';
 import { McpServersRenderer } from './McpServersRenderer';
+import { LangfuseRenderer } from './LangfuseRenderer';
 
 export const SECTION_RENDERERS: Partial<Record<string, React.ComponentType<t.FieldRendererProps>>> =
   {
     endpoints: CustomEndpointsRenderer,
     endpointsProviders: ProvidersRenderer,
     mcpServers: McpServersRenderer,
+    langfuse: LangfuseRenderer,
   };
 
 /** Sections whose custom renderer handles its own accordion — they are rendered
