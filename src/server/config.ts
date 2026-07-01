@@ -1,9 +1,9 @@
 import { z } from 'zod';
 import yaml from 'js-yaml';
 import { queryOptions } from '@tanstack/react-query';
-import { configSchema } from 'librechat-data-provider';
 import { createServerFn } from '@tanstack/react-start';
 import { SystemCapabilities } from '@librechat/data-schemas/capabilities';
+import { configSchema as upstreamConfigSchema } from 'librechat-data-provider';
 import type { AdminConfigResponse } from '@librechat/data-schemas';
 import type * as t from '@/types';
 import {
@@ -21,6 +21,34 @@ import { filterSecretPreviewFields, stripSecretPreviewValues } from '@/utils';
 import { safeFieldPath } from './utils/validation';
 import { flattenObject } from '@/utils/format';
 import { apiFetch } from './utils/api';
+
+/**
+ * Forward-compat shim: the pinned `librechat-data-provider@^0.8.509` predates the
+ * `langfuse` config group (tenant Langfuse connection: baseUrl / public key /
+ * secret key / enabled). The LibreChat sibling PR adds `langfuse` to
+ * `configSchema` and publishes a bumped data-provider; until that version is
+ * pinned here, extend the schema locally so the section renders in the config UI
+ * and `langfuse.*` field saves validate. Drops to a no-op passthrough once the
+ * pinned data-provider already defines `langfuse`; remove this shim then.
+ */
+const LANGFUSE_SHIM = z
+  .object({
+    enabled: z.boolean().optional(),
+    baseUrl: z.string().optional(),
+    publicKey: z.string().optional(),
+    secretKey: z.string().optional(),
+  })
+  .optional();
+
+type UpstreamConfigSchema = typeof upstreamConfigSchema;
+type UpstreamShapeValue = UpstreamConfigSchema extends { shape: infer S } ? S[keyof S] : never;
+
+const configSchema: UpstreamConfigSchema =
+  'shape' in upstreamConfigSchema && 'langfuse' in upstreamConfigSchema.shape
+    ? upstreamConfigSchema
+    : (upstreamConfigSchema.extend({
+        langfuse: LANGFUSE_SHIM as unknown as UpstreamShapeValue,
+      }) as UpstreamConfigSchema);
 
 const WRAPPER_TYPES = new Set([
   'ZodOptional',

@@ -98,6 +98,11 @@ export const SECTION_META: Record<
     descriptionKey: 'com_config_section_messageFilter_desc',
     tab: 'features',
   },
+  langfuse: {
+    titleKey: 'com_config_section_langfuse',
+    descriptionKey: 'com_config_section_langfuse_desc',
+    tab: 'features',
+  },
 
   fileConfig: {
     titleKey: 'com_config_section_file_config',
