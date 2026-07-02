@@ -6,6 +6,7 @@ import {
   splitUnionTypes,
   partitionScopeResetPaths,
   mergeIndexedArrayEdits,
+  applyConfigEdit,
 } from './utils';
 import { createField } from '@/test/fixtures';
 
@@ -270,10 +271,9 @@ describe('mergeIndexedArrayEdits', () => {
   });
 
   it('merges into an existing parent without clobbering its keys', () => {
-    const merged = mergeIndexedArrayEdits(
-      { modelSpecs: { enforce: true, prioritize: false } },
-      [['modelSpecs.list.0', { name: 'a' }]],
-    );
+    const merged = mergeIndexedArrayEdits({ modelSpecs: { enforce: true, prioritize: false } }, [
+      ['modelSpecs.list.0', { name: 'a' }],
+    ]);
     expect(merged.modelSpecs).toEqual({
       enforce: true,
       prioritize: false,
@@ -325,11 +325,57 @@ describe('mergeIndexedArrayEdits', () => {
   });
 
   it('walks deep parent chains, creating each missing level', () => {
-    const merged = mergeIndexedArrayEdits({}, [
-      ['endpoints.custom.deep.list.0', { name: 'x' }],
-    ]);
+    const merged = mergeIndexedArrayEdits({}, [['endpoints.custom.deep.list.0', { name: 'x' }]]);
     expect(merged).toEqual({
       endpoints: { custom: { deep: { list: [{ name: 'x' }] } } },
+    });
+  });
+});
+
+describe('applyConfigEdit', () => {
+  it('updates a pending whole-array edit when a newly-added entry is typed into', () => {
+    const prev = {
+      'modelSpecs.list': [{}, { name: 'smart-assistant' }],
+    };
+    const result = applyConfigEdit(
+      prev,
+      'modelSpecs.list.0',
+      { name: 'TEST1' },
+      {},
+      new Set(),
+      new Set(),
+    );
+    expect(result).toEqual({
+      'modelSpecs.list': [{ name: 'TEST1' }, { name: 'smart-assistant' }],
+    });
+    expect(result).not.toHaveProperty('modelSpecs.list.0');
+  });
+
+  it('keeps per-index edits when no parent array edit is pending', () => {
+    const result = applyConfigEdit(
+      {},
+      'modelSpecs.list.0',
+      { name: 'TEST1' },
+      {},
+      new Set(),
+      new Set(),
+    );
+    expect(result).toEqual({
+      'modelSpecs.list.0': { name: 'TEST1' },
+    });
+  });
+
+  it('drops stale indexed edits when a whole-array edit is queued', () => {
+    const result = applyConfigEdit(
+      { 'modelSpecs.list.0': { name: 'old' } },
+      'modelSpecs.list',
+      [{ name: 'new' }],
+      {},
+      new Set(),
+      new Set(),
+    );
+    expect(result).toEqual({
+      'modelSpecs.list': [{ name: 'new' }],
     });
   });
 });
@@ -337,11 +383,10 @@ describe('mergeIndexedArrayEdits', () => {
 describe('partitionScopeResetPaths', () => {
   it('routes whole MCP entry resets to tombstones', () => {
     expect(
-      partitionScopeResetPaths([
-        'mcpServers.github',
-        'mcpServers.github.url',
-        'interface.modelSelect',
-      ], new Set(['github'])),
+      partitionScopeResetPaths(
+        ['mcpServers.github', 'mcpServers.github.url', 'interface.modelSelect'],
+        new Set(['github']),
+      ),
     ).toEqual({
       resetPaths: ['mcpServers.github.url', 'interface.modelSelect'],
       tombstonePaths: ['mcpServers.github'],
@@ -350,10 +395,10 @@ describe('partitionScopeResetPaths', () => {
 
   it('routes whole MCP entry resets to unsets when the entry is scope-local', () => {
     expect(
-      partitionScopeResetPaths([
-        'mcpServers.scopeOnly',
-        'mcpServers.inherited',
-      ], new Set(['inherited'])),
+      partitionScopeResetPaths(
+        ['mcpServers.scopeOnly', 'mcpServers.inherited'],
+        new Set(['inherited']),
+      ),
     ).toEqual({
       resetPaths: ['mcpServers.scopeOnly'],
       tombstonePaths: ['mcpServers.inherited'],
@@ -362,12 +407,10 @@ describe('partitionScopeResetPaths', () => {
 
   it('preserves input order within reset and tombstone groups', () => {
     expect(
-      partitionScopeResetPaths([
-        'mcpServers.alpha',
-        'registration.enabled',
-        'mcpServers.beta',
-        'endpoints.custom.0',
-      ], new Set(['alpha', 'beta'])),
+      partitionScopeResetPaths(
+        ['mcpServers.alpha', 'registration.enabled', 'mcpServers.beta', 'endpoints.custom.0'],
+        new Set(['alpha', 'beta']),
+      ),
     ).toEqual({
       resetPaths: ['registration.enabled', 'endpoints.custom.0'],
       tombstonePaths: ['mcpServers.alpha', 'mcpServers.beta'],

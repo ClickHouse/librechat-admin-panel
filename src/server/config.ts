@@ -30,6 +30,9 @@ const WRAPPER_TYPES = new Set([
   'ZodPipeline',
 ]);
 
+const INDEXED_ARRAY_RE = /^(.+)\.(\d+)$/;
+const ARRAY_INDEX_KEY_RE = /^(0|[1-9]\d*)$/;
+
 function unwrapSchema(schema: t.ZodSchemaLike): t.ZodSchemaLike {
   const seen = new Set<t.ZodSchemaLike>();
   let current = schema;
@@ -583,6 +586,62 @@ export function validateFieldValue(
   return { success: true };
 }
 
+export function parseIndexedArrayPath(
+  fieldPath: string,
+): { arrayPath: string; index: number } | null {
+  const match = INDEXED_ARRAY_RE.exec(fieldPath);
+  if (!match) return null;
+  const [, arrayPath, indexStr] = match;
+  const schema = resolveSubSchema(configSchema as t.ZodSchemaLike, arrayPath.split('.'));
+  if (!schema) return null;
+  const unwrapped = unwrapSchema(schema);
+  if (unwrapped?._def?.typeName !== 'ZodArray') return null;
+  return { arrayPath, index: Number(indexStr) };
+}
+
+export function toConfigArraySource(value: unknown): unknown[] | undefined {
+  if (Array.isArray(value)) return [...value];
+  return toIndexedArrayObjectSource(value);
+}
+
+export function toIndexedArrayObjectSource(value: unknown): unknown[] | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  if (Array.isArray(value)) return undefined;
+  const arrayValue: unknown[] = [];
+  for (const [key, entryValue] of Object.entries(value as Record<string, t.ConfigValue>)) {
+    if (!ARRAY_INDEX_KEY_RE.test(key)) return undefined;
+    const index = Number(key);
+    if (!Number.isSafeInteger(index)) return undefined;
+    arrayValue[index] = entryValue;
+  }
+  return arrayValue;
+}
+
+function overlayArraySource(source: unknown[], overlay: unknown[]): unknown[] {
+  const result = [...source];
+  for (const key of Object.keys(overlay)) {
+    const index = Number(key);
+    result[index] = overlay[index];
+  }
+  return result;
+}
+
+function mergeConfigArraySource(source: unknown[], value: unknown): unknown[] {
+  if (Array.isArray(value)) return [...value];
+  const overlay = toIndexedArrayObjectSource(value);
+  return overlay ? overlayArraySource(source, overlay) : source;
+}
+
+export function mergeConfigArraySources(
+  baseValue: unknown,
+  overrideValue: unknown,
+  pendingValue: unknown,
+): unknown[] {
+  const baseSource = toConfigArraySource(baseValue) ?? [];
+  const overrideSource = mergeConfigArraySource(baseSource, overrideValue);
+  return mergeConfigArraySource(overrideSource, pendingValue);
+}
+
 /** Shared queryOptions for the schema tree used by command palette search. */
 export const configSchemaTreeOptions = queryOptions({
   queryKey: ['configSchemaTree'],
@@ -777,7 +836,7 @@ function normalizeEndpointValue(value: t.ConfigValue): t.ConfigValue {
   return value;
 }
 
-function normalizeAppServiceKeys(
+export function normalizeAppServiceKeys(
   raw: Record<string, t.ConfigValue>,
 ): Record<string, t.ConfigValue> {
   const result: Record<string, t.ConfigValue> = {};
@@ -871,37 +930,31 @@ export const baseConfigOptions = queryOptions({
   staleTime: 30_000,
 });
 
-const INDEXED_ARRAY_RE = /^(.+)\.(\d+)$/;
-
-async function mergeIndexedArrayEntries(
+export function mergeIndexedArrayEntriesIntoBase(
   entries: Array<{ fieldPath: string; value: unknown }>,
+  baseConfig: Record<string, t.ConfigValue>,
   mergedPaths?: Set<string>,
-): Promise<Array<{ fieldPath: string; value: unknown }>> {
+): Array<{ fieldPath: string; value: unknown }> {
   const indexed = new Map<string, Map<number, unknown>>();
   const rest: Array<{ fieldPath: string; value: unknown }> = [];
 
   for (const entry of entries) {
-    const match = INDEXED_ARRAY_RE.exec(entry.fieldPath);
-    if (match) {
-      const [, arrayPath, indexStr] = match;
+    const parsed = parseIndexedArrayPath(entry.fieldPath);
+    if (parsed) {
+      const { arrayPath, index } = parsed;
       if (!indexed.has(arrayPath)) indexed.set(arrayPath, new Map());
-      indexed.get(arrayPath)!.set(Number(indexStr), entry.value);
+      indexed.get(arrayPath)!.set(index, entry.value);
     } else {
       rest.push(entry);
     }
   }
 
   if (indexed.size === 0) return entries;
-
-  const baseResponse = await apiFetch('/api/admin/config/base');
-  if (!baseResponse.ok) throw new Error(`Failed to fetch base config: ${baseResponse.status}`);
-  const { config: baseConfig } = (await baseResponse.json()) as {
-    config: Record<string, unknown>;
-  };
+  const normalizedBaseConfig = normalizeAppServiceKeys(baseConfig);
 
   for (const [arrayPath, updates] of indexed) {
     const segments = arrayPath.split('.');
-    let current: unknown = baseConfig;
+    let current: unknown = normalizedBaseConfig;
     for (const seg of segments) {
       if (current == null || typeof current !== 'object') {
         current = undefined;
@@ -909,7 +962,7 @@ async function mergeIndexedArrayEntries(
       }
       current = (current as Record<string, unknown>)[seg];
     }
-    const arr = Array.isArray(current) ? [...current] : [];
+    const arr = toConfigArraySource(current) ?? [];
     for (const [idx, value] of updates) {
       arr[idx] = value;
     }
@@ -918,6 +971,26 @@ async function mergeIndexedArrayEntries(
   }
 
   return rest;
+}
+
+function hasIndexedArrayEntry(entries: Array<{ fieldPath: string; value: unknown }>): boolean {
+  for (const entry of entries) {
+    if (parseIndexedArrayPath(entry.fieldPath)) return true;
+  }
+  return false;
+}
+
+async function mergeIndexedArrayEntries(
+  entries: Array<{ fieldPath: string; value: unknown }>,
+  mergedPaths?: Set<string>,
+): Promise<Array<{ fieldPath: string; value: unknown }>> {
+  if (!hasIndexedArrayEntry(entries)) return entries;
+  const baseResponse = await apiFetch('/api/admin/config/base');
+  if (!baseResponse.ok) throw new Error(`Failed to fetch base config: ${baseResponse.status}`);
+  const { config: baseConfig } = (await baseResponse.json()) as {
+    config: Record<string, t.ConfigValue>;
+  };
+  return mergeIndexedArrayEntriesIntoBase(entries, baseConfig, mergedPaths);
 }
 
 export const saveBaseConfigFn = createServerFn({ method: 'POST' })

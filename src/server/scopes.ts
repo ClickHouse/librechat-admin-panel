@@ -21,6 +21,7 @@ import { BASE_CONFIG_PRINCIPAL_ID } from './constants';
 import { requireAnyCapability } from './capabilities';
 import { safeFieldPath } from './utils/validation';
 import { apiFetch } from './utils/api';
+import { normalizeAppServiceKeys, parseIndexedArrayPath, mergeConfigArraySources } from './config';
 
 // ── Dot-path helpers ─────────────────────────────────────────────────
 
@@ -32,6 +33,75 @@ function deepGet(obj: object, path: string): unknown {
     current = (current as Record<string, never>)[key];
   }
   return current;
+}
+
+async function getScopeOverrides(
+  apiType: PrincipalType,
+  principalId: string,
+): Promise<Record<string, unknown>> {
+  const response = await apiFetch(
+    `/api/admin/config/${apiType}/${encodeURIComponent(principalId)}`,
+  );
+  if (response.status === 404) return {};
+  if (!response.ok) throw new Error(`Failed to fetch config: ${response.status}`);
+  const { config } = (await response.json()) as AdminConfigResponse;
+  return normalizeAppServiceKeys((config.overrides ?? {}) as Record<string, t.ConfigValue>);
+}
+
+async function getBaseConfig(): Promise<Record<string, unknown>> {
+  const response = await apiFetch('/api/admin/config/base');
+  if (!response.ok) throw new Error(`Failed to fetch base config: ${response.status}`);
+  const { config } = (await response.json()) as { config: Record<string, t.ConfigValue> };
+  return normalizeAppServiceKeys(config);
+}
+
+async function mergeIndexedArrayEntriesForScope(
+  apiType: PrincipalType,
+  principalId: string,
+  entries: Array<{ fieldPath: string; value: unknown }>,
+): Promise<Array<{ fieldPath: string; value: unknown }>> {
+  const indexed = new Map<string, Map<number, unknown>>();
+  const rest: Array<{ fieldPath: string; value: unknown }> = [];
+  const restByPath = new Map<string, number>();
+
+  for (const entry of entries) {
+    const parsed = parseIndexedArrayPath(entry.fieldPath);
+    if (!parsed) {
+      restByPath.set(entry.fieldPath, rest.length);
+      rest.push(entry);
+      continue;
+    }
+    const { arrayPath, index } = parsed;
+    if (!indexed.has(arrayPath)) indexed.set(arrayPath, new Map());
+    indexed.get(arrayPath)!.set(index, entry.value);
+  }
+
+  if (indexed.size === 0) return entries;
+
+  const [scopeOverrides, baseConfig] = await Promise.all([
+    getScopeOverrides(apiType, principalId),
+    getBaseConfig(),
+  ]);
+
+  for (const [arrayPath, updates] of indexed) {
+    const restIndex = restByPath.get(arrayPath);
+    const pending = restIndex === undefined ? undefined : rest[restIndex]?.value;
+    const scopeValue = deepGet(scopeOverrides, arrayPath);
+    const baseValue = deepGet(baseConfig, arrayPath);
+    const arr = mergeConfigArraySources(baseValue, scopeValue, pending);
+    for (const [idx, value] of updates) {
+      arr[idx] = value;
+    }
+    const merged = { fieldPath: arrayPath, value: arr };
+    if (restIndex === undefined) {
+      restByPath.set(arrayPath, rest.length);
+      rest.push(merged);
+    } else {
+      rest[restIndex] = merged;
+    }
+  }
+
+  return rest;
 }
 
 // ── API helpers ──────────────────────────────────────────────────────
@@ -209,13 +279,14 @@ export const saveFieldProfileValueFn = createServerFn({ method: 'POST' })
     ]);
     if (isInterfacePermissionPath(data.fieldPath)) return { success: true };
     const apiType = data.principalType;
+    const entries = await mergeIndexedArrayEntriesForScope(apiType, data.principalId, [
+      { fieldPath: data.fieldPath, value: data.value },
+    ]);
     const response = await apiFetch(
       `/api/admin/config/${apiType}/${encodeURIComponent(data.principalId)}/fields`,
       {
         method: 'PATCH',
-        body: JSON.stringify({
-          entries: [{ fieldPath: data.fieldPath, value: data.value }],
-        }),
+        body: JSON.stringify({ entries }),
       },
     );
 
@@ -263,11 +334,12 @@ export const bulkSaveProfileValuesFn = createServerFn({ method: 'POST' })
       const filtered = data.entries.filter((e) => !isInterfacePermissionPath(e.fieldPath));
       if (filtered.length === 0) return { success: true, count: 0 };
       const apiType = data.principalType;
+      const entries = await mergeIndexedArrayEntriesForScope(apiType, data.principalId, filtered);
       const response = await apiFetch(
         `/api/admin/config/${apiType}/${encodeURIComponent(data.principalId)}/fields`,
         {
           method: 'PATCH',
-          body: JSON.stringify({ entries: filtered }),
+          body: JSON.stringify({ entries }),
         },
       );
 
@@ -277,7 +349,7 @@ export const bulkSaveProfileValuesFn = createServerFn({ method: 'POST' })
           (err as { error?: string }).error ?? `Failed to save fields: ${response.status}`,
         );
       }
-      return { success: true, count: filtered.length };
+      return { success: true, count: entries.length };
     },
   );
 

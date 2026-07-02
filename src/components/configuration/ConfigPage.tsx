@@ -21,7 +21,6 @@ import {
 import {
   flattenObject,
   unflattenObject,
-  serializeKVPairs,
   deepSerializeKVPairs,
   normalizeImportConfig,
   hasConfigCapability,
@@ -31,7 +30,7 @@ import {
 } from '@/utils';
 import { useLocalize, useHighlightRef, useActiveSection, useCapabilities } from '@/hooks';
 import { CONFIG_TABS, OTHER_TAB, SECTION_META, HIDDEN_SECTIONS } from './configMeta';
-import { mergeIndexedArrayEdits, partitionScopeResetPaths } from './utils';
+import { applyConfigEdit, mergeIndexedArrayEdits, partitionScopeResetPaths } from './utils';
 import { validateMcpCrossField } from './sections/McpServersRenderer';
 import { ScopeSelector, ScopeTriggerButton } from './ScopeSelector';
 import { StickyActionBar } from '@/components/shared';
@@ -385,51 +384,14 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
         return next;
       });
       setEditedValues((prev) => {
-        const baseline = scopeBaseline[path];
-        const match =
-          value === baseline ||
-          (typeof value === 'object' &&
-            typeof baseline === 'object' &&
-            JSON.stringify(value) === JSON.stringify(baseline));
-        /** A container-path undefined write must survive; baseline only stores leaves, so it would otherwise match `undefined === undefined` and get pruned. baselineContainerPaths catches the orphaned empty-object case where leaf-derived intermediates miss the entry. */
-        const isContainerDelete =
-          value === undefined &&
-          (baselineIntermediates.has(path) || baselineContainerPaths.has(path));
-        /** When the user deleted a container entry and is now writing descendants under it (delete-then-recreate of an MCP server), the new leaf must persist even if it matches baseline so the post-DELETE recreate is not missing required fields, and the ancestor-undefined must outlive the descendant write so handleConfirmSave can DELETE the entry before PATCHing the new leaves. Walk ancestors directly instead of scanning every pending edit; rename/remove emit one onChange per leaf and the prior O(n)-per-call scan compounded to O(n*m) work per event. */
-        const hasPendingAncestorDelete = (() => {
-          let lastDot = path.lastIndexOf('.');
-          while (lastDot > 0) {
-            const ancestor = path.slice(0, lastDot);
-            if (ancestor in prev && prev[ancestor] === undefined) return true;
-            lastDot = ancestor.lastIndexOf('.');
-          }
-          return false;
-        })();
-        if (match && !isContainerDelete && !hasPendingAncestorDelete) {
-          const next = { ...prev };
-          delete next[path];
-          return next;
-        }
-        const next = { ...prev, [path]: value };
-        if (Array.isArray(value)) {
-          const prefix = `${path}.`;
-          for (const k of Object.keys(next)) {
-            if (k.startsWith(prefix) && /\.\d+$/.test(k)) delete next[k];
-          }
-        }
-        const indexMatch = /^(.+)\.\d+$/.exec(path);
-        if (indexMatch) delete next[indexMatch[1]];
-        /** Two-way dedup: drop ancestors that the new leaf supersedes AND descendants that the new parent supersedes. An ancestor whose value is `undefined` expresses "delete this whole subtree" and must outlive subsequent descendant writes so DELETE-then-PATCH ordering at save time can fully replace the entry instead of leaking stale fields. */
-        for (const existing of Object.keys(next)) {
-          if (existing === path) continue;
-          const newIsDescendant = path.startsWith(`${existing}.`);
-          const newIsAncestor = existing.startsWith(`${path}.`);
-          if (newIsDescendant && next[existing] === undefined) continue;
-          if (newIsDescendant || newIsAncestor) {
-            delete next[existing];
-          }
-        }
-        return next;
+        return applyConfigEdit(
+          prev,
+          path,
+          value,
+          scopeBaseline,
+          baselineIntermediates,
+          baselineContainerPaths,
+        );
       });
     },
     [scopeBaseline, baselineIntermediates, baselineContainerPaths],
@@ -574,9 +536,7 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
       .filter((p) => editedValues[p] !== undefined)
       .map((p) => ({
         fieldPath: p,
-        value: /\.\d+$/.test(p)
-          ? deepSerializeKVPairs(editedValues[p])
-          : serializeKVPairs(editedValues[p]),
+        value: deepSerializeKVPairs(editedValues[p]),
       }));
     const resets = touched.filter((p) => editedValues[p] === undefined);
     const inheritedMcpKeys = (() => {
@@ -668,7 +628,7 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
   const serializedEditedValues = useMemo(() => {
     const result: t.FlatConfigMap = {};
     for (const [k, v] of Object.entries(editedValues)) {
-      result[k] = /\.\d+$/.test(k) ? deepSerializeKVPairs(v) : serializeKVPairs(v);
+      result[k] = deepSerializeKVPairs(v);
     }
     return result;
   }, [editedValues]);

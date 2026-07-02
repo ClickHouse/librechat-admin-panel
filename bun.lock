@@ -6,7 +6,7 @@
       "name": "tanstack-start-app",
       "dependencies": {
         "@clickhouse/click-ui": "0.2.0-rc.4",
-        "@librechat/data-schemas": "^0.0.55",
+        "@librechat/data-schemas": "^0.0.56",
         "@radix-ui/react-dialog": "1.1.15",
         "@tailwindcss/vite": "^4.3.1",
         "@tanstack/react-devtools": "0.10.0",
@@ -26,7 +26,7 @@
         "i18next-browser-languagedetector": "^8.2.1",
         "input-otp": "^1.4.2",
         "js-yaml": "^4.2.0",
-        "librechat-data-provider": "^0.8.508",
+        "librechat-data-provider": "^0.8.509",
         "lucide-react": "^0.545.0",
         "prom-client": "^15.1.3",
         "react": "^19.2.7",
@@ -294,7 +294,7 @@
 
     "@jridgewell/trace-mapping": ["@jridgewell/trace-mapping@0.3.31", "", { "dependencies": { "@jridgewell/resolve-uri": "3.1.2", "@jridgewell/sourcemap-codec": "1.5.5" } }, "sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw=="],
 
-    "@librechat/data-schemas": ["@librechat/data-schemas@0.0.55", "", { "peerDependencies": { "jsonwebtoken": "^9.0.2", "klona": "^2.0.6", "librechat-data-provider": "*", "lodash": "^4.17.23", "meilisearch": "^0.38.0", "mongoose": "^8.23.1", "nanoid": "^3.3.7", "winston": "^3.17.0", "winston-daily-rotate-file": "^5.0.0" } }, "sha512-fu/U0RCISLN8kXtFnOENYAtlgGVwvBL3mmsl38/SSfPTOA0qYlDPABpTG8MZwXwid35EfNWh6IJq6zHkHOr7gg=="],
+    "@librechat/data-schemas": ["@librechat/data-schemas@0.0.56", "", { "peerDependencies": { "jsonwebtoken": "^9.0.2", "klona": "^2.0.6", "librechat-data-provider": "*", "lodash": "^4.17.23", "meilisearch": "^0.38.0", "mongoose": "^8.23.1", "nanoid": "^3.3.7", "winston": "^3.17.0", "winston-daily-rotate-file": "^5.0.0" } }, "sha512-Wv8/LSN7BVecP5j+/7+N/gP/DlimCaDxm7K1CylUv9ExF0PPCzTQ1ust8+Oe0TGuGtmSfAX1VUiL51bHJ8AarA=="],
 
     "@mongodb-js/saslprep": ["@mongodb-js/saslprep@1.4.6", "", { "dependencies": { "sparse-bitfield": "^3.0.3" } }, "sha512-y+x3H1xBZd38n10NZF/rEBlvDOOMQ6LKUTHqr8R9VkJ+mmQOYtJFxIlkkK8fZrtOiL6VixbOBWMbZGBdal3Z1g=="],
 
@@ -1186,7 +1186,7 @@
 
     "levn": ["levn@0.4.1", "", { "dependencies": { "prelude-ls": "^1.2.1", "type-check": "~0.4.0" } }, "sha512-+bT2uH4E5LGE7h/n3evcS/sQlJXCpIp6ym8OWJ5eV6+67Dsql/LaaT7qJBAt2rzfoa/5QBGBhxDix1dMt2kQKQ=="],
 
-    "librechat-data-provider": ["librechat-data-provider@0.8.508", "", { "dependencies": { "axios": "^1.16.0", "dayjs": "^1.11.13", "js-yaml": "^4.2.0", "zod": "^3.22.4" }, "peerDependencies": { "@tanstack/react-query": "^4.28.0" } }, "sha512-tsp/Yn0xUN01shIdN0hkahEpLxxEU76/uEQU7XHUfODV9dr4cVkhi7Tg7Rq61vH7UuZuHvnxvOMIwBTDKRSOmw=="],
+    "librechat-data-provider": ["librechat-data-provider@0.8.509", "", { "dependencies": { "axios": "^1.16.0", "dayjs": "^1.11.13", "js-yaml": "^4.2.0", "zod": "^3.22.4" }, "peerDependencies": { "@tanstack/react-query": "^4.28.0" } }, "sha512-5GEkiKbPSYBTodiSPiu98skFjcZ1TiiJZuNZtc9mSBLCTi2GpCSM69+tAKENH5mex29/JCAd7HjtXrvVP/ZtaA=="],
 
     "lightningcss": ["lightningcss@1.32.0", "", { "dependencies": { "detect-libc": "^2.0.3" }, "optionalDependencies": { "lightningcss-android-arm64": "1.32.0", "lightningcss-darwin-arm64": "1.32.0", "lightningcss-darwin-x64": "1.32.0", "lightningcss-freebsd-x64": "1.32.0", "lightningcss-linux-arm-gnueabihf": "1.32.0", "lightningcss-linux-arm64-gnu": "1.32.0", "lightningcss-linux-arm64-musl": "1.32.0", "lightningcss-linux-x64-gnu": "1.32.0", "lightningcss-linux-x64-musl": "1.32.0", "lightningcss-win32-arm64-msvc": "1.32.0", "lightningcss-win32-x64-msvc": "1.32.0" } }, "sha512-NXYBzinNrblfraPGyrbPoD19C1h9lfI/1mzgWYvXUTe414Gz/X1FD2XBZSZM7rRTrMA8JL3OtAaGifrIKhQ5yQ=="],
 
@@ -1967,8 +1967,6 @@
     "htmlparser2/entities": ["entities@7.0.1", "", {}, "sha512-TWrgLOFUQTH994YUyl1yT4uyavY5nNB5muff+RtWaqNVCAK408b5ZnnbNAUEWLTCpum9w6arT70i1XdQ4UeOPA=="],
 
     "i18next/@babel/runtime": ["@babel/runtime@7.29.7", "", {}, "sha512-Nq8OhGWiZIZGV6hLHoyAKLLcJihP/xFeBMGJoUrxTX2psI8dCifzLhZISFb+VWS3wFMRDmCGw5R+dOySCqPLhw=="],
-
-    "librechat-data-provider/dayjs": ["dayjs@1.11.19", "", {}, "sha512-t5EcLVS6QPBNqM2z8fakk/NKel+Xzshgt8FFKAn+qwlD1pzZWxh0nVCrvFK7ZDb6XucZeF9z8C7CBWTRIVApAw=="],
 
     "librechat-data-provider/zod": ["zod@3.25.76", "", {}, "sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ=="],
 

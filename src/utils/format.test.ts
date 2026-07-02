@@ -12,16 +12,12 @@ describe('serializeKVPairs', () => {
   });
 
   it('handles json valueType by parsing JSON string', () => {
-    const pairs = [
-      { key: 'config', value: '{"nested": true}', valueType: 'json' as const },
-    ];
+    const pairs = [{ key: 'config', value: '{"nested": true}', valueType: 'json' as const }];
     expect(serializeKVPairs(pairs)).toEqual({ config: { nested: true } });
   });
 
   it('falls back to string for invalid json', () => {
-    const pairs = [
-      { key: 'bad', value: '{not json', valueType: 'json' as const },
-    ];
+    const pairs = [{ key: 'bad', value: '{not json', valueType: 'json' as const }];
     expect(serializeKVPairs(pairs)).toEqual({ bad: '{not json' });
   });
 
@@ -77,9 +73,7 @@ describe('deepSerializeKVPairs', () => {
   it('serializes KV pairs with json type in nested objects', () => {
     const value = {
       name: 'Test',
-      addParams: [
-        { key: 'config', value: '{"nested": {"deep": true}}', valueType: 'json' },
-      ],
+      addParams: [{ key: 'config', value: '{"nested": {"deep": true}}', valueType: 'json' }],
     };
     const result = deepSerializeKVPairs(value) as Record<string, unknown>;
     expect(result.addParams).toEqual({ config: { nested: { deep: true } } });
@@ -95,11 +89,24 @@ describe('deepSerializeKVPairs', () => {
     expect(models.fetch).toBe(true);
   });
 
+  it('serializes KV pairs inside array object entries', () => {
+    const value = [
+      {
+        name: 'TestAPI',
+        headers: [{ key: 'Authorization', value: 'Bearer ${TOKEN}', valueType: 'string' }],
+      },
+    ];
+    expect(deepSerializeKVPairs(value)).toEqual([
+      {
+        name: 'TestAPI',
+        headers: { Authorization: 'Bearer ${TOKEN}' },
+      },
+    ]);
+  });
+
   it('handles headers (string-only record) correctly', () => {
     const value = {
-      headers: [
-        { key: 'x-api-key', value: '${KEY}', valueType: 'string' },
-      ],
+      headers: [{ key: 'x-api-key', value: '${KEY}', valueType: 'string' }],
     };
     const result = deepSerializeKVPairs(value) as Record<string, unknown>;
     expect(result.headers).toEqual({ 'x-api-key': '${KEY}' });
@@ -120,9 +127,7 @@ describe('deepSerializeKVPairs', () => {
       models: { default: ['gpt-4'], fetch: true },
       titleConvo: true,
       titleModel: 'current_model',
-      headers: [
-        { key: 'Authorization', value: 'Bearer ${TOKEN}', valueType: 'string' },
-      ],
+      headers: [{ key: 'Authorization', value: 'Bearer ${TOKEN}', valueType: 'string' }],
       addParams: [
         { key: 'stream', value: 'true', valueType: 'boolean' },
         { key: 'config', value: '{"key": "value"}', valueType: 'json' },
