@@ -3,7 +3,7 @@ import yaml from 'js-yaml';
 import { queryOptions } from '@tanstack/react-query';
 import { createServerFn } from '@tanstack/react-start';
 import { SystemCapabilities } from '@librechat/data-schemas/capabilities';
-import { configSchema as upstreamConfigSchema } from 'librechat-data-provider';
+import { configSchema } from 'librechat-data-provider';
 import type { AdminConfigResponse } from '@librechat/data-schemas';
 import type * as t from '@/types';
 import {
@@ -25,30 +25,32 @@ import { apiFetch } from './utils/api';
 /**
  * Forward-compat shim: the pinned `librechat-data-provider@^0.8.509` predates the
  * `langfuse` config group (tenant Langfuse connection: baseUrl / public key /
- * secret key / enabled). The LibreChat sibling PR adds `langfuse` to
- * `configSchema` and publishes a bumped data-provider; until that version is
- * pinned here, extend the schema locally so the section renders in the config UI
- * and `langfuse.*` field saves validate. Drops to a no-op passthrough once the
- * pinned data-provider already defines `langfuse`; remove this shim then.
+ * secret key / enabled). Inject the section node into the schema tree so it renders
+ * through the custom LangfuseRenderer and `langfuse.*` values save via the config
+ * API (validateFieldValue tolerates paths absent from the schema). Injected only
+ * when the pinned data-provider does not already define `langfuse`; remove this
+ * shim once a data-provider that defines it is pinned.
  */
-const LANGFUSE_SHIM = z
-  .object({
-    enabled: z.boolean().optional(),
-    baseUrl: z.string().optional(),
-    publicKey: z.string().optional(),
-    secretKey: z.string().optional(),
-  })
-  .optional();
-
-type UpstreamConfigSchema = typeof upstreamConfigSchema;
-type UpstreamShapeValue = UpstreamConfigSchema extends { shape: infer S } ? S[keyof S] : never;
-
-const configSchema: UpstreamConfigSchema =
-  'shape' in upstreamConfigSchema && 'langfuse' in upstreamConfigSchema.shape
-    ? upstreamConfigSchema
-    : (upstreamConfigSchema.extend({
-        langfuse: LANGFUSE_SHIM as unknown as UpstreamShapeValue,
-      }) as UpstreamConfigSchema);
+const LANGFUSE_SHIM_FIELD: t.SchemaField = {
+  path: 'langfuse',
+  key: 'langfuse',
+  type: 'object',
+  isOptional: true,
+  isNullable: false,
+  isArray: false,
+  isObject: true,
+  depth: 0,
+  children: (['enabled', 'baseUrl', 'publicKey', 'secretKey'] as const).map((key) => ({
+    path: `langfuse.${key}`,
+    key,
+    type: key === 'enabled' ? 'boolean' : 'string',
+    isOptional: true,
+    isNullable: false,
+    isArray: false,
+    isObject: false,
+    depth: 1,
+  })),
+};
 
 const WRAPPER_TYPES = new Set([
   'ZodOptional',
@@ -681,6 +683,9 @@ export const configSchemaTreeOptions = queryOptions({
 export const getConfigSchemaFields = createServerFn({ method: 'GET' }).handler(async () => {
   try {
     const tree = extractSchemaTree(configSchema);
+    if (!tree.some((section) => section.key === 'langfuse')) {
+      tree.push(LANGFUSE_SHIM_FIELD);
+    }
     for (const section of tree) {
       if (section.key === 'interface' && section.children) {
         section.children = filterInterfacePermissionChildren(section.children);

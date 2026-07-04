@@ -12,13 +12,18 @@ function asString(value: t.ConfigValue): string {
 }
 
 export function LangfuseRenderer(props: t.FieldRendererProps) {
-  const { parentPath, getValue, onChange, disabled } = props;
+  const { parentPath, parentValue, getValue, onChange, disabled } = props;
   const localize = useLocalize();
 
-  const enabled = getValue(`${parentPath}.enabled`, false) === true;
-  const baseUrl = asString(getValue(`${parentPath}.baseUrl`, ''));
-  const publicKey = asString(getValue(`${parentPath}.publicKey`, ''));
-  const fingerprint = asString(getValue(`${parentPath}.secretKeyFingerprint`, ''));
+  const stored: Record<string, t.ConfigValue> =
+    parentValue && typeof parentValue === 'object' && !Array.isArray(parentValue)
+      ? (parentValue as Record<string, t.ConfigValue>)
+      : {};
+
+  const enabled = getValue(`${parentPath}.enabled`, stored.enabled ?? false) === true;
+  const baseUrl = asString(getValue(`${parentPath}.baseUrl`, stored.baseUrl ?? ''));
+  const publicKey = asString(getValue(`${parentPath}.publicKey`, stored.publicKey ?? ''));
+  const fingerprint = asString(stored.secretKeyFingerprint ?? '');
   const configured = fingerprint !== '';
 
   const [secret, setSecret] = useState('');
