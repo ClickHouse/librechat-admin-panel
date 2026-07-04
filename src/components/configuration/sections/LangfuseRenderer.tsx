@@ -1,8 +1,10 @@
 import { useState } from 'react';
-import { Button, Switch, TextField } from '@clickhouse/click-ui';
+import { Button, TextField } from '@clickhouse/click-ui';
 import type * as t from '@/types';
 import { PasswordInput } from '@/components/PasswordInput';
 import { testLangfuseConnectionFn } from '@/server';
+import { ToggleField } from '../fields/ToggleField';
+import { ConfigRow } from '../ConfigRow';
 import { useLocalize } from '@/hooks';
 
 type TestState = 'idle' | 'testing' | 'ok' | 'fail';
@@ -53,12 +55,15 @@ export function LangfuseRenderer(props: t.FieldRendererProps) {
 
   return (
     <div className="flex flex-col gap-4">
-      <Switch
-        checked={enabled}
-        disabled={disabled}
-        label={localize('com_config_langfuse_enabled')}
-        onCheckedChange={(value) => onChange(`${parentPath}.enabled`, value)}
-      />
+      <ConfigRow title={localize('com_config_langfuse_enabled')} fieldId="langfuse-enabled">
+        <ToggleField
+          id="langfuse-enabled"
+          checked={enabled}
+          disabled={disabled}
+          onChange={(value) => onChange(`${parentPath}.enabled`, value)}
+          aria-label={localize('com_config_langfuse_enabled')}
+        />
+      </ConfigRow>
       <TextField
         label={localize('com_config_langfuse_base_url')}
         value={baseUrl}
