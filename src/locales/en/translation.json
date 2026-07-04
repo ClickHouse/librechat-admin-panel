@@ -775,6 +775,7 @@
   "com_config_langfuse_secret_set": "Saved. Enter a new key to replace it",
   "com_config_langfuse_fingerprint": "Configured key fingerprint:",
   "com_config_langfuse_test": "Test connection",
+  "com_config_langfuse_testing": "Testing connection",
   "com_config_langfuse_test_ok": "Connected to Langfuse successfully",
   "com_config_langfuse_test_fail": "Could not connect to Langfuse",
   "com_config_section_secureImageLinks": "Secure image links",

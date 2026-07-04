@@ -91,7 +91,12 @@ export function LangfuseRenderer(props: t.FieldRendererProps) {
       <div className="flex items-center gap-2">
         <Button
           type="secondary"
-          label={localize('com_config_langfuse_test')}
+          label={
+            testState === 'testing'
+              ? localize('com_config_langfuse_testing')
+              : localize('com_config_langfuse_test')
+          }
+          loading={testState === 'testing'}
           disabled={!canTest || testState === 'testing'}
           onClick={handleTest}
         />
