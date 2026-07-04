@@ -772,7 +772,7 @@
   "com_config_langfuse_base_url": "Host",
   "com_config_langfuse_public_key": "Public key",
   "com_config_langfuse_secret_key": "Secret key",
-  "com_config_langfuse_secret_set": "Saved — enter a new key to replace it",
+  "com_config_langfuse_secret_set": "Saved. Enter a new key to replace it",
   "com_config_langfuse_fingerprint": "Configured key fingerprint:",
   "com_config_langfuse_test": "Test connection",
   "com_config_langfuse_test_ok": "Connected to Langfuse successfully",
