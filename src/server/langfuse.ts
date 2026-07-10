@@ -1,7 +1,6 @@
 import { z } from 'zod';
 import { createServerFn } from '@tanstack/react-start';
-import { SystemCapabilities } from '@librechat/data-schemas/capabilities';
-import { requireCapability } from './capabilities';
+import { requireAllSectionCapabilities } from './capabilities';
 import { apiFetch, extractApiError } from './utils/api';
 
 export interface LangfuseDestinationOption {
@@ -39,7 +38,7 @@ const connectionTestInputSchema = connectionInputSchema.omit({ enabled: true });
  */
 export const getLangfuseConnectionFn = createServerFn({ method: 'GET' }).handler(
   async (): Promise<LangfuseConnectionStatus> => {
-    await requireCapability(SystemCapabilities.MANAGE_CONFIGS);
+    await requireAllSectionCapabilities(['langfuse']);
     const response = await apiFetch('/api/admin/langfuse/connection');
     if (!response.ok) {
       return extractApiError(response, 'Failed to read Langfuse connection');
@@ -51,7 +50,7 @@ export const getLangfuseConnectionFn = createServerFn({ method: 'GET' }).handler
 export const updateLangfuseConnectionFn = createServerFn({ method: 'POST' })
   .inputValidator(connectionInputSchema)
   .handler(async ({ data }): Promise<LangfuseConnectionStatus> => {
-    await requireCapability(SystemCapabilities.MANAGE_CONFIGS);
+    await requireAllSectionCapabilities(['langfuse']);
     const response = await apiFetch('/api/admin/langfuse/connection', {
       method: 'PUT',
       body: JSON.stringify(data),
@@ -65,7 +64,7 @@ export const updateLangfuseConnectionFn = createServerFn({ method: 'POST' })
 export const testLangfuseConnectionFn = createServerFn({ method: 'POST' })
   .inputValidator(connectionTestInputSchema)
   .handler(async ({ data }): Promise<LangfuseConnectionTestResponse> => {
-    await requireCapability(SystemCapabilities.MANAGE_CONFIGS);
+    await requireAllSectionCapabilities(['langfuse']);
     const response = await apiFetch('/api/admin/langfuse/connection/test', {
       method: 'POST',
       body: JSON.stringify(data),

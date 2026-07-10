@@ -1,8 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { SystemCapabilities } from '@librechat/data-schemas/capabilities';
 
 const apiFetchMock = vi.fn();
-const requireCapabilityMock = vi.fn();
+const requireAllSectionCapabilitiesMock = vi.fn();
 
 vi.mock('./utils/api', () => ({
   apiFetch: (path: string, init?: RequestInit) => apiFetchMock(path, init),
@@ -12,7 +11,8 @@ vi.mock('./utils/api', () => ({
 }));
 
 vi.mock('./capabilities', () => ({
-  requireCapability: (capability: string) => requireCapabilityMock(capability),
+  requireAllSectionCapabilities: (sections: string[]) =>
+    requireAllSectionCapabilitiesMock(sections),
 }));
 
 vi.mock('@tanstack/react-start', () => ({
@@ -41,7 +41,7 @@ const status = {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  requireCapabilityMock.mockResolvedValue(undefined);
+  requireAllSectionCapabilitiesMock.mockResolvedValue(undefined);
 });
 
 describe('Langfuse connection server functions', () => {
@@ -49,7 +49,7 @@ describe('Langfuse connection server functions', () => {
     apiFetchMock.mockResolvedValue(new Response(JSON.stringify(status), { status: 200 }));
 
     await expect(getLangfuseConnectionFn()).resolves.toEqual(status);
-    expect(requireCapabilityMock).toHaveBeenCalledWith(SystemCapabilities.MANAGE_CONFIGS);
+    expect(requireAllSectionCapabilitiesMock).toHaveBeenCalledWith(['langfuse']);
     expect(apiFetchMock).toHaveBeenCalledWith('/api/admin/langfuse/connection', undefined);
   });
 
@@ -58,6 +58,7 @@ describe('Langfuse connection server functions', () => {
     const data = { enabled: false, destination: 'eu', publicKey: 'pk-lf-public' };
 
     await expect(updateLangfuseConnectionFn({ data })).resolves.toEqual(status);
+    expect(requireAllSectionCapabilitiesMock).toHaveBeenCalledWith(['langfuse']);
     expect(apiFetchMock).toHaveBeenCalledWith('/api/admin/langfuse/connection', {
       method: 'PUT',
       body: JSON.stringify(data),
@@ -76,6 +77,7 @@ describe('Langfuse connection server functions', () => {
       success: false,
       message: 'Langfuse rejected these keys',
     });
+    expect(requireAllSectionCapabilitiesMock).toHaveBeenCalledWith(['langfuse']);
     expect(apiFetchMock).toHaveBeenCalledWith('/api/admin/langfuse/connection/test', {
       method: 'POST',
       body: JSON.stringify(data),
