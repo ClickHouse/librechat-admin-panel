@@ -53,16 +53,16 @@ const LANGFUSE_SHIM_FIELD: t.SchemaField = {
 
 export function applyLangfuseSchemaVisibility(
   tree: t.SchemaField[],
-  fanoutEnabled: boolean,
+  fanoutEnabled: boolean | undefined,
 ): t.SchemaField[] {
   const langfuseIndex = tree.findIndex((section) => section.key === 'langfuse');
-  if (!fanoutEnabled) {
+  if (fanoutEnabled === false) {
     if (langfuseIndex >= 0) {
       tree.splice(langfuseIndex, 1);
     }
     return tree;
   }
-  if (langfuseIndex < 0) {
+  if (fanoutEnabled === true && langfuseIndex < 0) {
     tree.push(LANGFUSE_SHIM_FIELD);
   }
   return tree;
@@ -703,7 +703,7 @@ export const getConfigSchemaFields = createServerFn({ method: 'GET' }).handler(a
     const startupConfig = startupConfigResponse.ok
       ? ((await startupConfigResponse.json()) as { langfuseFanoutEnabled?: boolean })
       : undefined;
-    applyLangfuseSchemaVisibility(tree, startupConfig?.langfuseFanoutEnabled === true);
+    applyLangfuseSchemaVisibility(tree, startupConfig?.langfuseFanoutEnabled);
     for (const section of tree) {
       if (section.key === 'interface' && section.children) {
         section.children = filterInterfacePermissionChildren(section.children);

@@ -109,6 +109,24 @@ describe('applyLangfuseSchemaVisibility', () => {
     expect(findField(tree, 'schemaOnlyField')).toBeDefined();
     expect(tree.filter((field) => field.key === 'langfuse')).toHaveLength(1);
   });
+
+  it('preserves a schema-provided Langfuse section when fanout state is unknown', () => {
+    const tree = extractSchemaTree(
+      z3.object({ langfuse: z3.object({ schemaOnlyField: z3.string() }) }),
+    );
+
+    applyLangfuseSchemaVisibility(tree, undefined);
+
+    expect(findField(tree, 'schemaOnlyField')).toBeDefined();
+  });
+
+  it('does not inject the compatibility shim when fanout state is unknown', () => {
+    const tree = extractSchemaTree(z3.object({ interface: z3.object({ theme: z3.string() }) }));
+
+    applyLangfuseSchemaVisibility(tree, undefined);
+
+    expect(findField(tree, 'langfuse')).toBeUndefined();
+  });
 });
 
 describe('extractSchemaTree', () => {
