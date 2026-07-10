@@ -172,6 +172,12 @@ export function LangfuseRenderer({ disabled, isEditingScope }: t.FieldRendererPr
     (configured || trimmedSecretKey !== '');
   const busy = updateMutation.isPending || testMutation.isPending;
 
+  const markDraftUnverified = () => {
+    requestRef.current += 1;
+    setVerificationState('unverified');
+    setVerificationMessage('');
+  };
+
   const verify = (
     nextDestination: string,
     nextPublicKey: string,
@@ -345,8 +351,7 @@ export function LangfuseRenderer({ disabled, isEditingScope }: t.FieldRendererPr
             placeholder="pk-lf-..."
             onChange={(value) => {
               setPublicKey(value);
-              setVerificationState('unverified');
-              setVerificationMessage('');
+              markDraftUnverified();
             }}
           />
         )}
@@ -380,8 +385,7 @@ export function LangfuseRenderer({ disabled, isEditingScope }: t.FieldRendererPr
             placeholder="sk-lf-..."
             onChange={(value) => {
               setSecretKey(value);
-              setVerificationState('unverified');
-              setVerificationMessage('');
+              markDraftUnverified();
             }}
           />
         )}

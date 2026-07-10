@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type * as t from '@/types';
 import { LangfuseRenderer } from '../LangfuseRenderer';
@@ -249,6 +249,38 @@ describe('LangfuseRenderer', () => {
         publicKey: 'pk-lf-new',
       }),
     );
+  });
+
+  it('ignores an in-flight verification result after a key edit', async () => {
+    let resolveVerification: ((result: { success: boolean }) => void) | undefined;
+    mockTest.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveVerification = resolve;
+        }),
+    );
+    renderLangfuse();
+
+    fireEvent.change(await screen.findByPlaceholderText('pk-lf-...'), {
+      target: { value: 'pk-lf-old' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('sk-lf-...'), {
+      target: { value: 'sk-lf-secret' },
+    });
+    fireEvent.change(screen.getByLabelText('com_config_langfuse_destination'), {
+      target: { value: 'eu' },
+    });
+    await waitFor(() => expect(mockTest).toHaveBeenCalledTimes(1));
+
+    fireEvent.change(screen.getByPlaceholderText('pk-lf-...'), {
+      target: { value: 'pk-lf-new' },
+    });
+    expect(screen.getByText('com_config_langfuse_not_verified')).toBeVisible();
+
+    await act(async () => resolveVerification?.({ success: true }));
+
+    expect(screen.getByText('com_config_langfuse_not_verified')).toBeVisible();
+    expect(screen.queryByText('com_config_langfuse_verified')).not.toBeInTheDocument();
   });
 
   it('disables a saved connection without re-verifying credentials', async () => {
