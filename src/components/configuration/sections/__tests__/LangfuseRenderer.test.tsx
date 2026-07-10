@@ -286,6 +286,31 @@ describe('LangfuseRenderer', () => {
     expect(mockTest).toHaveBeenCalledTimes(1);
   });
 
+  it('retries a transient mount verification failure after the connection refreshes', async () => {
+    const configuredStatus = {
+      configured: true,
+      enabled: true,
+      destinations,
+      destination: 'eu',
+      publicKey: 'pk-lf-stored',
+      displaySecretKey: 'sk-lf-...515f',
+    };
+    mockGet.mockResolvedValue(configuredStatus);
+    mockTest.mockRejectedValueOnce(new Error('Langfuse is temporarily unavailable'));
+    mockTest.mockResolvedValueOnce({ success: true });
+    const { queryClient } = renderLangfuse();
+
+    expect(await screen.findByText('Langfuse is temporarily unavailable')).toBeVisible();
+    expect(mockTest).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      queryClient.setQueryData(LANGFUSE_CONNECTION_QUERY_KEY, { ...configuredStatus });
+    });
+
+    expect(await screen.findByText('com_config_langfuse_verified')).toBeVisible();
+    expect(mockTest).toHaveBeenCalledTimes(2);
+  });
+
   it('ignores an in-flight verification result after a key edit', async () => {
     let resolveVerification: ((result: { success: boolean }) => void) | undefined;
     mockTest.mockImplementationOnce(

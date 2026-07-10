@@ -123,17 +123,21 @@ export function LangfuseRenderer({ disabled, isEditingScope }: t.FieldRendererPr
       {
         onSuccess: (result) => {
           if (requestId !== requestRef.current) return;
+          testedConnectionRef.current = connectionKey;
           setVerificationState(result.success ? 'verified' : 'failed');
           setVerificationMessage(result.success ? '' : (result.message ?? ''));
         },
         onError: (error: Error) => {
           if (requestId !== requestRef.current) return;
+          if (testedConnectionRef.current === connectionKey) {
+            testedConnectionRef.current = undefined;
+          }
           setVerificationState('failed');
           setVerificationMessage(error.message);
         },
       },
     );
-  }, [status]);
+  }, [status, connectionQuery.dataUpdatedAt]);
 
   if (isEditingScope) {
     return (
