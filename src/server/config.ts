@@ -2,8 +2,8 @@ import { z } from 'zod';
 import yaml from 'js-yaml';
 import { queryOptions } from '@tanstack/react-query';
 import { createServerFn } from '@tanstack/react-start';
-import { SystemCapabilities } from '@librechat/data-schemas/capabilities';
 import { configSchema } from 'librechat-data-provider';
+import { SystemCapabilities } from '@librechat/data-schemas/capabilities';
 import type { AdminConfigResponse } from '@librechat/data-schemas';
 import type * as t from '@/types';
 import {
@@ -50,6 +50,23 @@ const LANGFUSE_SHIM_FIELD: t.SchemaField = {
     }),
   ),
 };
+
+export function applyLangfuseSchemaVisibility(
+  tree: t.SchemaField[],
+  fanoutEnabled: boolean,
+): t.SchemaField[] {
+  const langfuseIndex = tree.findIndex((section) => section.key === 'langfuse');
+  if (!fanoutEnabled) {
+    if (langfuseIndex >= 0) {
+      tree.splice(langfuseIndex, 1);
+    }
+    return tree;
+  }
+  if (langfuseIndex < 0) {
+    tree.push(LANGFUSE_SHIM_FIELD);
+  }
+  return tree;
+}
 
 const WRAPPER_TYPES = new Set([
   'ZodOptional',
@@ -682,9 +699,11 @@ export const configSchemaTreeOptions = queryOptions({
 export const getConfigSchemaFields = createServerFn({ method: 'GET' }).handler(async () => {
   try {
     const tree = extractSchemaTree(configSchema);
-    if (!tree.some((section) => section.key === 'langfuse')) {
-      tree.push(LANGFUSE_SHIM_FIELD);
-    }
+    const startupConfigResponse = await apiFetch('/api/config');
+    const startupConfig = startupConfigResponse.ok
+      ? ((await startupConfigResponse.json()) as { langfuseFanoutEnabled?: boolean })
+      : undefined;
+    applyLangfuseSchemaVisibility(tree, startupConfig?.langfuseFanoutEnabled === true);
     for (const section of tree) {
       if (section.key === 'interface' && section.children) {
         section.children = filterInterfacePermissionChildren(section.children);
