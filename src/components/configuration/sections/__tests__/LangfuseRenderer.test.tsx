@@ -27,13 +27,6 @@ vi.mock('@/server', () => ({
   updateLangfuseConnectionFn: vi.fn(),
 }));
 
-interface SwitchProps {
-  checked: boolean;
-  disabled?: boolean;
-  onCheckedChange?: (value: boolean) => void;
-  'aria-label'?: string;
-}
-
 interface TextFieldProps {
   label?: string;
   value?: string;
@@ -84,15 +77,6 @@ vi.mock('@clickhouse/click-ui', () => ({
         <option value={value}>{children}</option>
       ),
     },
-  ),
-  Switch: (props: SwitchProps) => (
-    <button
-      role="switch"
-      aria-checked={props.checked}
-      aria-label={props['aria-label']}
-      disabled={props.disabled}
-      onClick={() => props.onCheckedChange?.(!props.checked)}
-    />
   ),
   TextField: ({ label, value, placeholder, disabled, onChange }: TextFieldProps) => (
     <input
@@ -149,6 +133,16 @@ describe('LangfuseRenderer', () => {
     ).toBeVisible();
     expect(screen.getByPlaceholderText('pk-lf-...')).toBeVisible();
     expect(screen.getByPlaceholderText('sk-lf-...')).toBeVisible();
+    expect(screen.getByRole('button', { name: 'com_ui_cancel' })).toBeVisible();
+    expect(
+      screen.getByRole('button', { name: 'com_config_langfuse_save_and_enable' }),
+    ).toBeVisible();
+    expect(
+      screen.queryByRole('button', { name: 'com_config_langfuse_enable' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'com_config_langfuse_disable' }),
+    ).not.toBeInTheDocument();
   });
 
   it('shows masked keys and verifies a configured connection on load', async () => {
@@ -192,8 +186,9 @@ describe('LangfuseRenderer', () => {
     fireEvent.change(screen.getByPlaceholderText('sk-lf-...'), {
       target: { value: 'sk-lf-secret' },
     });
-    fireEvent.click(screen.getByRole('switch'));
-    const saveButton = screen.getByRole('button', { name: 'com_ui_save' });
+    const saveButton = screen.getByRole('button', {
+      name: 'com_config_langfuse_save_and_enable',
+    });
     await waitFor(() => expect(saveButton).toBeEnabled());
     fireEvent.click(saveButton);
 
@@ -230,10 +225,18 @@ describe('LangfuseRenderer', () => {
     fireEvent.click(
       await screen.findByRole('button', { name: 'com_ui_edit com_config_langfuse_public_key' }),
     );
+    expect(screen.getByRole('button', { name: 'com_ui_cancel' })).toBeVisible();
+    expect(
+      screen.getByRole('button', { name: 'com_config_langfuse_save_and_enable' }),
+    ).toBeVisible();
+    expect(
+      screen.queryByRole('button', { name: 'com_config_langfuse_disable' }),
+    ).not.toBeInTheDocument();
     fireEvent.change(screen.getByPlaceholderText('pk-lf-...'), {
       target: { value: 'pk-lf-new' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'com_ui_save' }));
+    expect(screen.getByText('com_config_langfuse_not_verified')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'com_config_langfuse_save_and_enable' }));
 
     await waitFor(() =>
       expect(mockUpdate).toHaveBeenCalledWith({
@@ -248,7 +251,7 @@ describe('LangfuseRenderer', () => {
     );
   });
 
-  it('persists the enable toggle without re-verifying credentials', async () => {
+  it('disables a saved connection without re-verifying credentials', async () => {
     const configuredStatus = {
       configured: true,
       enabled: true,
@@ -264,7 +267,7 @@ describe('LangfuseRenderer', () => {
     await waitFor(() => expect(mockTest).toHaveBeenCalledTimes(1));
     mockTest.mockClear();
 
-    fireEvent.click(screen.getByRole('switch'));
+    fireEvent.click(screen.getByRole('button', { name: 'com_config_langfuse_disable' }));
 
     await waitFor(() =>
       expect(mockUpdate).toHaveBeenCalledWith({
@@ -272,6 +275,36 @@ describe('LangfuseRenderer', () => {
       }),
     );
     expect(mockTest).not.toHaveBeenCalled();
+    expect(await screen.findByRole('button', { name: 'com_config_langfuse_enable' })).toBeEnabled();
+  });
+
+  it('enables a saved connection without re-verifying credentials', async () => {
+    const configuredStatus = {
+      configured: true,
+      enabled: false,
+      destinations,
+      destination: 'eu',
+      publicKey: 'pk-lf-existing',
+      displaySecretKey: 'sk-lf-...515f',
+    };
+    mockGet.mockResolvedValue(configuredStatus);
+    mockUpdate.mockResolvedValue({ ...configuredStatus, enabled: true });
+    renderLangfuse();
+    await screen.findByText('sk-lf-...515f');
+    await waitFor(() => expect(mockTest).toHaveBeenCalledTimes(1));
+    mockTest.mockClear();
+
+    fireEvent.click(screen.getByRole('button', { name: 'com_config_langfuse_enable' }));
+
+    await waitFor(() =>
+      expect(mockUpdate).toHaveBeenCalledWith({
+        data: { enabled: true, destination: 'eu', publicKey: 'pk-lf-existing' },
+      }),
+    );
+    expect(mockTest).not.toHaveBeenCalled();
+    expect(
+      await screen.findByRole('button', { name: 'com_config_langfuse_disable' }),
+    ).toBeEnabled();
   });
 
   it('re-verifies the stored connection when an invalid key edit is cancelled', async () => {
@@ -293,7 +326,7 @@ describe('LangfuseRenderer', () => {
     fireEvent.change(screen.getByPlaceholderText('pk-lf-...'), {
       target: { value: 'pk-lf-invalid' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'com_ui_save' }));
+    fireEvent.click(screen.getByRole('button', { name: 'com_config_langfuse_save_and_enable' }));
     expect(await screen.findByText('invalid keys')).toBeVisible();
 
     mockTest.mockResolvedValueOnce({ success: true });
@@ -310,5 +343,14 @@ describe('LangfuseRenderer', () => {
     renderLangfuse({ isEditingScope: true });
     expect(screen.getByText('com_config_langfuse_tenant_wide')).toBeVisible();
     expect(mockGet).not.toHaveBeenCalled();
+  });
+
+  it('disables actions when the section is read-only', async () => {
+    renderLangfuse({ disabled: true });
+
+    expect(await screen.findByRole('button', { name: 'com_ui_cancel' })).toBeDisabled();
+    expect(
+      screen.getByRole('button', { name: 'com_config_langfuse_save_and_enable' }),
+    ).toBeDisabled();
   });
 });

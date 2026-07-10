@@ -10,11 +10,9 @@ import {
   updateLangfuseConnectionFn,
 } from '@/server';
 import { notifyError, notifySuccess } from '@/utils';
-import { ToggleField } from '../fields/ToggleField';
-import { ConfigRow } from '../ConfigRow';
 import { useLocalize } from '@/hooks';
 
-type VerificationState = 'idle' | 'checking' | 'verified' | 'failed';
+type VerificationState = 'idle' | 'unverified' | 'checking' | 'verified' | 'failed';
 
 function getConnectionKey(status?: LangfuseConnectionStatus): string | undefined {
   if (!status?.configured || !status.destination || !status.publicKey) return undefined;
@@ -39,6 +37,8 @@ function getVerificationLabel(
       return localize('com_config_langfuse_verified');
     case 'failed':
       return message || localize('com_config_langfuse_test_fail');
+    case 'unverified':
+      return localize('com_config_langfuse_not_verified');
     default:
       return localize('com_config_langfuse_not_configured');
   }
@@ -61,7 +61,6 @@ export function LangfuseRenderer({ disabled, isEditingScope }: t.FieldRendererPr
   const localize = useLocalize();
   const queryClient = useQueryClient();
   const [status, setStatus] = useState<LangfuseConnectionStatus>();
-  const [enabled, setEnabled] = useState(false);
   const [destination, setDestination] = useState('');
   const [publicKey, setPublicKey] = useState('');
   const [secretKey, setSecretKey] = useState('');
@@ -77,6 +76,7 @@ export function LangfuseRenderer({ disabled, isEditingScope }: t.FieldRendererPr
     queryFn: () => getLangfuseConnectionFn(),
     enabled: !isEditingScope,
     retry: false,
+    refetchOnWindowFocus: false,
   });
   const updateMutation = useMutation({
     mutationFn: (data: {
@@ -95,7 +95,6 @@ export function LangfuseRenderer({ disabled, isEditingScope }: t.FieldRendererPr
     if (!connectionQuery.data) return;
     const nextStatus = connectionQuery.data;
     setStatus(nextStatus);
-    setEnabled(nextStatus.enabled);
     setDestination(
       nextStatus.destinations.some(({ key }) => key === nextStatus.destination)
         ? (nextStatus.destination ?? '')
@@ -159,9 +158,13 @@ export function LangfuseRenderer({ disabled, isEditingScope }: t.FieldRendererPr
   const trimmedSecretKey = secretKey.trim();
   const destinationChanged = destination !== (status?.destination ?? '');
   const publicKeyChanged = trimmedPublicKey !== (status?.publicKey ?? '');
-  const hasCredentialEdits =
-    !configured || editingPublicKey || editingSecretKey || destinationChanged;
-  const showActions = hasCredentialEdits || publicKeyChanged || trimmedSecretKey !== '';
+  const isEditing =
+    !configured ||
+    editingPublicKey ||
+    editingSecretKey ||
+    destinationChanged ||
+    publicKeyChanged ||
+    trimmedSecretKey !== '';
   const canSave =
     !disabled &&
     destination !== '' &&
@@ -208,7 +211,7 @@ export function LangfuseRenderer({ disabled, isEditingScope }: t.FieldRendererPr
 
   const saveConnection = () => {
     const payload = {
-      enabled,
+      enabled: true,
       destination,
       publicKey: trimmedPublicKey,
       ...(trimmedSecretKey ? { secretKey: trimmedSecretKey } : {}),
@@ -218,7 +221,6 @@ export function LangfuseRenderer({ disabled, isEditingScope }: t.FieldRendererPr
         queryClient.setQueryData(LANGFUSE_CONNECTION_QUERY_KEY, nextStatus);
         testedConnectionRef.current = getConnectionKey(nextStatus);
         setStatus(nextStatus);
-        setEnabled(nextStatus.enabled);
         setDestination(nextStatus.destination ?? '');
         setPublicKey(nextStatus.publicKey ?? '');
         setSecretKey('');
@@ -231,33 +233,30 @@ export function LangfuseRenderer({ disabled, isEditingScope }: t.FieldRendererPr
   };
 
   const handleSave = () => {
-    if (!enabled) {
-      saveConnection();
-      return;
-    }
     verify(destination, trimmedPublicKey, trimmedSecretKey, saveConnection);
   };
 
   const handleCancel = () => {
-    setEnabled(status?.enabled === true);
-    setDestination(status?.destination ?? '');
+    const storedDestination = status?.destinations.some(({ key }) => key === status.destination)
+      ? status.destination
+      : undefined;
+    setDestination(storedDestination ?? '');
     setPublicKey(status?.publicKey ?? '');
     setSecretKey('');
     setEditingPublicKey(false);
     setEditingSecretKey(false);
-    if (configured && status?.destination && status.publicKey) {
-      verify(status.destination, status.publicKey, '');
+    if (configured && storedDestination && status?.publicKey) {
+      verify(storedDestination, status.publicKey, '');
     } else {
       setVerificationState('idle');
       setVerificationMessage('');
     }
   };
 
-  const handleEnabledChange = (nextEnabled: boolean) => {
-    setEnabled(nextEnabled);
+  const handleEnabledChange = () => {
     if (!configured || !status?.destination || !status.publicKey) return;
 
-    const previousEnabled = status.enabled;
+    const nextEnabled = status.enabled !== true;
     updateMutation.mutate(
       {
         enabled: nextEnabled,
@@ -271,10 +270,7 @@ export function LangfuseRenderer({ disabled, isEditingScope }: t.FieldRendererPr
           setStatus(nextStatus);
           notifySuccess(localize('com_config_langfuse_saved'));
         },
-        onError: (error: Error) => {
-          setEnabled(previousEnabled);
-          notifyError(error.message);
-        },
+        onError: (error: Error) => notifyError(error.message),
       },
     );
   };
@@ -284,24 +280,17 @@ export function LangfuseRenderer({ disabled, isEditingScope }: t.FieldRendererPr
 
   return (
     <div className="flex max-w-2xl flex-col gap-5">
-      <ConfigRow
-        title={localize('com_config_langfuse_enabled')}
-        description={localize('com_config_langfuse_description')}
-        badge={
+      <div className="flex flex-col gap-1">
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-semibold">{localize('com_config_langfuse_enabled')}</span>
           <span className="w-fit rounded-full border border-(--cui-color-stroke-default) px-2 py-0.5 text-[10px] font-medium text-(--cui-color-text-muted)">
             {localize('com_config_langfuse_beta')}
           </span>
-        }
-        fieldId="langfuse-enabled"
-      >
-        <ToggleField
-          id="langfuse-enabled"
-          checked={enabled}
-          disabled={disabled || busy}
-          onChange={handleEnabledChange}
-          aria-label={localize('com_config_langfuse_enabled')}
-        />
-      </ConfigRow>
+        </div>
+        <span className="text-xs text-(--cui-color-text-muted)">
+          {localize('com_config_langfuse_description')}
+        </span>
+      </div>
 
       <div
         className="flex items-center gap-2 text-xs text-(--cui-color-text-muted)"
@@ -354,7 +343,11 @@ export function LangfuseRenderer({ disabled, isEditingScope }: t.FieldRendererPr
             value={publicKey}
             disabled={disabled || busy}
             placeholder="pk-lf-..."
-            onChange={setPublicKey}
+            onChange={(value) => {
+              setPublicKey(value);
+              setVerificationState('unverified');
+              setVerificationMessage('');
+            }}
           />
         )}
       </div>
@@ -385,34 +378,48 @@ export function LangfuseRenderer({ disabled, isEditingScope }: t.FieldRendererPr
             value={secretKey}
             disabled={disabled || busy}
             placeholder="sk-lf-..."
-            onChange={setSecretKey}
+            onChange={(value) => {
+              setSecretKey(value);
+              setVerificationState('unverified');
+              setVerificationMessage('');
+            }}
           />
         )}
       </div>
 
       <div className="flex min-h-9 items-center justify-end gap-2">
-        {showActions && (
+        {isEditing ? (
           <>
-            {configured && (
-              <Button
-                type="secondary"
-                label={localize('com_ui_cancel')}
-                disabled={busy}
-                onClick={handleCancel}
-              />
-            )}
+            <Button
+              type="secondary"
+              label={localize('com_ui_cancel')}
+              disabled={disabled || busy}
+              onClick={handleCancel}
+            />
             <Button
               type="primary"
               label={
                 testMutation.isPending
                   ? localize('com_config_langfuse_checking')
-                  : localize('com_ui_save')
+                  : localize('com_config_langfuse_save_and_enable')
               }
               loading={busy}
               disabled={!canSave || busy}
               onClick={handleSave}
             />
           </>
+        ) : (
+          <Button
+            type={status?.enabled === true ? 'secondary' : 'primary'}
+            label={localize(
+              status?.enabled === true
+                ? 'com_config_langfuse_disable'
+                : 'com_config_langfuse_enable',
+            )}
+            disabled={disabled || busy}
+            loading={updateMutation.isPending}
+            onClick={handleEnabledChange}
+          />
         )}
       </div>
     </div>
