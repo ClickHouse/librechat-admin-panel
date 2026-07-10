@@ -5,6 +5,7 @@ import type * as t from '@/types';
 import { LangfuseRenderer } from '../LangfuseRenderer';
 import {
   getLangfuseConnectionFn,
+  LANGFUSE_CONNECTION_QUERY_KEY,
   testLangfuseConnectionFn,
   updateLangfuseConnectionFn,
 } from '@/server';
@@ -20,6 +21,7 @@ vi.mock('@/utils', () => ({
 }));
 
 vi.mock('@/server', () => ({
+  LANGFUSE_CONNECTION_QUERY_KEY: ['adminLangfuseConnection'],
   getLangfuseConnectionFn: vi.fn(),
   testLangfuseConnectionFn: vi.fn(),
   updateLangfuseConnectionFn: vi.fn(),
@@ -122,11 +124,12 @@ function renderLangfuse(overrides: Partial<t.FieldRendererProps> = {}) {
     onChange: vi.fn(),
     ...overrides,
   };
-  return render(
+  const result = render(
     <QueryClientProvider client={queryClient}>
       <LangfuseRenderer {...props} />
     </QueryClientProvider>,
   );
+  return { ...result, queryClient };
 }
 
 beforeEach(() => {
@@ -222,7 +225,7 @@ describe('LangfuseRenderer', () => {
     };
     mockGet.mockResolvedValue(configuredStatus);
     mockUpdate.mockResolvedValue({ ...configuredStatus, publicKey: 'pk-lf-new' });
-    renderLangfuse();
+    const { queryClient } = renderLangfuse();
 
     fireEvent.click(
       await screen.findByRole('button', { name: 'com_ui_edit com_config_langfuse_public_key' }),
@@ -235,6 +238,12 @@ describe('LangfuseRenderer', () => {
     await waitFor(() =>
       expect(mockUpdate).toHaveBeenCalledWith({
         data: { enabled: true, destination: 'eu', publicKey: 'pk-lf-new' },
+      }),
+    );
+    await waitFor(() =>
+      expect(queryClient.getQueryData(LANGFUSE_CONNECTION_QUERY_KEY)).toEqual({
+        ...configuredStatus,
+        publicKey: 'pk-lf-new',
       }),
     );
   });

@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { Button, Select, TextField } from '@clickhouse/click-ui';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type * as t from '@/types';
 import type { LangfuseConnectionStatus } from '@/server';
 import {
   getLangfuseConnectionFn,
+  LANGFUSE_CONNECTION_QUERY_KEY,
   testLangfuseConnectionFn,
   updateLangfuseConnectionFn,
 } from '@/server';
@@ -58,6 +59,7 @@ function getVerificationDotClass(state: VerificationState): string {
 
 export function LangfuseRenderer({ disabled, isEditingScope }: t.FieldRendererProps) {
   const localize = useLocalize();
+  const queryClient = useQueryClient();
   const [status, setStatus] = useState<LangfuseConnectionStatus>();
   const [enabled, setEnabled] = useState(false);
   const [destination, setDestination] = useState('');
@@ -71,7 +73,7 @@ export function LangfuseRenderer({ disabled, isEditingScope }: t.FieldRendererPr
   const requestRef = useRef(0);
 
   const connectionQuery = useQuery({
-    queryKey: ['adminLangfuseConnection'],
+    queryKey: LANGFUSE_CONNECTION_QUERY_KEY,
     queryFn: () => getLangfuseConnectionFn(),
     enabled: !isEditingScope,
     retry: false,
@@ -213,6 +215,7 @@ export function LangfuseRenderer({ disabled, isEditingScope }: t.FieldRendererPr
     };
     updateMutation.mutate(payload, {
       onSuccess: (nextStatus) => {
+        queryClient.setQueryData(LANGFUSE_CONNECTION_QUERY_KEY, nextStatus);
         testedConnectionRef.current = getConnectionKey(nextStatus);
         setStatus(nextStatus);
         setEnabled(nextStatus.enabled);
@@ -263,6 +266,7 @@ export function LangfuseRenderer({ disabled, isEditingScope }: t.FieldRendererPr
       },
       {
         onSuccess: (nextStatus) => {
+          queryClient.setQueryData(LANGFUSE_CONNECTION_QUERY_KEY, nextStatus);
           testedConnectionRef.current = getConnectionKey(nextStatus);
           setStatus(nextStatus);
           notifySuccess(localize('com_config_langfuse_saved'));

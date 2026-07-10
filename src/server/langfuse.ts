@@ -23,6 +23,8 @@ export interface LangfuseConnectionTestResponse {
   message?: string;
 }
 
+export const LANGFUSE_CONNECTION_QUERY_KEY = ['adminLangfuseConnection'] as const;
+
 const connectionInputSchema = z.object({
   enabled: z.boolean(),
   destination: z.string(),
