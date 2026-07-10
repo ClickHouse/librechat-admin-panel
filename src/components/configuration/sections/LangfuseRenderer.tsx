@@ -1,111 +1,415 @@
-import { useState } from 'react';
-import { Button, TextField } from '@clickhouse/click-ui';
+import { useEffect, useRef, useState } from 'react';
+import { Button, Select, TextField } from '@clickhouse/click-ui';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import type * as t from '@/types';
-import { PasswordInput } from '@/components/PasswordInput';
-import { testLangfuseConnectionFn } from '@/server';
+import type { LangfuseConnectionStatus } from '@/server';
+import {
+  getLangfuseConnectionFn,
+  testLangfuseConnectionFn,
+  updateLangfuseConnectionFn,
+} from '@/server';
+import { notifyError, notifySuccess } from '@/utils';
 import { ToggleField } from '../fields/ToggleField';
 import { ConfigRow } from '../ConfigRow';
 import { useLocalize } from '@/hooks';
 
-type TestState = 'idle' | 'testing' | 'ok' | 'fail';
+type VerificationState = 'idle' | 'checking' | 'verified' | 'failed';
 
-function asString(value: t.ConfigValue): string {
-  return typeof value === 'string' ? value : '';
+function getConnectionKey(status?: LangfuseConnectionStatus): string | undefined {
+  if (!status?.configured || !status.destination || !status.publicKey) return undefined;
+  return `${status.destination}\u0000${status.publicKey}`;
 }
 
-export function LangfuseRenderer(props: t.FieldRendererProps) {
-  const { parentPath, parentValue, getValue, onChange, disabled } = props;
+function maskPublicKey(publicKey: string): string {
+  const trimmed = publicKey.trim();
+  if (trimmed.length <= 12) return trimmed;
+  return `${trimmed.slice(0, 6)}...${trimmed.slice(-4)}`;
+}
+
+function getVerificationLabel(
+  state: VerificationState,
+  message: string,
+  localize: ReturnType<typeof useLocalize>,
+): string {
+  switch (state) {
+    case 'checking':
+      return localize('com_config_langfuse_checking');
+    case 'verified':
+      return localize('com_config_langfuse_verified');
+    case 'failed':
+      return message || localize('com_config_langfuse_test_fail');
+    default:
+      return localize('com_config_langfuse_not_configured');
+  }
+}
+
+function getVerificationDotClass(state: VerificationState): string {
+  switch (state) {
+    case 'verified':
+      return 'bg-(--cui-color-accent-success)';
+    case 'failed':
+      return 'bg-(--cui-color-accent-danger)';
+    case 'checking':
+      return 'bg-(--cui-color-accent-warning)';
+    default:
+      return 'border border-(--cui-color-stroke-default)';
+  }
+}
+
+export function LangfuseRenderer({ disabled, isEditingScope }: t.FieldRendererProps) {
   const localize = useLocalize();
+  const [status, setStatus] = useState<LangfuseConnectionStatus>();
+  const [enabled, setEnabled] = useState(false);
+  const [destination, setDestination] = useState('');
+  const [publicKey, setPublicKey] = useState('');
+  const [secretKey, setSecretKey] = useState('');
+  const [editingPublicKey, setEditingPublicKey] = useState(false);
+  const [editingSecretKey, setEditingSecretKey] = useState(false);
+  const [verificationState, setVerificationState] = useState<VerificationState>('idle');
+  const [verificationMessage, setVerificationMessage] = useState('');
+  const testedConnectionRef = useRef<string | undefined>(undefined);
+  const requestRef = useRef(0);
 
-  const stored: Record<string, t.ConfigValue> =
-    parentValue && typeof parentValue === 'object' && !Array.isArray(parentValue)
-      ? (parentValue as Record<string, t.ConfigValue>)
-      : {};
+  const connectionQuery = useQuery({
+    queryKey: ['adminLangfuseConnection'],
+    queryFn: () => getLangfuseConnectionFn(),
+    enabled: !isEditingScope,
+    retry: false,
+  });
+  const updateMutation = useMutation({
+    mutationFn: (data: {
+      enabled: boolean;
+      destination: string;
+      publicKey: string;
+      secretKey?: string;
+    }) => updateLangfuseConnectionFn({ data }),
+  });
+  const testMutation = useMutation({
+    mutationFn: (data: { destination: string; publicKey: string; secretKey?: string }) =>
+      testLangfuseConnectionFn({ data }),
+  });
 
-  const enabled = getValue(`${parentPath}.enabled`, stored.enabled ?? false) === true;
-  const baseUrl = asString(getValue(`${parentPath}.baseUrl`, stored.baseUrl ?? ''));
-  const publicKey = asString(getValue(`${parentPath}.publicKey`, stored.publicKey ?? ''));
-  const fingerprint = asString(stored.secretKeyFingerprint ?? '');
-  const configured = fingerprint !== '';
+  useEffect(() => {
+    if (!connectionQuery.data) return;
+    const nextStatus = connectionQuery.data;
+    setStatus(nextStatus);
+    setEnabled(nextStatus.enabled);
+    setDestination(
+      nextStatus.destinations.some(({ key }) => key === nextStatus.destination)
+        ? (nextStatus.destination ?? '')
+        : '',
+    );
+    setPublicKey(nextStatus.publicKey ?? '');
+  }, [connectionQuery.data]);
 
-  const [secret, setSecret] = useState('');
-  const [testState, setTestState] = useState<TestState>('idle');
-  const [testMessage, setTestMessage] = useState('');
+  useEffect(() => {
+    const connectionKey = getConnectionKey(status);
+    if (!connectionKey) {
+      setVerificationState('idle');
+      setVerificationMessage('');
+      return;
+    }
+    if (testedConnectionRef.current === connectionKey) return;
 
-  const canTest = !disabled && baseUrl !== '' && publicKey !== '' && secret !== '';
+    testedConnectionRef.current = connectionKey;
+    const requestId = ++requestRef.current;
+    setVerificationState('checking');
+    setVerificationMessage('');
+    testMutation.mutate(
+      { destination: status?.destination ?? '', publicKey: status?.publicKey ?? '' },
+      {
+        onSuccess: (result) => {
+          if (requestId !== requestRef.current) return;
+          setVerificationState(result.success ? 'verified' : 'failed');
+          setVerificationMessage(result.success ? '' : (result.message ?? ''));
+        },
+        onError: (error: Error) => {
+          if (requestId !== requestRef.current) return;
+          setVerificationState('failed');
+          setVerificationMessage(error.message);
+        },
+      },
+    );
+  }, [status]);
 
-  const handleTest = async () => {
-    setTestState('testing');
-    setTestMessage('');
-    try {
-      const result = await testLangfuseConnectionFn({
-        data: { baseUrl, publicKey, secretKey: secret },
-      });
-      setTestState(result.success ? 'ok' : 'fail');
-      setTestMessage(
-        result.success
-          ? localize('com_config_langfuse_test_ok')
-          : (result.message ?? localize('com_config_langfuse_test_fail')),
-      );
-    } catch {
-      setTestState('fail');
-      setTestMessage(localize('com_config_langfuse_test_fail'));
+  if (isEditingScope) {
+    return (
+      <p className="text-sm text-(--cui-color-text-muted)">
+        {localize('com_config_langfuse_tenant_wide')}
+      </p>
+    );
+  }
+
+  if (connectionQuery.isPending) {
+    return <p className="text-sm text-(--cui-color-text-muted)">{localize('com_ui_loading')}</p>;
+  }
+
+  if (connectionQuery.isError) {
+    return (
+      <p role="alert" className="text-sm text-(--cui-color-text-danger)">
+        {connectionQuery.error.message}
+      </p>
+    );
+  }
+
+  const configured = status?.configured === true;
+  const trimmedPublicKey = publicKey.trim();
+  const trimmedSecretKey = secretKey.trim();
+  const destinationChanged = destination !== (status?.destination ?? '');
+  const publicKeyChanged = trimmedPublicKey !== (status?.publicKey ?? '');
+  const hasCredentialEdits =
+    !configured || editingPublicKey || editingSecretKey || destinationChanged;
+  const showActions = hasCredentialEdits || publicKeyChanged || trimmedSecretKey !== '';
+  const canSave =
+    !disabled &&
+    destination !== '' &&
+    trimmedPublicKey !== '' &&
+    (configured || trimmedSecretKey !== '');
+  const busy = updateMutation.isPending || testMutation.isPending;
+
+  const verify = (
+    nextDestination: string,
+    nextPublicKey: string,
+    nextSecretKey: string,
+    onVerified?: () => void,
+  ) => {
+    const requestId = ++requestRef.current;
+    if (!nextDestination || !nextPublicKey || (!configured && !nextSecretKey)) {
+      setVerificationState('idle');
+      setVerificationMessage('');
+      return;
+    }
+
+    setVerificationState('checking');
+    setVerificationMessage('');
+    testMutation.mutate(
+      {
+        destination: nextDestination,
+        publicKey: nextPublicKey,
+        ...(nextSecretKey ? { secretKey: nextSecretKey } : {}),
+      },
+      {
+        onSuccess: (result) => {
+          if (requestId !== requestRef.current) return;
+          setVerificationState(result.success ? 'verified' : 'failed');
+          setVerificationMessage(result.success ? '' : (result.message ?? ''));
+          if (result.success) onVerified?.();
+        },
+        onError: (error: Error) => {
+          if (requestId !== requestRef.current) return;
+          setVerificationState('failed');
+          setVerificationMessage(error.message);
+        },
+      },
+    );
+  };
+
+  const saveConnection = () => {
+    const payload = {
+      enabled,
+      destination,
+      publicKey: trimmedPublicKey,
+      ...(trimmedSecretKey ? { secretKey: trimmedSecretKey } : {}),
+    };
+    updateMutation.mutate(payload, {
+      onSuccess: (nextStatus) => {
+        testedConnectionRef.current = getConnectionKey(nextStatus);
+        setStatus(nextStatus);
+        setEnabled(nextStatus.enabled);
+        setDestination(nextStatus.destination ?? '');
+        setPublicKey(nextStatus.publicKey ?? '');
+        setSecretKey('');
+        setEditingPublicKey(false);
+        setEditingSecretKey(false);
+        notifySuccess(localize('com_config_langfuse_saved'));
+      },
+      onError: (error: Error) => notifyError(error.message),
+    });
+  };
+
+  const handleSave = () => {
+    if (!enabled) {
+      saveConnection();
+      return;
+    }
+    verify(destination, trimmedPublicKey, trimmedSecretKey, saveConnection);
+  };
+
+  const handleCancel = () => {
+    setEnabled(status?.enabled === true);
+    setDestination(status?.destination ?? '');
+    setPublicKey(status?.publicKey ?? '');
+    setSecretKey('');
+    setEditingPublicKey(false);
+    setEditingSecretKey(false);
+    if (configured && status?.destination && status.publicKey) {
+      verify(status.destination, status.publicKey, '');
+    } else {
+      setVerificationState('idle');
+      setVerificationMessage('');
     }
   };
 
+  const handleEnabledChange = (nextEnabled: boolean) => {
+    setEnabled(nextEnabled);
+    if (!configured || !status?.destination || !status.publicKey) return;
+
+    const previousEnabled = status.enabled;
+    updateMutation.mutate(
+      {
+        enabled: nextEnabled,
+        destination: status.destination,
+        publicKey: status.publicKey,
+      },
+      {
+        onSuccess: (nextStatus) => {
+          testedConnectionRef.current = getConnectionKey(nextStatus);
+          setStatus(nextStatus);
+          notifySuccess(localize('com_config_langfuse_saved'));
+        },
+        onError: (error: Error) => {
+          setEnabled(previousEnabled);
+          notifyError(error.message);
+        },
+      },
+    );
+  };
+
+  const statusLabel = getVerificationLabel(verificationState, verificationMessage, localize);
+  const statusDotClass = getVerificationDotClass(verificationState);
+
   return (
-    <div className="flex flex-col gap-4">
-      <ConfigRow title={localize('com_config_langfuse_enabled')} fieldId="langfuse-enabled">
+    <div className="flex max-w-2xl flex-col gap-5">
+      <ConfigRow
+        title={localize('com_config_langfuse_enabled')}
+        description={localize('com_config_langfuse_description')}
+        badge={
+          <span className="w-fit rounded-full border border-(--cui-color-stroke-default) px-2 py-0.5 text-[10px] font-medium text-(--cui-color-text-muted)">
+            {localize('com_config_langfuse_beta')}
+          </span>
+        }
+        fieldId="langfuse-enabled"
+      >
         <ToggleField
           id="langfuse-enabled"
           checked={enabled}
-          disabled={disabled}
-          onChange={(value) => onChange(`${parentPath}.enabled`, value)}
+          disabled={disabled || busy}
+          onChange={handleEnabledChange}
           aria-label={localize('com_config_langfuse_enabled')}
         />
       </ConfigRow>
-      <TextField
-        label={localize('com_config_langfuse_base_url')}
-        value={baseUrl}
-        disabled={disabled}
-        placeholder="https://cloud.langfuse.com"
-        onChange={(value) => onChange(`${parentPath}.baseUrl`, value)}
-      />
-      <TextField
-        label={localize('com_config_langfuse_public_key')}
-        value={publicKey}
-        disabled={disabled}
-        placeholder="pk-lf-..."
-        onChange={(value) => onChange(`${parentPath}.publicKey`, value)}
-      />
-      <PasswordInput
-        label={localize('com_config_langfuse_secret_key')}
-        value={secret}
-        disabled={disabled}
-        placeholder={configured ? localize('com_config_langfuse_secret_set') : 'sk-lf-...'}
-        onChange={(value) => {
-          setSecret(value);
-          onChange(`${parentPath}.secretKey`, value);
+
+      <div
+        className="flex items-center gap-2 text-xs text-(--cui-color-text-muted)"
+        aria-live="polite"
+      >
+        <span className={`h-2 w-2 shrink-0 rounded-full ${statusDotClass}`} />
+        <span>{statusLabel}</span>
+      </div>
+
+      <Select
+        label={localize('com_config_langfuse_destination')}
+        value={destination || undefined}
+        placeholder={localize('com_config_langfuse_select_destination')}
+        disabled={disabled || busy || (status?.destinations.length ?? 0) === 0}
+        onSelect={(value) => {
+          setDestination(value);
+          verify(value, trimmedPublicKey, trimmedSecretKey);
         }}
-      />
-      {configured && (
-        <span className="text-xs">
-          {localize('com_config_langfuse_fingerprint')} <code>{fingerprint}</code>
-        </span>
-      )}
-      <div className="flex items-center gap-2">
-        <Button
-          type="secondary"
-          label={
-            testState === 'testing'
-              ? localize('com_config_langfuse_testing')
-              : localize('com_config_langfuse_test')
-          }
-          loading={testState === 'testing'}
-          disabled={!canTest || testState === 'testing'}
-          onClick={handleTest}
-        />
-        {testMessage !== '' && <span className="text-xs">{testMessage}</span>}
+      >
+        {status?.destinations.map(({ key, baseUrl }) => (
+          <Select.Item key={key} value={key}>
+            {key} - {baseUrl}
+          </Select.Item>
+        ))}
+      </Select>
+
+      <div className="flex flex-col gap-1.5">
+        <span className="text-sm font-medium">{localize('com_config_langfuse_public_key')}</span>
+        {configured && !editingPublicKey ? (
+          <button
+            type="button"
+            className="rounded-md border border-(--cui-color-stroke-default) px-3 py-2 text-left hover:border-(--cui-color-stroke-emphasis) focus-visible:outline-2 focus-visible:outline-(--cui-color-stroke-emphasis)"
+            disabled={disabled || busy}
+            onClick={() => setEditingPublicKey(true)}
+            aria-label={`${localize('com_ui_edit')} ${localize('com_config_langfuse_public_key')}`}
+          >
+            <code className="text-sm">{maskPublicKey(publicKey)}</code>
+          </button>
+        ) : (
+          <TextField
+            id="langfuse-public-token"
+            name="langfuse-public-token"
+            label=""
+            autoFocus={editingPublicKey}
+            autoComplete="off"
+            data-lpignore="true"
+            data-1p-ignore="true"
+            data-bwignore="true"
+            data-form-type="other"
+            value={publicKey}
+            disabled={disabled || busy}
+            placeholder="pk-lf-..."
+            onChange={setPublicKey}
+          />
+        )}
+      </div>
+
+      <div className="flex flex-col gap-1.5">
+        <span className="text-sm font-medium">{localize('com_config_langfuse_secret_key')}</span>
+        {configured && !editingSecretKey ? (
+          <button
+            type="button"
+            className="rounded-md border border-(--cui-color-stroke-default) px-3 py-2 text-left hover:border-(--cui-color-stroke-emphasis) focus-visible:outline-2 focus-visible:outline-(--cui-color-stroke-emphasis)"
+            disabled={disabled || busy}
+            onClick={() => setEditingSecretKey(true)}
+            aria-label={`${localize('com_ui_edit')} ${localize('com_config_langfuse_secret_key')}`}
+          >
+            <code className="text-sm">{status?.displaySecretKey}</code>
+          </button>
+        ) : (
+          <TextField
+            id="langfuse-private-token"
+            name="langfuse-private-token"
+            label=""
+            autoFocus={editingSecretKey}
+            autoComplete="off"
+            data-lpignore="true"
+            data-1p-ignore="true"
+            data-bwignore="true"
+            data-form-type="other"
+            value={secretKey}
+            disabled={disabled || busy}
+            placeholder="sk-lf-..."
+            onChange={setSecretKey}
+          />
+        )}
+      </div>
+
+      <div className="flex min-h-9 items-center justify-end gap-2">
+        {showActions && (
+          <>
+            {configured && (
+              <Button
+                type="secondary"
+                label={localize('com_ui_cancel')}
+                disabled={busy}
+                onClick={handleCancel}
+              />
+            )}
+            <Button
+              type="primary"
+              label={
+                testMutation.isPending
+                  ? localize('com_config_langfuse_checking')
+                  : localize('com_ui_save')
+              }
+              loading={busy}
+              disabled={!canSave || busy}
+              onClick={handleSave}
+            />
+          </>
+        )}
       </div>
     </div>
   );

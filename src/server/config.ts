@@ -24,12 +24,9 @@ import { apiFetch } from './utils/api';
 
 /**
  * Forward-compat shim: the pinned `librechat-data-provider@^0.8.509` predates the
- * `langfuse` config group (tenant Langfuse connection: baseUrl / public key /
- * secret key / enabled). Inject the section node into the schema tree so it renders
- * through the custom LangfuseRenderer and `langfuse.*` values save via the config
- * API (validateFieldValue tolerates paths absent from the schema). Injected only
- * when the pinned data-provider does not already define `langfuse`; remove this
- * shim once a data-provider that defines it is pinned.
+ * `langfuse` config group. Inject the section node so the custom renderer remains
+ * discoverable until a data-provider release containing the group is pinned. The
+ * renderer persists through LibreChat's dedicated Langfuse connection API.
  */
 const LANGFUSE_SHIM_FIELD: t.SchemaField = {
   path: 'langfuse',
@@ -40,16 +37,18 @@ const LANGFUSE_SHIM_FIELD: t.SchemaField = {
   isArray: false,
   isObject: true,
   depth: 0,
-  children: (['enabled', 'baseUrl', 'publicKey', 'secretKey'] as const).map((key) => ({
-    path: `langfuse.${key}`,
-    key,
-    type: key === 'enabled' ? 'boolean' : 'string',
-    isOptional: true,
-    isNullable: false,
-    isArray: false,
-    isObject: false,
-    depth: 1,
-  })),
+  children: (['enabled', 'destination', 'publicKey', 'secretKey', 'displaySecretKey'] as const).map(
+    (key) => ({
+      path: `langfuse.${key}`,
+      key,
+      type: key === 'enabled' ? 'boolean' : 'string',
+      isOptional: true,
+      isNullable: false,
+      isArray: false,
+      isObject: false,
+      depth: 1,
+    }),
+  ),
 };
 
 const WRAPPER_TYPES = new Set([
