@@ -70,6 +70,7 @@ export function LangfuseRenderer({ disabled, isEditingScope }: t.FieldRendererPr
   const [verificationMessage, setVerificationMessage] = useState('');
   const testedConnectionRef = useRef<string | undefined>(undefined);
   const requestRef = useRef(0);
+  const hasDraftRef = useRef(false);
 
   const connectionQuery = useQuery({
     queryKey: LANGFUSE_CONNECTION_QUERY_KEY,
@@ -93,6 +94,7 @@ export function LangfuseRenderer({ disabled, isEditingScope }: t.FieldRendererPr
 
   useEffect(() => {
     if (!connectionQuery.data) return;
+    if (hasDraftRef.current) return;
     const nextStatus = connectionQuery.data;
     setStatus(nextStatus);
     setDestination(
@@ -173,6 +175,7 @@ export function LangfuseRenderer({ disabled, isEditingScope }: t.FieldRendererPr
   const busy = updateMutation.isPending || testMutation.isPending;
 
   const markDraftUnverified = () => {
+    hasDraftRef.current = true;
     requestRef.current += 1;
     setVerificationState('unverified');
     setVerificationMessage('');
@@ -224,6 +227,7 @@ export function LangfuseRenderer({ disabled, isEditingScope }: t.FieldRendererPr
     };
     updateMutation.mutate(payload, {
       onSuccess: (nextStatus) => {
+        hasDraftRef.current = false;
         queryClient.setQueryData(LANGFUSE_CONNECTION_QUERY_KEY, nextStatus);
         testedConnectionRef.current = getConnectionKey(nextStatus);
         setStatus(nextStatus);
@@ -243,16 +247,22 @@ export function LangfuseRenderer({ disabled, isEditingScope }: t.FieldRendererPr
   };
 
   const handleCancel = () => {
-    const storedDestination = status?.destinations.some(({ key }) => key === status.destination)
-      ? status.destination
+    hasDraftRef.current = false;
+    const latestStatus =
+      queryClient.getQueryData<LangfuseConnectionStatus>(LANGFUSE_CONNECTION_QUERY_KEY) ?? status;
+    setStatus(latestStatus);
+    const storedDestination = latestStatus?.destinations.some(
+      ({ key }) => key === latestStatus.destination,
+    )
+      ? latestStatus.destination
       : undefined;
     setDestination(storedDestination ?? '');
-    setPublicKey(status?.publicKey ?? '');
+    setPublicKey(latestStatus?.publicKey ?? '');
     setSecretKey('');
     setEditingPublicKey(false);
     setEditingSecretKey(false);
-    if (configured && storedDestination && status?.publicKey) {
-      verify(storedDestination, status.publicKey, '');
+    if (latestStatus?.configured && storedDestination && latestStatus.publicKey) {
+      verify(storedDestination, latestStatus.publicKey, '');
     } else {
       setVerificationState('idle');
       setVerificationMessage('');
@@ -312,6 +322,7 @@ export function LangfuseRenderer({ disabled, isEditingScope }: t.FieldRendererPr
         placeholder={localize('com_config_langfuse_select_destination')}
         disabled={disabled || busy || (status?.destinations.length ?? 0) === 0}
         onSelect={(value) => {
+          hasDraftRef.current = true;
           setDestination(value);
           verify(value, trimmedPublicKey, trimmedSecretKey);
         }}
@@ -330,7 +341,10 @@ export function LangfuseRenderer({ disabled, isEditingScope }: t.FieldRendererPr
             type="button"
             className="rounded-md border border-(--cui-color-stroke-default) px-3 py-2 text-left hover:border-(--cui-color-stroke-emphasis) focus-visible:outline-2 focus-visible:outline-(--cui-color-stroke-emphasis)"
             disabled={disabled || busy}
-            onClick={() => setEditingPublicKey(true)}
+            onClick={() => {
+              hasDraftRef.current = true;
+              setEditingPublicKey(true);
+            }}
             aria-label={`${localize('com_ui_edit')} ${localize('com_config_langfuse_public_key')}`}
           >
             <code className="text-sm">{maskPublicKey(publicKey)}</code>
@@ -364,7 +378,10 @@ export function LangfuseRenderer({ disabled, isEditingScope }: t.FieldRendererPr
             type="button"
             className="rounded-md border border-(--cui-color-stroke-default) px-3 py-2 text-left hover:border-(--cui-color-stroke-emphasis) focus-visible:outline-2 focus-visible:outline-(--cui-color-stroke-emphasis)"
             disabled={disabled || busy}
-            onClick={() => setEditingSecretKey(true)}
+            onClick={() => {
+              hasDraftRef.current = true;
+              setEditingSecretKey(true);
+            }}
             aria-label={`${localize('com_ui_edit')} ${localize('com_config_langfuse_secret_key')}`}
           >
             <code className="text-sm">{status?.displaySecretKey}</code>

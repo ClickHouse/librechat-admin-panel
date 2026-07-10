@@ -314,6 +314,7 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
       schemaTree.some((section) => section.key === 'langfuse') &&
       sectionPermissions.langfuse?.canEdit === true,
     retry: false,
+    refetchOnWindowFocus: false,
   });
 
   const baseConfiguredPaths = useMemo(

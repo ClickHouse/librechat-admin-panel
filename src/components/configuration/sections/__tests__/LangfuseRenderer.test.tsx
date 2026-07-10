@@ -251,6 +251,41 @@ describe('LangfuseRenderer', () => {
     );
   });
 
+  it('preserves draft fields when shared connection data refreshes', async () => {
+    const configuredStatus = {
+      configured: true,
+      enabled: true,
+      destinations,
+      destination: 'eu',
+      publicKey: 'pk-lf-stored',
+      displaySecretKey: 'sk-lf-...515f',
+    };
+    mockGet.mockResolvedValue(configuredStatus);
+    const { queryClient } = renderLangfuse();
+    expect(await screen.findByText('com_config_langfuse_verified')).toBeVisible();
+    expect(mockTest).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'com_ui_edit com_config_langfuse_public_key' }),
+    );
+    fireEvent.change(screen.getByPlaceholderText('pk-lf-...'), {
+      target: { value: 'pk-lf-draft' },
+    });
+
+    act(() => {
+      queryClient.setQueryData(LANGFUSE_CONNECTION_QUERY_KEY, {
+        ...configuredStatus,
+        destination: 'us',
+        publicKey: 'pk-lf-refetched',
+      });
+    });
+
+    expect(screen.getByPlaceholderText('pk-lf-...')).toHaveValue('pk-lf-draft');
+    expect(screen.getByLabelText('com_config_langfuse_destination')).toHaveValue('eu');
+    expect(screen.getByText('com_config_langfuse_not_verified')).toBeVisible();
+    expect(mockTest).toHaveBeenCalledTimes(1);
+  });
+
   it('ignores an in-flight verification result after a key edit', async () => {
     let resolveVerification: ((result: { success: boolean }) => void) | undefined;
     mockTest.mockImplementationOnce(
