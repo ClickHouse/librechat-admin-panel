@@ -374,6 +374,35 @@ describe('LangfuseRenderer', () => {
     ).toBeEnabled();
   });
 
+  it('enables a disabled connection when credential edits are saved with Save & enable', async () => {
+    const configuredStatus = {
+      configured: true,
+      enabled: false,
+      destinations,
+      destination: 'eu',
+      publicKey: 'pk-lf-existing',
+      displaySecretKey: 'sk-lf-...515f',
+    };
+    mockGet.mockResolvedValue(configuredStatus);
+    mockUpdate.mockResolvedValue({ ...configuredStatus, enabled: true, publicKey: 'pk-lf-new' });
+    renderLangfuse();
+    await screen.findByText('sk-lf-...515f');
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'com_ui_edit com_config_langfuse_public_key' }),
+    );
+    fireEvent.change(screen.getByPlaceholderText('pk-lf-...'), {
+      target: { value: 'pk-lf-new' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'com_config_langfuse_save_and_enable' }));
+
+    await waitFor(() =>
+      expect(mockUpdate).toHaveBeenCalledWith({
+        data: { enabled: true, destination: 'eu', publicKey: 'pk-lf-new' },
+      }),
+    );
+  });
+
   it('re-verifies the stored connection when an invalid key edit is cancelled', async () => {
     mockGet.mockResolvedValue({
       configured: true,

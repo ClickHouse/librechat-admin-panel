@@ -220,6 +220,7 @@ export function LangfuseRenderer({ disabled, isEditingScope }: t.FieldRendererPr
 
   const saveConnection = () => {
     const payload = {
+      // Credential edits are committed through the explicit "Save & enable" action.
       enabled: true,
       destination,
       publicKey: trimmedPublicKey,
