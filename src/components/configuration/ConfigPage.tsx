@@ -742,10 +742,21 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
           notifyError(err.message);
         });
       } else {
-        importMutation.mutate(normalized, { onSuccess: () => showImportSuccess() });
+        const stripped = stripSecretPreviewValues(normalized, '', schemaPathSet) as Record<
+          string,
+          t.ConfigValue
+        >;
+        importMutation.mutate(stripped, { onSuccess: () => showImportSuccess() });
       }
     },
-    [isEditingScope, editingScope, importMutation, showImportSuccess, handleImportAsProfile],
+    [
+      isEditingScope,
+      editingScope,
+      importMutation,
+      showImportSuccess,
+      handleImportAsProfile,
+      schemaPathSet,
+    ],
   );
 
   const highlightRef = useHighlightRef(highlightField);
