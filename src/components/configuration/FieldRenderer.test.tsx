@@ -513,11 +513,17 @@ describe('masked secret fields', () => {
   });
 
   it('keeps a cleared replacement visible after remount instead of showing the stale mask', () => {
-    renderMasked(noop, { touchedPaths: new Set(['ocr.apiKey']) });
+    renderMasked(noop, { editedValues: { 'ocr.apiKey': '' } });
     expect(screen.queryByDisplayValue('sk-mist...4321')).not.toBeInTheDocument();
     const input = screen.getByRole('textbox');
     expect(input).not.toBeDisabled();
     expect(input).toHaveValue('');
+  });
+
+  it('does not reopen a cleared replacement once it drops out of editedValues as a baseline match', () => {
+    renderMasked(noop, { touchedPaths: new Set(['ocr.apiKey']) });
+    expect(screen.getByDisplayValue('sk-mist...4321')).toBeDisabled();
+    expect(screen.getByText('com_config_secret_replace')).toBeInTheDocument();
   });
 
   it('an untyped Replace click does not survive a bumped editSessionId', () => {

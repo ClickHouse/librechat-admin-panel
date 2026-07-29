@@ -163,6 +163,7 @@ export function SingleFieldRenderer({
   onChange,
   onResetField,
   onDiscardField,
+  editedValues,
   disabled,
   permissions,
   onProfileChange,
@@ -190,6 +191,7 @@ export function SingleFieldRenderer({
   const isDbOverride = dbOverridePaths?.has(path);
   const isTouched = touchedPaths?.has(path);
   const isPendingReset = pendingResets?.has(path) ?? false;
+  const hasPendingEdit = editedValues ? path in editedValues : false;
   const defaultHint = schemaDefaults ? formatDefault(schemaDefaults[path]) : null;
 
   if (showConfiguredOnly && !isConfigured && !hasDescendant(path, configuredPaths)) return null;
@@ -378,7 +380,7 @@ export function SingleFieldRenderer({
           maskedValue={maskedSecret}
           onChange={(v) => onChange(path, v)}
           onCancel={() => onDiscardField?.(path)}
-          hasPendingEdit={isTouched}
+          hasPendingEdit={hasPendingEdit}
           disabled={disabled}
           aria-label={fieldLabel}
         />
@@ -1225,6 +1227,7 @@ export function FieldRenderer({
   onChange,
   onResetField,
   onDiscardField,
+  editedValues,
   disabled,
   profileMap,
   previewMode,
@@ -1303,6 +1306,7 @@ export function FieldRenderer({
                 onChange={onChange}
                 onResetField={onResetField}
                 onDiscardField={onDiscardField}
+                editedValues={editedValues}
                 disabled={disabled}
                 profileMap={profileMap}
                 previewMode={previewMode}
@@ -1334,6 +1338,7 @@ export function FieldRenderer({
             onChange={onChange}
             onResetField={onResetField}
             onDiscardField={onDiscardField}
+            editedValues={editedValues}
             disabled={disabled}
             permissions={permissions}
             onProfileChange={onProfileChange}

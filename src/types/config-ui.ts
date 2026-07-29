@@ -201,6 +201,16 @@ export interface SingleFieldRendererProps {
    * whenever a scope-resolved baseline happens to also read as empty.
    */
   onDiscardField?: (path: string) => void;
+  /**
+   * Source of truth for whether a secret field currently has a queued
+   * replacement (`SecretField`'s `hasPendingEdit`). Membership in this map,
+   * not `touchedPaths`, since a replacement typed then cleared back to a
+   * baseline that itself reads as an empty string gets removed from here by
+   * `applyConfigEdit`'s baseline-match diffing, while `touchedPaths` keeps
+   * the path forever — using the latter would keep showing an open, empty
+   * replace input for a field with nothing actually queued to save.
+   */
+  editedValues?: FlatConfigMap;
   disabled?: boolean;
   permissions?: ScopePermissions;
   onProfileChange?: () => void;
