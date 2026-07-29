@@ -1073,11 +1073,32 @@ export function renderInlineField(
   }
 
   if (controlType === 'text') {
+    const stringValue = typeof fieldValue === 'string' ? fieldValue : '';
+    const secretPreviewValue = getSecretPreviewValue(values, field.key);
+    const maskedSecret =
+      secretPreviewValue != null && stringValue === '' ? secretPreviewValue : null;
+
+    if (maskedSecret != null) {
+      return (
+        <InlineRow key={field.key} label={fieldLabel} fieldId={fieldId} required={required}>
+          <SecretField
+            id={fieldId}
+            value={stringValue}
+            maskedValue={maskedSecret}
+            onChange={(v) => onChange(field.key, v)}
+            onCancel={() => onChange(field.key, '')}
+            disabled={disabled}
+            aria-label={fieldLabel}
+          />
+        </InlineRow>
+      );
+    }
+
     return (
       <InlineRow key={field.key} label={fieldLabel} fieldId={fieldId} required={required}>
         <TextField
           id={fieldId}
-          value={typeof fieldValue === 'string' ? fieldValue : ''}
+          value={stringValue}
           onChange={(v) => onChange(field.key, v)}
           disabled={disabled}
         />

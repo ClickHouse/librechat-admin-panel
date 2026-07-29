@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import type * as t from '@/types';
-import { SingleFieldRenderer, FieldRenderer } from './FieldRenderer';
+import { SingleFieldRenderer, FieldRenderer, renderInlineField } from './FieldRenderer';
 import { createField } from '@/test/fixtures';
 
 vi.mock('@/hooks/useLocalize', () => ({
@@ -544,5 +544,39 @@ describe('masked secret fields', () => {
 
     expect(screen.getByDisplayValue('sk-mist...4321')).toBeDisabled();
     expect(screen.getByText('com_config_secret_replace')).toBeInTheDocument();
+  });
+});
+
+describe('renderInlineField masked secrets (collection entries)', () => {
+  const apiKeyField = createField({ key: 'apiKey', type: 'string' });
+  const localize = (key: string) => key;
+
+  it('renders a masked display with a Replace flow for a configured array-entry secret', () => {
+    const onChange = vi.fn();
+    render(
+      <>
+        {renderInlineField(
+          apiKeyField,
+          { name: 'first', apiKeyPreview: 'sk-mist...4321' },
+          'endpoints.custom.0',
+          onChange,
+          localize,
+        )}
+      </>,
+    );
+    const masked = screen.getByDisplayValue('sk-mist...4321');
+    expect(masked).toBeDisabled();
+    expect(screen.getByText('com_config_secret_replace')).toBeInTheDocument();
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it('renders a normal empty input when the array entry has no preview companion', () => {
+    render(
+      <>
+        {renderInlineField(apiKeyField, { name: 'first' }, 'endpoints.custom.0', vi.fn(), localize)}
+      </>,
+    );
+    expect(screen.getByRole('textbox')).not.toBeDisabled();
+    expect(screen.queryByText('com_config_secret_replace')).not.toBeInTheDocument();
   });
 });
