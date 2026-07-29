@@ -579,4 +579,22 @@ describe('renderInlineField masked secrets (collection entries)', () => {
     expect(screen.getByRole('textbox')).not.toBeDisabled();
     expect(screen.queryByText('com_config_secret_replace')).not.toBeInTheDocument();
   });
+
+  it('cancelling an array-entry replace clears the field with undefined, never an empty string', () => {
+    const onChange = vi.fn();
+    render(
+      <>
+        {renderInlineField(
+          apiKeyField,
+          { name: 'first', apiKeyPreview: 'sk-mist...4321' },
+          'endpoints.custom.0',
+          onChange,
+          localize,
+        )}
+      </>,
+    );
+    fireEvent.click(screen.getByText('com_config_secret_replace'));
+    fireEvent.click(screen.getByText('com_ui_cancel'));
+    expect(onChange).toHaveBeenCalledWith('apiKey', undefined);
+  });
 });

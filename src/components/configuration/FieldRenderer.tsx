@@ -1086,7 +1086,7 @@ export function renderInlineField(
             value={stringValue}
             maskedValue={maskedSecret}
             onChange={(v) => onChange(field.key, v)}
-            onCancel={() => onChange(field.key, '')}
+            onCancel={() => onChange(field.key, undefined)}
             disabled={disabled}
             aria-label={fieldLabel}
           />
