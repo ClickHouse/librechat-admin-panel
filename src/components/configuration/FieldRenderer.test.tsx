@@ -580,7 +580,24 @@ describe('renderInlineField masked secrets (collection entries)', () => {
     expect(screen.queryByText('com_config_secret_replace')).not.toBeInTheDocument();
   });
 
-  it('cancelling an array-entry replace clears the field with undefined, never an empty string', () => {
+  it('cancelling a queued empty-string array-entry replacement clears the field with undefined', () => {
+    const onChange = vi.fn();
+    render(
+      <>
+        {renderInlineField(
+          apiKeyField,
+          { name: 'first', apiKey: '', apiKeyPreview: 'sk-mist...4321' },
+          'endpoints.custom.0',
+          onChange,
+          localize,
+        )}
+      </>,
+    );
+    fireEvent.click(screen.getByText('com_ui_cancel'));
+    expect(onChange).toHaveBeenCalledWith('apiKey', undefined);
+  });
+
+  it('cancelling an untyped array-entry replace never calls onChange, so the entry stays clean', () => {
     const onChange = vi.fn();
     render(
       <>
@@ -595,7 +612,7 @@ describe('renderInlineField masked secrets (collection entries)', () => {
     );
     fireEvent.click(screen.getByText('com_config_secret_replace'));
     fireEvent.click(screen.getByText('com_ui_cancel'));
-    expect(onChange).toHaveBeenCalledWith('apiKey', undefined);
+    expect(onChange).not.toHaveBeenCalled();
   });
 
   it('keeps a cleared array-entry replacement visible instead of showing the stale mask', () => {
