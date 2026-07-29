@@ -940,7 +940,7 @@ let cachedSchemaPathSet: Set<string> | undefined;
  * strip them so paths match the plain dotted convention `secretPathForPreviewPath`
  * and `stripSecretPreviewValues` expect.
  */
-function getSchemaPathSet(): Set<string> {
+export function getSchemaPathSet(): Set<string> {
   if (!cachedSchemaPathSet) {
     const paths = flattenTree(extractSchemaTree(configSchema)).map((f) =>
       f.path.replace(/\.(\[\]|\{\})/g, ''),

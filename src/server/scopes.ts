@@ -17,11 +17,17 @@ import type {
 } from '@librechat/data-schemas';
 import type * as t from '@/types';
 import { isInterfacePermissionPath } from '@/utils/interfacePermissions';
+import { stripSecretPreviewValues } from '@/utils';
 import { BASE_CONFIG_PRINCIPAL_ID } from './constants';
 import { requireAnyCapability } from './capabilities';
 import { safeFieldPath } from './utils/validation';
 import { apiFetch } from './utils/api';
-import { normalizeAppServiceKeys, parseIndexedArrayPath, mergeConfigArraySources } from './config';
+import {
+  normalizeAppServiceKeys,
+  parseIndexedArrayPath,
+  mergeConfigArraySources,
+  getSchemaPathSet,
+} from './config';
 
 // ── Dot-path helpers ─────────────────────────────────────────────────
 
@@ -55,7 +61,7 @@ async function getBaseConfig(): Promise<Record<string, unknown>> {
   return normalizeAppServiceKeys(config);
 }
 
-async function mergeIndexedArrayEntriesForScope(
+export async function mergeIndexedArrayEntriesForScope(
   apiType: PrincipalType,
   principalId: string,
   entries: Array<{ fieldPath: string; value: unknown }>,
@@ -92,7 +98,12 @@ async function mergeIndexedArrayEntriesForScope(
     for (const [idx, value] of updates) {
       arr[idx] = value;
     }
-    const merged = { fieldPath: arrayPath, value: arr };
+    const strippedArr = stripSecretPreviewValues(
+      arr as t.ConfigValue[],
+      arrayPath,
+      getSchemaPathSet(),
+    );
+    const merged = { fieldPath: arrayPath, value: strippedArr };
     if (restIndex === undefined) {
       restByPath.set(arrayPath, rest.length);
       rest.push(merged);
