@@ -1,11 +1,21 @@
 import type * as t from '@/types';
 
 const PREVIEW_KEY_RE = /^(.+)Preview$/;
+const ARRAY_INDEX_SEGMENT_RE = /\.\d+(?=\.|$)/g;
 
 function secretKeyForPreviewKey(key: string): string | null {
   const match = PREVIEW_KEY_RE.exec(key);
   if (!match) return null;
   return match[1];
+}
+
+/**
+ * Strips numeric array-index segments (`endpoints.custom.0.apiKey` →
+ * `endpoints.custom.apiKey`) so an edited array entry's path matches the
+ * schema's index-free field paths.
+ */
+function stripArrayIndices(path: string): string {
+  return path.replace(ARRAY_INDEX_SEGMENT_RE, '');
 }
 
 /** Masked-preview companion key for a secret field key (`apiKey` → `apiKeyPreview`). */
@@ -39,7 +49,7 @@ export function secretPathForPreviewPath(
   const realKey = secretKeyForPreviewKey(lastDot === -1 ? path : path.slice(lastDot + 1));
   if (!realKey) return null;
   const realPath = lastDot === -1 ? realKey : `${path.slice(0, lastDot + 1)}${realKey}`;
-  return schemaPaths.has(realPath) ? realPath : null;
+  return schemaPaths.has(stripArrayIndices(realPath)) ? realPath : null;
 }
 
 /**

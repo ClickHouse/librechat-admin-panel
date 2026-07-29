@@ -54,6 +54,16 @@ describe('secretPathForPreviewPath', () => {
     expect(secretPathForPreviewPath('interface.modelDisplayLabelPreview', schemaPaths)).toBeNull();
     expect(secretPathForPreviewPath('ocr.apiKey', schemaPaths)).toBeNull();
   });
+
+  it('maps an array-entry preview path to its index-free schema secret path', () => {
+    const arraySchemaPaths = new Set(['endpoints.custom.apiKey']);
+    expect(secretPathForPreviewPath('endpoints.custom.0.apiKeyPreview', arraySchemaPaths)).toBe(
+      'endpoints.custom.0.apiKey',
+    );
+    expect(secretPathForPreviewPath('endpoints.custom.12.apiKeyPreview', arraySchemaPaths)).toBe(
+      'endpoints.custom.12.apiKey',
+    );
+  });
 });
 
 describe('mapSecretPreviewPaths', () => {

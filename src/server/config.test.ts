@@ -1200,6 +1200,35 @@ describe('mergeIndexedArrayEntriesIntoBase', () => {
       },
     ]);
   });
+
+  it('strips secret preview companions from untouched array entries after merging', () => {
+    const result = mergeIndexedArrayEntriesIntoBase(
+      [
+        {
+          fieldPath: 'endpoints.custom.1',
+          value: { name: 'edited', baseURL: 'https://edited.example.com', apiKey: '' },
+        },
+      ],
+      {
+        endpoints: {
+          custom: [
+            { name: 'first', baseURL: 'https://first.example.com', apiKeyPreview: 'sk-...aaaa' },
+            { name: 'second', baseURL: 'https://second.example.com', apiKeyPreview: 'sk-...bbbb' },
+          ],
+        },
+      },
+    );
+
+    expect(result).toEqual([
+      {
+        fieldPath: 'endpoints.custom',
+        value: [
+          { name: 'first', baseURL: 'https://first.example.com' },
+          { name: 'edited', baseURL: 'https://edited.example.com', apiKey: '' },
+        ],
+      },
+    ]);
+  });
 });
 
 describe('validateFieldValue for endpoints', () => {
