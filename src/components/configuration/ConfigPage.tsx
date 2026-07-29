@@ -293,8 +293,8 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
 
   const scopeConfiguredPaths = useMemo(() => {
     if (!scopeChangedPaths) return new Set<string>();
-    return new Set(scopeChangedPaths);
-  }, [scopeChangedPaths]);
+    return mapSecretDisplayPaths(scopeChangedPaths, schemaPathSet);
+  }, [scopeChangedPaths, schemaPathSet]);
 
   const activeConfiguredPaths = isEditingScope ? scopeConfiguredPaths : configuredPaths;
 
