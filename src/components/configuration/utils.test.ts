@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import type * as t from '@/types';
 import {
   getControlType,
   getEnumOptions,
@@ -6,9 +7,11 @@ import {
   splitUnionTypes,
   partitionScopeResetPaths,
   mergeIndexedArrayEdits,
+  buildSavePayload,
   applyConfigEdit,
 } from './utils';
 import { createField } from '@/test/fixtures';
+import { flattenObject } from '@/utils';
 
 describe('getControlType', () => {
   it('maps boolean to toggle', () => {
@@ -415,5 +418,107 @@ describe('partitionScopeResetPaths', () => {
       resetPaths: ['registration.enabled', 'endpoints.custom.0'],
       tombstonePaths: ['mcpServers.alpha', 'mcpServers.beta'],
     });
+  });
+});
+
+describe('buildSavePayload — masked secrets never reach the backend', () => {
+  const schemaPaths = new Set([
+    'ocr.apiKey',
+    'ocr.baseURL',
+    'speech.tts.openai.apiKey',
+    'speech.tts.openai.model',
+  ]);
+  const config = {
+    ocr: { displayApiKey: 'sk-mist...4321', baseURL: 'https://ocr.example' },
+  };
+  const baseline = flattenObject(config);
+  const noIntermediates = new Set<string>();
+  const noContainers = new Set<string>();
+
+  it('submitting without touching the masked secret excludes it from the payload', () => {
+    const edited = applyConfigEdit(
+      {},
+      'ocr.baseURL',
+      'https://new.example',
+      baseline,
+      noIntermediates,
+      noContainers,
+    );
+    const { saves, resets } = buildSavePayload(new Set(['ocr.baseURL']), edited, schemaPaths);
+    expect(saves).toEqual([{ fieldPath: 'ocr.baseURL', value: 'https://new.example' }]);
+    expect(resets).toEqual([]);
+    expect(saves.some((s) => s.fieldPath === 'ocr.apiKey')).toBe(false);
+    expect(JSON.stringify(saves)).not.toContain('sk-mist...4321');
+  });
+
+  it('submitting with no touched paths produces an empty payload', () => {
+    const { touched, saves, resets } = buildSavePayload(new Set(), {}, schemaPaths);
+    expect(touched).toEqual([]);
+    expect(saves).toEqual([]);
+    expect(resets).toEqual([]);
+  });
+
+  it('a display companion leaf path never survives as a save entry', () => {
+    const { saves } = buildSavePayload(
+      new Set(['ocr.displayApiKey']),
+      { 'ocr.displayApiKey': 'sk-mist...4321' },
+      schemaPaths,
+    );
+    expect(saves).toEqual([]);
+  });
+
+  it('display companions nested in object values are stripped', () => {
+    const edited = {
+      'speech.tts.openai': { displayApiKey: 'sk-abc...1111', model: 'tts-1' },
+    };
+    const { saves } = buildSavePayload(new Set(['speech.tts.openai']), edited, schemaPaths);
+    expect(saves).toEqual([{ fieldPath: 'speech.tts.openai', value: { model: 'tts-1' } }]);
+  });
+
+  it('a typed replacement is submitted as the new value', () => {
+    const edited = applyConfigEdit(
+      {},
+      'ocr.apiKey',
+      'brand-new-secret',
+      baseline,
+      noIntermediates,
+      noContainers,
+    );
+    const { saves } = buildSavePayload(new Set(['ocr.apiKey']), edited, schemaPaths);
+    expect(saves).toEqual([{ fieldPath: 'ocr.apiKey', value: 'brand-new-secret' }]);
+  });
+
+  it('cancelling a replacement drops the edit so nothing is submitted', () => {
+    let edited = applyConfigEdit(
+      {},
+      'ocr.apiKey',
+      'half-typed',
+      baseline,
+      noIntermediates,
+      noContainers,
+    );
+    edited = applyConfigEdit(
+      edited,
+      'ocr.apiKey',
+      undefined,
+      baseline,
+      noIntermediates,
+      noContainers,
+    );
+    const { touched, saves, resets } = buildSavePayload(
+      new Set(['ocr.apiKey']),
+      edited,
+      schemaPaths,
+    );
+    expect(touched).toEqual([]);
+    expect(saves).toEqual([]);
+    expect(resets).toEqual([]);
+  });
+
+  it('resetting a masked secret produces a reset for the real path, not a save', () => {
+    const edited: t.FlatConfigMap = { 'ocr.apiKey': undefined };
+    const { saves, resets } = buildSavePayload(new Set(['ocr.apiKey']), edited, schemaPaths);
+    expect(saves).toEqual([]);
+    expect(resets).toEqual(['ocr.apiKey']);
   });
 });

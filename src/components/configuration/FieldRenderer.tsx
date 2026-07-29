@@ -24,6 +24,7 @@ import { renderCollapsible } from './renderCollapsible';
 import { TextareaField } from './fields/TextareaField';
 import { KeyValueField } from './fields/KeyValueField';
 import { NumberField } from './fields/NumberField';
+import { SecretField } from './fields/SecretField';
 import { ToggleField } from './fields/ToggleField';
 import { SelectField } from './fields/SelectField';
 import { TextField } from './fields/TextField';
@@ -31,7 +32,7 @@ import { ListField } from './fields/ListField';
 import { CodeField } from './fields/CodeField';
 import { ConfigRow } from './ConfigRow';
 import { useLocalize } from '@/hooks';
-import { cn } from '@/utils';
+import { cn, getSecretDisplayValue } from '@/utils';
 
 function formatDefault(value: t.ConfigValue): string | null {
   if (value === undefined || value === null) return null;
@@ -175,6 +176,7 @@ export function SingleFieldRenderer({
   schemaDefaults,
   showConfiguredOnly,
   isSoleField,
+  secretDisplayValue,
 }: t.SingleFieldRendererProps) {
   const localize = useLocalize();
   const controlType = getControlType(field);
@@ -361,6 +363,36 @@ export function SingleFieldRenderer({
 
   if (controlType === 'text') {
     const stringValue = typeof currentValue === 'string' ? currentValue : '';
+    const baselineEmpty = typeof value !== 'string' || value === '';
+    const maskedSecret =
+      secretDisplayValue != null && baselineEmpty && !isPendingReset ? secretDisplayValue : null;
+
+    if (maskedSecret != null) {
+      const control = (
+        <SecretField
+          id={fieldId}
+          value={stringValue}
+          maskedValue={maskedSecret}
+          onChange={(v) => onChange(path, v)}
+          onCancel={() => onChange(path, undefined)}
+          disabled={disabled}
+          aria-label={fieldLabel}
+        />
+      );
+      if (isSoleField) return control;
+      return (
+        <ConfigRow
+          title={fieldLabel}
+          description={description}
+          disabled={disabled}
+          fieldId={fieldId}
+          {...rowProps}
+        >
+          {control}
+        </ConfigRow>
+      );
+    }
+
     const isMultiline = stringValue.includes('\n') || field.key.toLowerCase().includes('content');
 
     if (isMultiline) {
@@ -551,10 +583,7 @@ function BooleanChip({ value }: { value: boolean }) {
   const localize = useLocalize();
   return (
     <span
-      className={cn(
-        'boolean-chip self-start',
-        value ? 'boolean-chip-true' : 'boolean-chip-false',
-      )}
+      className={cn('boolean-chip self-start', value ? 'boolean-chip-true' : 'boolean-chip-false')}
       aria-label={localize(value ? 'com_ui_true' : 'com_ui_false')}
     >
       {localize(value ? 'com_ui_true' : 'com_ui_false')}
@@ -651,9 +680,7 @@ export function NestedGroup({
           >
             <Icon name="chevron-right" size="xs" />
           </span>
-          <span className="text-sm font-medium text-(--cui-color-text-default)">
-            {label}
-          </span>
+          <span className="text-sm font-medium text-(--cui-color-text-default)">{label}</span>
           {totalCount > 0 && (
             <span
               className={cn(
@@ -1312,6 +1339,7 @@ export function FieldRenderer({
             schemaDefaults={schemaDefaults}
             showConfiguredOnly={showConfiguredOnly}
             isSoleField={false}
+            secretDisplayValue={getSecretDisplayValue(values, group.field.key)}
           />
         );
       })}

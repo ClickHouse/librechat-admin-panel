@@ -38,6 +38,8 @@ interface MockTextFieldProps {
   onBlur?: () => void;
   onKeyDown?: (e: React.KeyboardEvent) => void;
   type?: string;
+  disabled?: boolean;
+  'aria-label'?: string;
 }
 interface MockNumberFieldProps {
   id?: string;
@@ -78,17 +80,44 @@ vi.mock('@clickhouse/click-ui', () => ({
     },
   ),
   Icon: ({ name }: MockIconProps) => <span data-testid={`icon-${name}`} />,
-  Button: ({ label, onClick }: MockButtonProps) => (
-    <button onClick={onClick}>{label}</button>
-  ),
+  Button: ({ label, onClick }: MockButtonProps) => <button onClick={onClick}>{label}</button>,
   IconButton: ({ icon, onClick, ...props }: MockIconButtonProps) => (
-    <button onClick={onClick} aria-label={props['aria-label'] ?? icon} data-testid={`icon-button-${icon}`} />
+    <button
+      onClick={onClick}
+      aria-label={props['aria-label'] ?? icon}
+      data-testid={`icon-button-${icon}`}
+    />
   ),
-  TextField: ({ id, value, placeholder, onChange, onBlur, type }: MockTextFieldProps) => (
-    <input id={id} value={value ?? ''} placeholder={placeholder} type={type ?? 'text'} onChange={(e) => onChange?.(e.target.value)} onBlur={onBlur} />
+  TextField: ({
+    id,
+    value,
+    placeholder,
+    onChange,
+    onBlur,
+    type,
+    disabled,
+    ...rest
+  }: MockTextFieldProps) => (
+    <input
+      id={id}
+      value={value ?? ''}
+      placeholder={placeholder}
+      type={type ?? 'text'}
+      disabled={disabled}
+      aria-label={rest['aria-label']}
+      onChange={(e) => onChange?.(e.target.value)}
+      onBlur={onBlur}
+    />
   ),
   NumberField: ({ id, value, placeholder, onChange, onBlur }: MockNumberFieldProps) => (
-    <input id={id} value={value ?? ''} placeholder={placeholder} type="number" onChange={(e) => onChange?.(e.target.value)} onBlur={onBlur} />
+    <input
+      id={id}
+      value={value ?? ''}
+      placeholder={placeholder}
+      type="number"
+      onChange={(e) => onChange?.(e.target.value)}
+      onBlur={onBlur}
+    />
   ),
 }));
 
@@ -393,5 +422,91 @@ describe('SingleFieldRenderer onChange interactions', () => {
     );
     fireEvent.click(screen.getByRole('switch'));
     expect(onChange).toHaveBeenCalledWith('s.enabled', true);
+  });
+});
+
+describe('masked secret fields', () => {
+  const secretFields = [createField({ key: 'apiKey', type: 'string', path: 'ocr.apiKey' })];
+  const maskedParent = { displayApiKey: 'sk-mist...4321' };
+
+  const renderMasked = (onChange = noop, extra: Partial<t.FieldRendererProps> = {}) =>
+    render(
+      <FieldRenderer
+        fields={secretFields}
+        parentValue={maskedParent}
+        parentPath="ocr"
+        getValue={getValue}
+        onChange={onChange}
+        {...extra}
+      />,
+    );
+
+  it('renders the masked display read-only when the display companion is set', () => {
+    const onChange = vi.fn();
+    renderMasked(onChange);
+    const masked = screen.getByDisplayValue('sk-mist...4321');
+    expect(masked).toBeDisabled();
+    expect(screen.getByText('com_config_secret_replace')).toBeInTheDocument();
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it('renders a normal empty input when no display companion is set', () => {
+    render(
+      <FieldRenderer
+        fields={secretFields}
+        parentValue={{}}
+        parentPath="ocr"
+        getValue={getValue}
+        onChange={noop}
+      />,
+    );
+    expect(screen.getByRole('textbox')).not.toBeDisabled();
+    expect(screen.queryByText('com_config_secret_replace')).not.toBeInTheDocument();
+  });
+
+  it('replace flow submits only the newly typed secret, never the masked value', () => {
+    const onChange = vi.fn();
+    renderMasked(onChange);
+    fireEvent.click(screen.getByText('com_config_secret_replace'));
+    const input = screen.getByRole('textbox');
+    expect(input).not.toBeDisabled();
+    expect(input).toHaveValue('');
+    fireEvent.change(input, { target: { value: 'brand-new-secret' } });
+    fireEvent.blur(input);
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenCalledWith('ocr.apiKey', 'brand-new-secret');
+  });
+
+  it('cancelling the replace flow clears the pending replacement', () => {
+    const onChange = vi.fn();
+    renderMasked(onChange);
+    fireEvent.click(screen.getByText('com_config_secret_replace'));
+    fireEvent.click(screen.getByText('com_ui_cancel'));
+    expect(onChange).toHaveBeenCalledWith('ocr.apiKey', undefined);
+    expect(screen.getByDisplayValue('sk-mist...4321')).toBeDisabled();
+  });
+
+  it('shows the normal input while a reset is pending', () => {
+    renderMasked(noop, { pendingResets: new Set(['ocr.apiKey']) });
+    expect(screen.queryByDisplayValue('sk-mist...4321')).not.toBeInTheDocument();
+    expect(screen.getByRole('textbox')).not.toBeDisabled();
+  });
+
+  it('keeps the reset affordance for a masked db-overridden secret', () => {
+    const onResetField = vi.fn();
+    renderMasked(noop, {
+      dbOverridePaths: new Set(['ocr.apiKey']),
+      configuredPaths: new Set(['ocr.apiKey']),
+      permissions: { canView: true, canEdit: true, canAssign: false },
+      onResetField,
+    });
+    fireEvent.click(screen.getByText('com_ui_reset'));
+    expect(onResetField).toHaveBeenCalledWith('ocr.apiKey');
+  });
+
+  it('hides the replace button when the field is disabled', () => {
+    renderMasked(noop, { disabled: true });
+    expect(screen.getByDisplayValue('sk-mist...4321')).toBeDisabled();
+    expect(screen.queryByText('com_config_secret_replace')).not.toBeInTheDocument();
   });
 });

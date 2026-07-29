@@ -1,4 +1,5 @@
 export { TextField } from './TextField';
+export { SecretField } from './SecretField';
 export { NumberField } from './NumberField';
 export { TextareaField } from './TextareaField';
 export { ToggleField } from './ToggleField';

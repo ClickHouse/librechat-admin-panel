@@ -203,6 +203,8 @@ export interface SingleFieldRendererProps {
   schemaDefaults?: FlatConfigMap;
   showConfiguredOnly?: boolean;
   isSoleField?: boolean;
+  /** Masked display of a set-but-redacted secret, from the sibling display companion. */
+  secretDisplayValue?: string;
 }
 
 export interface FieldRendererProps {

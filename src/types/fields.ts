@@ -34,6 +34,19 @@ export interface TextFieldProps {
   'aria-describedby'?: string;
 }
 
+export interface SecretFieldProps {
+  id: string;
+  /** Pending replacement value; empty string when no replacement is typed. */
+  value: string;
+  /** Masked display of the stored secret (e.g. `sk-mist...4321`). */
+  maskedValue: string;
+  onChange: (value: string) => void;
+  /** Invoked when the admin abandons the replace flow. */
+  onCancel: () => void;
+  disabled?: boolean;
+  'aria-label'?: string;
+}
+
 export interface TextareaFieldProps {
   id: string;
   value: string;

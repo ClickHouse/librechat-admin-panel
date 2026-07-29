@@ -17,6 +17,7 @@ import {
   requireAllSectionCapabilities,
 } from './capabilities';
 import { BASE_CONFIG_PRINCIPAL_ID } from './constants';
+import { filterSecretDisplayFields } from '@/utils/secrets';
 import { safeFieldPath } from './utils/validation';
 import { flattenObject } from '@/utils/format';
 import { apiFetch } from './utils/api';
@@ -357,7 +358,7 @@ export function extractSchemaTree(
     }
   }
 
-  return fields;
+  return filterSecretDisplayFields(fields);
 }
 
 export function flattenTree(fields: t.SchemaField[]): t.SchemaField[] {

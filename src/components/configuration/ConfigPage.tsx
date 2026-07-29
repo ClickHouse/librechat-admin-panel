@@ -25,12 +25,20 @@ import {
   normalizeImportConfig,
   hasConfigCapability,
   getTabsWithPermission,
+  mapSecretDisplayPaths,
+  secretPathForDisplayPath,
+  stripSecretDisplayValues,
   notifySuccess,
   notifyError,
 } from '@/utils';
 import { useLocalize, useHighlightRef, useActiveSection, useCapabilities } from '@/hooks';
 import { CONFIG_TABS, OTHER_TAB, SECTION_META, HIDDEN_SECTIONS } from './configMeta';
-import { applyConfigEdit, mergeIndexedArrayEdits, partitionScopeResetPaths } from './utils';
+import {
+  applyConfigEdit,
+  buildSavePayload,
+  mergeIndexedArrayEdits,
+  partitionScopeResetPaths,
+} from './utils';
 import { validateMcpCrossField } from './sections/McpServersRenderer';
 import { ScopeSelector, ScopeTriggerButton } from './ScopeSelector';
 import { StickyActionBar } from '@/components/shared';
@@ -118,6 +126,9 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
   const [editedValues, setEditedValues] = useState<t.FlatConfigMap>({});
   const [touchedPaths, setTouchedPaths] = useState<Set<string>>(() => new Set());
 
+  const fieldPaths = useMemo(() => collectFieldPaths(schemaTree), [schemaTree]);
+  const schemaPathSet = useMemo(() => new Set(fieldPaths), [fieldPaths]);
+
   const configuredPaths = useMemo(() => {
     const paths = new Set<string>();
     if (configuredFromBase) {
@@ -126,13 +137,13 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
     if (dbOverrides) {
       for (const p of Object.keys(flattenObject(dbOverrides))) paths.add(p);
     }
-    return paths;
-  }, [configuredFromBase, dbOverrides]);
+    return mapSecretDisplayPaths(paths, schemaPathSet);
+  }, [configuredFromBase, dbOverrides, schemaPathSet]);
 
   const dbOverridePaths = useMemo(() => {
     if (!dbOverrides) return new Set<string>();
-    return new Set(Object.keys(flattenObject(dbOverrides)));
-  }, [dbOverrides]);
+    return mapSecretDisplayPaths(Object.keys(flattenObject(dbOverrides)), schemaPathSet);
+  }, [dbOverrides, schemaPathSet]);
 
   const baseRecordKeys = useMemo(() => {
     const result: Record<string, Set<string>> = {};
@@ -255,7 +266,6 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
   const editingScope: t.ConfigScope | undefined =
     selectedScope.type === 'SCOPE' ? selectedScope.scope : undefined;
 
-  const fieldPaths = useMemo(() => collectFieldPaths(schemaTree), [schemaTree]);
   const { data: profileMap = {} } = useQuery(profileMapOptions(fieldPaths));
 
   const handleProfileChange = useCallback(() => {
@@ -496,7 +506,7 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
 
   const handleConfirmSave = useCallback(async () => {
     if (saving) return;
-    const touched = [...touchedPaths].filter((p) => p in editedValues);
+    const { touched, saves, resets } = buildSavePayload(touchedPaths, editedValues, schemaPathSet);
     if (touched.length === 0) return;
 
     /** Per-leaf saves can land an MCP entry in a transport state whose required siblings are missing (e.g. type=stdio with no command/args). Server-side per-field validation only sees one path at a time, so do the cross-field check here against the merged effective entry before any PATCH fires. Use baseActiveConfigValues so scope-mode edits validate against the scope-resolved baseline (where prior scope overrides supply some required fields) instead of the base config alone. */
@@ -532,13 +542,6 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
       }
     }
 
-    const saves = touched
-      .filter((p) => editedValues[p] !== undefined)
-      .map((p) => ({
-        fieldPath: p,
-        value: deepSerializeKVPairs(editedValues[p]),
-      }));
-    const resets = touched.filter((p) => editedValues[p] === undefined);
     const inheritedMcpKeys = (() => {
       const source = isEditingScope ? configValues?.mcpServers : undefined;
       if (source && typeof source === 'object' && !Array.isArray(source)) {
@@ -614,6 +617,7 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
   }, [
     touchedPaths,
     editedValues,
+    schemaPathSet,
     saving,
     isEditingScope,
     baseActiveConfigValues,
@@ -668,8 +672,14 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
       const normalized = normalizeImportConfig(appConfig);
       const flat = flattenObject(normalized);
       const entries = Object.entries(flat)
-        .filter(([, value]) => value != null)
-        .map(([fieldPath, value]) => ({ fieldPath, value }));
+        .filter(
+          ([fieldPath, value]) =>
+            value != null && secretPathForDisplayPath(fieldPath, schemaPathSet) == null,
+        )
+        .map(([fieldPath, value]) => ({
+          fieldPath,
+          value: stripSecretDisplayValues(value, fieldPath, schemaPathSet),
+        }));
       await bulkSaveProfileValuesFn({
         data: {
           principalType: scope.principalType,
@@ -689,7 +699,7 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
         }),
       );
     },
-    [queryClient, localize, showImportSuccess],
+    [queryClient, localize, showImportSuccess, schemaPathSet],
   );
 
   const handleImport = useCallback(
