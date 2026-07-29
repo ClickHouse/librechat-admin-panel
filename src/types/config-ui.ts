@@ -82,6 +82,8 @@ export interface ConfigTabContentProps {
   /** YAML-defined entry keys per section, keyed by parent path. */
   baseRecordKeys?: Record<string, Set<string>>;
   onValidationError?: (message: string) => void;
+  /** See `SingleFieldRendererProps.editSessionId`. */
+  editSessionId?: number;
 }
 
 export interface ConfigTableOfContentsProps {
@@ -205,6 +207,14 @@ export interface SingleFieldRendererProps {
   isSoleField?: boolean;
   /** Masked display of a set-but-redacted secret, from the sibling display companion. */
   secretDisplayValue?: string;
+  /**
+   * Bumped by the parent on Discard, a successful save, a confirmed scope
+   * change, or a reset-to-default success — every bulk `editedValues`/
+   * `touchedPaths` clear. Used as part of `SecretField`'s `key` so an
+   * in-progress (possibly untyped) replacement doesn't survive past the
+   * edit session that started it.
+   */
+  editSessionId?: number;
 }
 
 export interface FieldRendererProps {
@@ -234,6 +244,8 @@ export interface FieldRendererProps {
   /** YAML-defined entry keys for the section being rendered. */
   yamlBaseKeys?: Set<string>;
   onValidationError?: (message: string) => void;
+  /** See `SingleFieldRendererProps.editSessionId`. */
+  editSessionId?: number;
 }
 
 export interface ImportYamlDialogProps {

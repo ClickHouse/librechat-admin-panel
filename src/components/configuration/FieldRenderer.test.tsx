@@ -509,4 +509,24 @@ describe('masked secret fields', () => {
     expect(screen.getByDisplayValue('sk-mist...4321')).toBeDisabled();
     expect(screen.queryByText('com_config_secret_replace')).not.toBeInTheDocument();
   });
+
+  it('an untyped Replace click does not survive a bumped editSessionId', () => {
+    const { rerender } = renderMasked(noop, { editSessionId: 0 });
+    fireEvent.click(screen.getByText('com_config_secret_replace'));
+    expect(screen.getByRole('textbox')).not.toBeDisabled();
+
+    rerender(
+      <FieldRenderer
+        fields={secretFields}
+        parentValue={maskedParent}
+        parentPath="ocr"
+        getValue={getValue}
+        onChange={noop}
+        editSessionId={1}
+      />,
+    );
+
+    expect(screen.getByDisplayValue('sk-mist...4321')).toBeDisabled();
+    expect(screen.getByText('com_config_secret_replace')).toBeInTheDocument();
+  });
 });

@@ -177,6 +177,7 @@ export function SingleFieldRenderer({
   showConfiguredOnly,
   isSoleField,
   secretDisplayValue,
+  editSessionId,
 }: t.SingleFieldRendererProps) {
   const localize = useLocalize();
   const controlType = getControlType(field);
@@ -370,6 +371,7 @@ export function SingleFieldRenderer({
     if (maskedSecret != null) {
       const control = (
         <SecretField
+          key={`${fieldId}-${editSessionId ?? 0}`}
           id={fieldId}
           value={stringValue}
           maskedValue={maskedSecret}
@@ -1235,6 +1237,7 @@ export function FieldRenderer({
   pendingResets,
   schemaDefaults,
   showConfiguredOnly,
+  editSessionId,
 }: t.FieldRendererProps) {
   const localize = useLocalize();
   const values =
@@ -1311,6 +1314,7 @@ export function FieldRenderer({
                 pendingResets={pendingResets}
                 schemaDefaults={schemaDefaults}
                 showConfiguredOnly={showConfiguredOnly}
+                editSessionId={editSessionId}
               />
             </NestedGroup>
           );
@@ -1340,6 +1344,7 @@ export function FieldRenderer({
             showConfiguredOnly={showConfiguredOnly}
             isSoleField={false}
             secretDisplayValue={getSecretDisplayValue(values, group.field.key)}
+            editSessionId={editSessionId}
           />
         );
       })}

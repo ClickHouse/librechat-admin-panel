@@ -57,6 +57,7 @@ export function ConfigTabContent({
   isEditingScope,
   baseRecordKeys,
   onValidationError,
+  editSessionId,
 }: t.ConfigTabContentProps) {
   const localize = useLocalize();
   const fieldsDisabled = readOnly;
@@ -186,6 +187,7 @@ export function ConfigTabContent({
       isEditingScope,
       yamlBaseKeys: baseRecordKeys?.[dataKey],
       onValidationError,
+      editSessionId,
     };
     return (
       <>

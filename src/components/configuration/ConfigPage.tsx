@@ -125,6 +125,7 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
   const flatBaseline = useMemo(() => flattenObject(configValues ?? {}), [configValues]);
   const [editedValues, setEditedValues] = useState<t.FlatConfigMap>({});
   const [touchedPaths, setTouchedPaths] = useState<Set<string>>(() => new Set());
+  const [editSessionId, setEditSessionId] = useState(0);
 
   const fieldPaths = useMemo(() => collectFieldPaths(schemaTree), [schemaTree]);
   const schemaPathSet = useMemo(() => new Set(fieldPaths), [fieldPaths]);
@@ -217,6 +218,7 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
         if (!window.confirm(localize('com_config_unsaved_leave'))) return;
         setEditedValues({});
         setTouchedPaths(new Set());
+        setEditSessionId((id) => id + 1);
       }
       setConfirmSaveOpen(false);
       setSelectedScope(newSelection);
@@ -432,11 +434,13 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
   const handleDiscard = useCallback(() => {
     setEditedValues({});
     setTouchedPaths(new Set());
+    setEditSessionId((id) => id + 1);
   }, []);
 
   const clearEdits = useCallback(() => {
     setEditedValues({});
     setTouchedPaths(new Set());
+    setEditSessionId((id) => id + 1);
     setConfirmSaveOpen(false);
     setSaving(false);
     setSaveError(null);
@@ -481,6 +485,7 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
       ]);
       setEditedValues({});
       setTouchedPaths(new Set());
+      setEditSessionId((id) => id + 1);
       setResettingBase(false);
       setResetBaseOpen(false);
       notifySuccess(localize('com_config_reset_base_success'));
@@ -959,6 +964,7 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
               isEditingScope={isEditingScope}
               baseRecordKeys={baseRecordKeys}
               onValidationError={(message) => notifyError(message)}
+              editSessionId={editSessionId}
             />
           </div>
         </div>
