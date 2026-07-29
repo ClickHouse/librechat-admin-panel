@@ -673,7 +673,10 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
     const baseline = isEditingScope ? scopeBaseline : flatBaseline;
     const result: t.FlatConfigMap = { ...baseline };
     for (const path of Object.keys(editedValues)) {
-      if (path in result) continue;
+      if (path in result) {
+        result[path] = stripSecretPreviewValues(result[path], path, schemaPathSet);
+        continue;
+      }
       const segments = path.split('.');
       let current: t.ConfigValue = configValues;
       for (const seg of segments) {
