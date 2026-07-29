@@ -672,4 +672,47 @@ describe('renderInlineField masked secrets (collection entries)', () => {
     expect(screen.getByDisplayValue('sk-mist...4321')).toBeDisabled();
     expect(screen.getByText('com_config_secret_replace')).toBeInTheDocument();
   });
+
+  it('an untyped Replace click inside a nested inline group does not survive a bumped editSessionId', () => {
+    const nestedField = createField({ key: 'connection', children: [apiKeyField] });
+    const parentValue = { connection: { apiKeyPreview: 'sk-mist...4321' } };
+    const { rerender } = render(
+      <>
+        {renderInlineField(
+          nestedField,
+          parentValue,
+          'endpoints.custom.0',
+          vi.fn(),
+          localize,
+          undefined,
+          undefined,
+          undefined,
+          0,
+        )}
+      </>,
+    );
+    fireEvent.click(screen.getByText('com_config_field_connection'));
+    fireEvent.click(screen.getByText('com_config_secret_replace'));
+    expect(screen.getByRole('textbox')).not.toBeDisabled();
+
+    rerender(
+      <>
+        {renderInlineField(
+          nestedField,
+          parentValue,
+          'endpoints.custom.0',
+          vi.fn(),
+          localize,
+          undefined,
+          undefined,
+          undefined,
+          1,
+        )}
+      </>,
+    );
+    fireEvent.click(screen.getByText('com_config_field_connection'));
+
+    expect(screen.getByDisplayValue('sk-mist...4321')).toBeDisabled();
+    expect(screen.getByText('com_config_secret_replace')).toBeInTheDocument();
+  });
 });

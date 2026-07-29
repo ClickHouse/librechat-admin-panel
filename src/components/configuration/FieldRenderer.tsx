@@ -918,6 +918,7 @@ function NestedGroupWithAddField({
   parentPath,
   onChange,
   disabled,
+  editSessionId,
 }: {
   label: string;
   fields: t.SchemaField[];
@@ -925,6 +926,7 @@ function NestedGroupWithAddField({
   parentPath: string;
   onChange: (path: string, value: t.ConfigValue) => void;
   disabled?: boolean;
+  editSessionId?: number;
 }) {
   const addFieldRef = useRef<(() => void) | null>(null);
   const localize = useLocalize();
@@ -961,6 +963,7 @@ function NestedGroupWithAddField({
         disabled={disabled}
         addFieldTriggerRef={addFieldRef}
         onHiddenFieldsChange={setHasHideable}
+        editSessionId={editSessionId}
       />
     </NestedGroup>
   );
@@ -1049,6 +1052,7 @@ export function renderInlineField(
           onChange(field.key, { ...current, [leafKey]: v });
         }}
         disabled={disabled}
+        editSessionId={editSessionId}
       />
     );
   }
