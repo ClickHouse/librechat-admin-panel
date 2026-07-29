@@ -664,10 +664,10 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
   const serializedEditedValues = useMemo(() => {
     const result: t.FlatConfigMap = {};
     for (const [k, v] of Object.entries(editedValues)) {
-      result[k] = deepSerializeKVPairs(v);
+      result[k] = stripSecretPreviewValues(deepSerializeKVPairs(v), k, schemaPathSet);
     }
     return result;
-  }, [editedValues]);
+  }, [editedValues, schemaPathSet]);
 
   const originalValuesForDialog = useMemo(() => {
     const baseline = isEditingScope ? scopeBaseline : flatBaseline;
@@ -685,10 +685,11 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
           ? (current as t.ConfigValue[])[Number(seg)]
           : (current as Record<string, t.ConfigValue>)[seg];
       }
-      if (current !== undefined) result[path] = current;
+      if (current !== undefined)
+        result[path] = stripSecretPreviewValues(current, path, schemaPathSet);
     }
     return result;
-  }, [editedValues, flatBaseline, isEditingScope, scopeBaseline, configValues]);
+  }, [editedValues, flatBaseline, isEditingScope, scopeBaseline, configValues, schemaPathSet]);
 
   const [importSuccessMessage, setImportSuccessMessage] = useState<string | null>(null);
 
