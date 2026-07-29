@@ -32,7 +32,7 @@ import { ListField } from './fields/ListField';
 import { CodeField } from './fields/CodeField';
 import { ConfigRow } from './ConfigRow';
 import { useLocalize } from '@/hooks';
-import { cn, getSecretDisplayValue } from '@/utils';
+import { cn, getSecretPreviewValue } from '@/utils';
 
 function formatDefault(value: t.ConfigValue): string | null {
   if (value === undefined || value === null) return null;
@@ -176,7 +176,7 @@ export function SingleFieldRenderer({
   schemaDefaults,
   showConfiguredOnly,
   isSoleField,
-  secretDisplayValue,
+  secretPreviewValue,
   editSessionId,
 }: t.SingleFieldRendererProps) {
   const localize = useLocalize();
@@ -366,7 +366,7 @@ export function SingleFieldRenderer({
     const stringValue = typeof currentValue === 'string' ? currentValue : '';
     const baselineEmpty = typeof value !== 'string' || value === '';
     const maskedSecret =
-      secretDisplayValue != null && baselineEmpty && !isPendingReset ? secretDisplayValue : null;
+      secretPreviewValue != null && baselineEmpty && !isPendingReset ? secretPreviewValue : null;
 
     if (maskedSecret != null) {
       const control = (
@@ -1343,7 +1343,7 @@ export function FieldRenderer({
             schemaDefaults={schemaDefaults}
             showConfiguredOnly={showConfiguredOnly}
             isSoleField={false}
-            secretDisplayValue={getSecretDisplayValue(values, group.field.key)}
+            secretPreviewValue={getSecretPreviewValue(values, group.field.key)}
             editSessionId={editSessionId}
           />
         );

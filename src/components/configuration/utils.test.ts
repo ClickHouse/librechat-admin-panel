@@ -429,7 +429,7 @@ describe('buildSavePayload — masked secrets never reach the backend', () => {
     'speech.tts.openai.model',
   ]);
   const config = {
-    ocr: { displayApiKey: 'sk-mist...4321', baseURL: 'https://ocr.example' },
+    ocr: { apiKeyPreview: 'sk-mist...4321', baseURL: 'https://ocr.example' },
   };
   const baseline = flattenObject(config);
   const noIntermediates = new Set<string>();
@@ -460,8 +460,8 @@ describe('buildSavePayload — masked secrets never reach the backend', () => {
 
   it('a display companion leaf path never survives as a save entry', () => {
     const { saves } = buildSavePayload(
-      new Set(['ocr.displayApiKey']),
-      { 'ocr.displayApiKey': 'sk-mist...4321' },
+      new Set(['ocr.apiKeyPreview']),
+      { 'ocr.apiKeyPreview': 'sk-mist...4321' },
       schemaPaths,
     );
     expect(saves).toEqual([]);
@@ -469,7 +469,7 @@ describe('buildSavePayload — masked secrets never reach the backend', () => {
 
   it('display companions nested in object values are stripped', () => {
     const edited = {
-      'speech.tts.openai': { displayApiKey: 'sk-abc...1111', model: 'tts-1' },
+      'speech.tts.openai': { apiKeyPreview: 'sk-abc...1111', model: 'tts-1' },
     };
     const { saves } = buildSavePayload(new Set(['speech.tts.openai']), edited, schemaPaths);
     expect(saves).toEqual([{ fieldPath: 'speech.tts.openai', value: { model: 'tts-1' } }]);

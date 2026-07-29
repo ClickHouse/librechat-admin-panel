@@ -25,9 +25,9 @@ import {
   normalizeImportConfig,
   hasConfigCapability,
   getTabsWithPermission,
-  mapSecretDisplayPaths,
-  secretPathForDisplayPath,
-  stripSecretDisplayValues,
+  mapSecretPreviewPaths,
+  secretPathForPreviewPath,
+  stripSecretPreviewValues,
   notifySuccess,
   notifyError,
 } from '@/utils';
@@ -138,12 +138,12 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
     if (dbOverrides) {
       for (const p of Object.keys(flattenObject(dbOverrides))) paths.add(p);
     }
-    return mapSecretDisplayPaths(paths, schemaPathSet);
+    return mapSecretPreviewPaths(paths, schemaPathSet);
   }, [configuredFromBase, dbOverrides, schemaPathSet]);
 
   const dbOverridePaths = useMemo(() => {
     if (!dbOverrides) return new Set<string>();
-    return mapSecretDisplayPaths(Object.keys(flattenObject(dbOverrides)), schemaPathSet);
+    return mapSecretPreviewPaths(Object.keys(flattenObject(dbOverrides)), schemaPathSet);
   }, [dbOverrides, schemaPathSet]);
 
   const baseRecordKeys = useMemo(() => {
@@ -295,12 +295,12 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
 
   const scopeConfiguredPaths = useMemo(() => {
     if (!scopeChangedPaths) return new Set<string>();
-    return mapSecretDisplayPaths(scopeChangedPaths, schemaPathSet);
+    return mapSecretPreviewPaths(scopeChangedPaths, schemaPathSet);
   }, [scopeChangedPaths, schemaPathSet]);
 
   const scopeChangedPathsMapped = useMemo(() => {
     if (!scopeChangedPaths) return null;
-    return Array.from(mapSecretDisplayPaths(scopeChangedPaths, schemaPathSet));
+    return Array.from(mapSecretPreviewPaths(scopeChangedPaths, schemaPathSet));
   }, [scopeChangedPaths, schemaPathSet]);
 
   const activeConfiguredPaths = isEditingScope ? scopeConfiguredPaths : configuredPaths;
@@ -684,11 +684,11 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
       const entries = Object.entries(flat)
         .filter(
           ([fieldPath, value]) =>
-            value != null && secretPathForDisplayPath(fieldPath, schemaPathSet) == null,
+            value != null && secretPathForPreviewPath(fieldPath, schemaPathSet) == null,
         )
         .map(([fieldPath, value]) => ({
           fieldPath,
-          value: stripSecretDisplayValues(value, fieldPath, schemaPathSet),
+          value: stripSecretPreviewValues(value, fieldPath, schemaPathSet),
         }));
       await bulkSaveProfileValuesFn({
         data: {

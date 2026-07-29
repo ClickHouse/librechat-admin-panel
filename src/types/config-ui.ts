@@ -205,8 +205,8 @@ export interface SingleFieldRendererProps {
   schemaDefaults?: FlatConfigMap;
   showConfiguredOnly?: boolean;
   isSoleField?: boolean;
-  /** Masked display of a set-but-redacted secret, from the sibling display companion. */
-  secretDisplayValue?: string;
+  /** Masked preview of a set-but-redacted secret, from the sibling `<field>Preview` companion. */
+  secretPreviewValue?: string;
   /**
    * Bumped by the parent on Discard, a successful save, a confirmed scope
    * change, or a reset-to-default success — every bulk `editedValues`/

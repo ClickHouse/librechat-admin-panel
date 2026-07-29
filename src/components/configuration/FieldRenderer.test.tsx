@@ -427,7 +427,7 @@ describe('SingleFieldRenderer onChange interactions', () => {
 
 describe('masked secret fields', () => {
   const secretFields = [createField({ key: 'apiKey', type: 'string', path: 'ocr.apiKey' })];
-  const maskedParent = { displayApiKey: 'sk-mist...4321' };
+  const maskedParent = { apiKeyPreview: 'sk-mist...4321' };
 
   const renderMasked = (onChange = noop, extra: Partial<t.FieldRendererProps> = {}) =>
     render(

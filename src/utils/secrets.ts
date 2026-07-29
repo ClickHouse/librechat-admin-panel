@@ -1,97 +1,97 @@
 import type * as t from '@/types';
 
-const DISPLAY_KEY_RE = /^display([A-Z].*)$/;
+const PREVIEW_KEY_RE = /^(.+)Preview$/;
 
-function secretKeyForDisplayKey(key: string): string | null {
-  const match = DISPLAY_KEY_RE.exec(key);
+function secretKeyForPreviewKey(key: string): string | null {
+  const match = PREVIEW_KEY_RE.exec(key);
   if (!match) return null;
-  return match[1].charAt(0).toLowerCase() + match[1].slice(1);
+  return match[1];
 }
 
-/** Display companion key for a secret field key (`apiKey` → `displayApiKey`). */
-export function toSecretDisplayKey(key: string): string {
-  return `display${key.charAt(0).toUpperCase()}${key.slice(1)}`;
+/** Masked-preview companion key for a secret field key (`apiKey` → `apiKeyPreview`). */
+export function toSecretPreviewKey(key: string): string {
+  return `${key}Preview`;
 }
 
 /**
- * Masked display value (e.g. `sk-mist...4321`) for a redacted secret field,
- * read from the sibling display companion the backend returns when a secret
+ * Masked preview value (e.g. `sk-mist...4321`) for a redacted secret field,
+ * read from the sibling preview companion the backend returns when a secret
  * is set. Returns undefined when the field has no set-and-hidden secret.
  */
-export function getSecretDisplayValue(parentValue: t.ConfigValue, key: string): string | undefined {
+export function getSecretPreviewValue(parentValue: t.ConfigValue, key: string): string | undefined {
   if (!parentValue || typeof parentValue !== 'object' || Array.isArray(parentValue)) {
     return undefined;
   }
-  const sibling = (parentValue as Record<string, t.ConfigValue>)[toSecretDisplayKey(key)];
+  const sibling = (parentValue as Record<string, t.ConfigValue>)[toSecretPreviewKey(key)];
   return typeof sibling === 'string' && sibling !== '' ? sibling : undefined;
 }
 
 /**
- * Real secret path for a display companion path (`ocr.displayApiKey` →
+ * Real secret path for a preview companion path (`ocr.apiKeyPreview` →
  * `ocr.apiKey`). Anchored to known schema leaf paths so dynamic record keys
- * that merely look display-shaped never match.
+ * that merely look preview-shaped never match.
  */
-export function secretPathForDisplayPath(
+export function secretPathForPreviewPath(
   path: string,
   schemaPaths: ReadonlySet<string>,
 ): string | null {
   const lastDot = path.lastIndexOf('.');
-  const realKey = secretKeyForDisplayKey(lastDot === -1 ? path : path.slice(lastDot + 1));
+  const realKey = secretKeyForPreviewKey(lastDot === -1 ? path : path.slice(lastDot + 1));
   if (!realKey) return null;
   const realPath = lastDot === -1 ? realKey : `${path.slice(0, lastDot + 1)}${realKey}`;
   return schemaPaths.has(realPath) ? realPath : null;
 }
 
 /**
- * Replaces display companion paths with their real secret paths so a redacted
+ * Replaces preview companion paths with their real secret paths so a redacted
  * secret still counts as configured/overridden for indicator and reset logic.
  */
-export function mapSecretDisplayPaths(
+export function mapSecretPreviewPaths(
   paths: Iterable<string>,
   schemaPaths: ReadonlySet<string>,
 ): Set<string> {
   const result = new Set<string>();
   for (const path of paths) {
-    result.add(secretPathForDisplayPath(path, schemaPaths) ?? path);
+    result.add(secretPathForPreviewPath(path, schemaPaths) ?? path);
   }
   return result;
 }
 
 /**
- * Deep-removes display companion strings from a value before submission. The
- * backend rejects writes to display paths, and a masked display value must
+ * Deep-removes preview companion strings from a value before submission. The
+ * backend rejects writes to preview paths, and a masked preview value must
  * never round-trip as if it were a real secret.
  */
-export function stripSecretDisplayValues(
+export function stripSecretPreviewValues(
   value: t.ConfigValue,
   basePath: string,
   schemaPaths: ReadonlySet<string>,
 ): t.ConfigValue {
   if (Array.isArray(value)) {
-    return value.map((entry) => stripSecretDisplayValues(entry, basePath, schemaPaths));
+    return value.map((entry) => stripSecretPreviewValues(entry, basePath, schemaPaths));
   }
   if (!value || typeof value !== 'object') return value;
   const result: Record<string, t.ConfigValue> = {};
   for (const [key, child] of Object.entries(value as Record<string, t.ConfigValue>)) {
     const childPath = basePath ? `${basePath}.${key}` : key;
-    if (typeof child === 'string' && secretPathForDisplayPath(childPath, schemaPaths) != null) {
+    if (typeof child === 'string' && secretPathForPreviewPath(childPath, schemaPaths) != null) {
       continue;
     }
-    result[key] = stripSecretDisplayValues(child, childPath, schemaPaths);
+    result[key] = stripSecretPreviewValues(child, childPath, schemaPaths);
   }
   return result;
 }
 
 /**
- * Drops schema fields that are display companions of a sibling secret field
- * (`displayApiKey` next to `apiKey`) so they never render as editable inputs.
+ * Drops schema fields that are preview companions of a sibling secret field
+ * (`apiKeyPreview` next to `apiKey`) so they never render as editable inputs.
  * Operates on a single field level; extraction applies it per level.
  */
-export function filterSecretDisplayFields(fields: t.SchemaField[]): t.SchemaField[] {
+export function filterSecretPreviewFields(fields: t.SchemaField[]): t.SchemaField[] {
   const keys = new Set(fields.map((f) => f.key));
   return fields.filter((field) => {
     if (field.type !== 'string') return true;
-    const realKey = secretKeyForDisplayKey(field.key);
+    const realKey = secretKeyForPreviewKey(field.key);
     return realKey == null || !keys.has(realKey);
   });
 }

@@ -51,7 +51,7 @@ describe('ProvidersRenderer', () => {
     render(
       <ProvidersRenderer
         fields={providerFields}
-        parentValue={{ openAI: { displayApiKey: 'sk-test...1234' } }}
+        parentValue={{ openAI: { apiKeyPreview: 'sk-test...1234' } }}
         parentPath="endpoints"
         getValue={getValue}
         onChange={noop}
@@ -64,7 +64,7 @@ describe('ProvidersRenderer', () => {
     render(
       <ProvidersRenderer
         fields={providerFields}
-        parentValue={{ openAI: { displayApiKey: 'sk-test...1234' } }}
+        parentValue={{ openAI: { apiKeyPreview: 'sk-test...1234' } }}
         parentPath="endpoints"
         getValue={getValue}
         onChange={noop}

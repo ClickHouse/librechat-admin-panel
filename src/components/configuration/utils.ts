@@ -1,5 +1,5 @@
 import type * as t from '@/types';
-import { deepSerializeKVPairs, secretPathForDisplayPath, stripSecretDisplayValues } from '@/utils';
+import { deepSerializeKVPairs, secretPathForPreviewPath, stripSecretPreviewValues } from '@/utils';
 
 const INDEXED_ARRAY_PATH_RE = /^(.+)\.(\d+)$/;
 
@@ -17,11 +17,11 @@ export function buildSavePayload(
   const touched = [...touchedPaths].filter((p) => p in editedValues);
   const saves = touched
     .filter(
-      (p) => editedValues[p] !== undefined && secretPathForDisplayPath(p, schemaPaths) == null,
+      (p) => editedValues[p] !== undefined && secretPathForPreviewPath(p, schemaPaths) == null,
     )
     .map((p) => ({
       fieldPath: p,
-      value: stripSecretDisplayValues(deepSerializeKVPairs(editedValues[p]), p, schemaPaths),
+      value: stripSecretPreviewValues(deepSerializeKVPairs(editedValues[p]), p, schemaPaths),
     }));
   const resets = touched.filter((p) => editedValues[p] === undefined);
   return { touched, saves, resets };
