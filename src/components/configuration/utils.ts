@@ -3,12 +3,6 @@ import { deepSerializeKVPairs, secretPathForDisplayPath, stripSecretDisplayValue
 
 const INDEXED_ARRAY_PATH_RE = /^(.+)\.(\d+)$/;
 
-export interface SavePayload {
-  touched: string[];
-  saves: Array<{ fieldPath: string; value: t.ConfigValue }>;
-  resets: string[];
-}
-
 /**
  * Builds the save payload from touched edits. Only admin-touched paths are
  * submitted, secret display companion paths are dropped, and display
@@ -19,7 +13,7 @@ export function buildSavePayload(
   touchedPaths: ReadonlySet<string>,
   editedValues: t.FlatConfigMap,
   schemaPaths: ReadonlySet<string>,
-): SavePayload {
+): t.SavePayload {
   const touched = [...touchedPaths].filter((p) => p in editedValues);
   const saves = touched
     .filter(

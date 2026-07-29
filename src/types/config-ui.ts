@@ -336,3 +336,9 @@ export interface SectionHeaderProps {
   subtitle?: ReactNode;
   children?: ReactNode;
 }
+
+export interface SavePayload {
+  touched: string[];
+  saves: Array<{ fieldPath: string; value: ConfigValue }>;
+  resets: string[];
+}
