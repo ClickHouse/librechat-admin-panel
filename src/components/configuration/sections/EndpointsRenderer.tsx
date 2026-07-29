@@ -487,6 +487,7 @@ function ProviderSection({
   configuredPaths,
   dbOverridePaths,
   touchedPaths,
+  pendingResets,
   schemaDefaults,
   showConfiguredOnly,
   previewMode,
@@ -495,6 +496,7 @@ function ProviderSection({
   resolvedValues,
   onProfileChange,
   showChangedOnly,
+  editSessionId,
 }: { field: t.SchemaField } & SharedProps & { parentPath: string }) {
   const localize = useLocalize();
 
@@ -537,6 +539,7 @@ function ProviderSection({
     configuredPaths,
     dbOverridePaths,
     touchedPaths,
+    pendingResets,
     schemaDefaults,
     showConfiguredOnly,
     previewMode,
@@ -545,6 +548,7 @@ function ProviderSection({
     resolvedValues,
     onProfileChange,
     showChangedOnly,
+    editSessionId,
   };
 
   const title = (
@@ -677,6 +681,7 @@ export function ProvidersRenderer(props: t.FieldRendererProps) {
     configuredPaths,
     dbOverridePaths,
     touchedPaths,
+    pendingResets,
     schemaDefaults,
     showConfiguredOnly,
     previewMode,
@@ -685,6 +690,7 @@ export function ProvidersRenderer(props: t.FieldRendererProps) {
     resolvedValues,
     onProfileChange,
     showChangedOnly,
+    editSessionId,
   } = props;
 
   // Named provider objects (openAI, anthropic, …)
@@ -709,6 +715,7 @@ export function ProvidersRenderer(props: t.FieldRendererProps) {
     configuredPaths,
     dbOverridePaths,
     touchedPaths,
+    pendingResets,
     schemaDefaults,
     showConfiguredOnly,
     previewMode,
@@ -717,6 +724,7 @@ export function ProvidersRenderer(props: t.FieldRendererProps) {
     resolvedValues,
     onProfileChange,
     showChangedOnly,
+    editSessionId,
   };
 
   // In showConfiguredOnly mode, hide providers with no configured descendants
