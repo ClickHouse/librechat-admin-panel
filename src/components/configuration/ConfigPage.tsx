@@ -218,8 +218,8 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
         if (!window.confirm(localize('com_config_unsaved_leave'))) return;
         setEditedValues({});
         setTouchedPaths(new Set());
-        setEditSessionId((id) => id + 1);
       }
+      setEditSessionId((id) => id + 1);
       setConfirmSaveOpen(false);
       setSelectedScope(newSelection);
       const scopeId =
