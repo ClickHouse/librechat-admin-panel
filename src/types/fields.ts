@@ -132,6 +132,8 @@ export interface ArrayObjectFieldProps {
   renderFields: CollectionRenderFields;
   /** When set, each entry card gets an id of `{entryIdPrefix}-{index}` for TOC scroll targets. */
   entryIdPrefix?: string;
+  /** See `SingleFieldRendererProps.editSessionId`. Forwarded to `renderFields`. */
+  editSessionId?: number;
 }
 
 export interface RecordObjectFieldProps {
@@ -144,6 +146,8 @@ export interface RecordObjectFieldProps {
   /** Ref that gets populated with a function to open the add-key input. */
   addTriggerRef?: React.MutableRefObject<(() => void) | null>;
   renderFields: CollectionRenderFields;
+  /** See `SingleFieldRendererProps.editSessionId`. Forwarded to `renderFields`. */
+  editSessionId?: number;
 }
 
 export type CollectionRenderFields = (
@@ -153,6 +157,8 @@ export type CollectionRenderFields = (
   onChange: (path: string, value: ConfigValue) => void,
   /** Optional ref populated with a trigger to open the "add field" dropdown. */
   addFieldTriggerRef?: React.MutableRefObject<(() => void) | null>,
+  /** See `SingleFieldRendererProps.editSessionId`. */
+  editSessionId?: number,
 ) => React.ReactNode;
 
 export interface ObjectEntryCardProps {
@@ -166,6 +172,8 @@ export interface ObjectEntryCardProps {
   disabled?: boolean;
   defaultExpanded?: boolean;
   renderFields: CollectionRenderFields;
+  /** See `SingleFieldRendererProps.editSessionId`. Forwarded to `renderFields`. */
+  editSessionId?: number;
 }
 
 export interface SwitchObjectFieldProps {

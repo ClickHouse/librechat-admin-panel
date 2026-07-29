@@ -53,6 +53,7 @@ function ArrayObjectNestedGroup({
   onChange,
   disabled,
   isSoleField,
+  editSessionId,
 }: {
   fieldId: string;
   fieldLabel: string;
@@ -62,6 +63,7 @@ function ArrayObjectNestedGroup({
   onChange: (path: string, value: t.ConfigValue) => void;
   disabled?: boolean;
   isSoleField?: boolean;
+  editSessionId?: number;
 }) {
   const items = Array.isArray(currentValue) ? currentValue : [];
   const addTriggerRef = useRef<(() => void) | null>(null);
@@ -83,6 +85,7 @@ function ArrayObjectNestedGroup({
       hideAddButton
       addTriggerRef={addTriggerRef}
       renderFields={renderCollectionEntryFields}
+      editSessionId={editSessionId}
     />
   );
   if (isSoleField) return arrayField;
@@ -113,6 +116,7 @@ function RecordObjectNestedGroup({
   onChange,
   disabled,
   isSoleField,
+  editSessionId,
 }: {
   fieldId: string;
   fieldLabel: string;
@@ -123,6 +127,7 @@ function RecordObjectNestedGroup({
   onChange: (path: string, value: t.ConfigValue) => void;
   disabled?: boolean;
   isSoleField?: boolean;
+  editSessionId?: number;
 }) {
   const addTriggerRef = useRef<(() => void) | null>(null);
   const handleAdd = disabled ? undefined : () => addTriggerRef.current?.();
@@ -137,6 +142,7 @@ function RecordObjectNestedGroup({
       allowPrimitiveValues={field.recordValueAllowsPrimitive}
       addTriggerRef={addTriggerRef}
       renderFields={renderCollectionEntryFields}
+      editSessionId={editSessionId}
     />
   );
   if (isSoleField) return recordField;
@@ -297,6 +303,7 @@ export function SingleFieldRenderer({
         onChange={onChange}
         disabled={disabled}
         isSoleField={isSoleField}
+        editSessionId={editSessionId}
       />
     );
   }
@@ -317,6 +324,7 @@ export function SingleFieldRenderer({
         onChange={onChange}
         disabled={disabled}
         isSoleField={isSoleField}
+        editSessionId={editSessionId}
       />
     );
   }
@@ -742,6 +750,7 @@ export function renderCollectionEntryFields(
   parentPath: string,
   onChange: (path: string, value: t.ConfigValue) => void,
   addFieldTriggerRef?: React.MutableRefObject<(() => void) | null>,
+  editSessionId?: number,
 ): ReactNode {
   return (
     <InlineFieldRenderer
@@ -750,6 +759,7 @@ export function renderCollectionEntryFields(
       parentPath={parentPath}
       onChange={onChange}
       addFieldTriggerRef={addFieldTriggerRef}
+      editSessionId={editSessionId}
     />
   );
 }
@@ -776,6 +786,7 @@ function InlineFieldRenderer({
   disabled,
   addFieldTriggerRef,
   onHiddenFieldsChange,
+  editSessionId,
 }: {
   fields: t.SchemaField[];
   parentValue: t.ConfigValue;
@@ -784,6 +795,7 @@ function InlineFieldRenderer({
   disabled?: boolean;
   addFieldTriggerRef?: React.MutableRefObject<(() => void) | null>;
   onHiddenFieldsChange?: (hasHidden: boolean) => void;
+  editSessionId?: number;
 }) {
   const localize = useLocalize();
   const [addedKeys, setAddedKeys] = useState<Set<string>>(() => new Set());
@@ -865,7 +877,17 @@ function InlineFieldRenderer({
   return (
     <div className="flex flex-col gap-3">
       {visibleFields.map((field) =>
-        renderInlineField(field, parentValue, parentPath, onChange, localize, disabled),
+        renderInlineField(
+          field,
+          parentValue,
+          parentPath,
+          onChange,
+          localize,
+          disabled,
+          undefined,
+          undefined,
+          editSessionId,
+        ),
       )}
       {!disabled && hiddenFields.length > 0 && showDropdown && (
         <AddFieldDropdown
@@ -996,6 +1018,8 @@ export function renderInlineField(
   collectionRenderOverrides?: Record<string, t.CollectionRenderFields>,
   /** When true, non-optional fields show a required indicator (*). */
   showRequired?: boolean,
+  /** See `SingleFieldRendererProps.editSessionId`. */
+  editSessionId?: number,
 ): ReactNode {
   const values =
     typeof parentValue === 'object' && parentValue !== null && !Array.isArray(parentValue)
@@ -1088,6 +1112,7 @@ export function renderInlineField(
       return (
         <InlineRow key={field.key} label={fieldLabel} fieldId={fieldId} required={required}>
           <SecretField
+            key={`${fieldId}-${editSessionId ?? 0}`}
             id={fieldId}
             value={stringValue}
             maskedValue={maskedSecret}
@@ -1153,6 +1178,7 @@ export function renderInlineField(
           onChange={(v) => onChange(field.key, v)}
           disabled={disabled}
           renderFields={renderFn}
+          editSessionId={editSessionId}
         />
       </CollectionRow>
     );
@@ -1170,6 +1196,7 @@ export function renderInlineField(
           disabled={disabled}
           allowPrimitiveValues={field.recordValueAllowsPrimitive}
           renderFields={renderFn}
+          editSessionId={editSessionId}
         />
       </CollectionRow>
     );

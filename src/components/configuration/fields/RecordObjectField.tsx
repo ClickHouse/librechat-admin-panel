@@ -14,6 +14,7 @@ export function RecordObjectField({
   allowPrimitiveValues,
   addTriggerRef,
   renderFields,
+  editSessionId,
 }: t.RecordObjectFieldProps) {
   const localize = useLocalize();
   const [showAddInput, setShowAddInput] = useState(false);
@@ -101,6 +102,7 @@ export function RecordObjectField({
           disabled={disabled}
           defaultExpanded={key === justAddedKey}
           renderFields={renderFields}
+          editSessionId={editSessionId}
         />
       ))}
       {entries.length === 0 && !showAddInput && (

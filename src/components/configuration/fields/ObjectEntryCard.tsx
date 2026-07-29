@@ -17,6 +17,7 @@ export function ObjectEntryCard({
   disabled,
   defaultExpanded = false,
   renderFields,
+  editSessionId,
 }: t.ObjectEntryCardProps) {
   const localize = useLocalize();
   const [isExpanded, setIsExpanded] = useState(defaultExpanded);
@@ -31,7 +32,6 @@ export function ObjectEntryCard({
   useEffect(() => {
     if (isExpanded && !hasEverExpanded) setHasEverExpanded(true);
   }, [isExpanded, hasEverExpanded]);
-
 
   // Track whether renderFields registered an addFieldTrigger.
   // Runs every render because the ref is populated by children after mount.
@@ -224,7 +224,14 @@ export function ObjectEntryCard({
                 )}
                 {!isPrimitive(value) &&
                   fields.length > 0 &&
-                  renderFields(fields, value, entryKey, handleFieldChange, addFieldTriggerRef)}
+                  renderFields(
+                    fields,
+                    value,
+                    entryKey,
+                    handleFieldChange,
+                    addFieldTriggerRef,
+                    editSessionId,
+                  )}
                 {!isPrimitive(value) && fields.length === 0 && (
                   <CodeField
                     id={`entry-${entryKey}`}

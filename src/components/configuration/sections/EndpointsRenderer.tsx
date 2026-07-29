@@ -128,6 +128,7 @@ function flattenGroupFields(
   localize: (key: string, interpolation?: Record<string, string | number>) => string,
   disabled?: boolean,
   collectionRenderOverrides?: Record<string, t.CollectionRenderFields>,
+  editSessionId?: number,
 ): ReactNode[] {
   const values =
     typeof parentValue === 'object' && parentValue !== null && !Array.isArray(parentValue)
@@ -155,6 +156,7 @@ function flattenGroupFields(
             disabled,
             collectionRenderOverrides,
             true,
+            editSessionId,
           ),
         );
       }
@@ -169,6 +171,7 @@ function flattenGroupFields(
           disabled,
           collectionRenderOverrides,
           true,
+          editSessionId,
         ),
       );
     }
@@ -185,6 +188,7 @@ function FieldGroup({
   disabled,
   defaultExpanded,
   collectionRenderOverrides,
+  editSessionId,
 }: {
   labelKey: string;
   fields: t.SchemaField[];
@@ -194,6 +198,7 @@ function FieldGroup({
   disabled?: boolean;
   defaultExpanded: boolean;
   collectionRenderOverrides?: Record<string, t.CollectionRenderFields>;
+  editSessionId?: number;
 }) {
   const localize = useLocalize();
   const { isExpanded, hasEverExpanded, sectionRef, toggle } = useCollapsibleSection({
@@ -236,6 +241,7 @@ function FieldGroup({
             localize,
             disabled,
             collectionRenderOverrides,
+            editSessionId,
           )}
         </div>,
       )}
@@ -251,6 +257,7 @@ function GroupedFieldRenderer({
   onChange,
   disabled,
   collectionRenderOverrides,
+  editSessionId,
 }: {
   groupKey: string;
   fields: t.SchemaField[];
@@ -259,6 +266,7 @@ function GroupedFieldRenderer({
   onChange: (path: string, value: t.ConfigValue) => void;
   disabled?: boolean;
   collectionRenderOverrides?: Record<string, t.CollectionRenderFields>;
+  editSessionId?: number;
 }) {
   const groups = FIELD_GROUPS[groupKey];
   if (!groups) return null;
@@ -284,6 +292,7 @@ function GroupedFieldRenderer({
             disabled={disabled}
             defaultExpanded={group.defaultExpanded}
             collectionRenderOverrides={collectionRenderOverrides}
+            editSessionId={editSessionId}
           />
         );
       })}
@@ -297,6 +306,7 @@ function GroupedFieldRenderer({
           disabled={disabled}
           defaultExpanded={false}
           collectionRenderOverrides={collectionRenderOverrides}
+          editSessionId={editSessionId}
         />
       )}
     </div>
@@ -457,7 +467,7 @@ const COLLECTION_RENDER_OVERRIDES: Record<string, t.CollectionRenderFields> = {
  * into `ArrayObjectField` and `ObjectEntryCard`.
  */
 function makeGroupedEndpointFields(disabled?: boolean): t.CollectionRenderFields {
-  return (fields, parentValue, parentPath, onChange) => (
+  return (fields, parentValue, parentPath, onChange, _addFieldTriggerRef, editSessionId) => (
     <GroupedFieldRenderer
       groupKey="custom"
       fields={fields}
@@ -466,6 +476,7 @@ function makeGroupedEndpointFields(disabled?: boolean): t.CollectionRenderFields
       onChange={onChange}
       disabled={disabled}
       collectionRenderOverrides={COLLECTION_RENDER_OVERRIDES}
+      editSessionId={editSessionId}
     />
   );
 }
@@ -600,7 +611,7 @@ function ProviderSection({
 // ---------------------------------------------------------------------------
 
 export function CustomEndpointsRenderer(props: t.FieldRendererProps) {
-  const { fields, parentPath, parentValue, getValue, onChange, disabled } = props;
+  const { fields, parentPath, parentValue, getValue, onChange, disabled, editSessionId } = props;
   const localize = useLocalize();
   const [createOpen, setCreateOpen] = useState(false);
   const renderGroupedEndpointFields = useMemo(
@@ -650,6 +661,7 @@ export function CustomEndpointsRenderer(props: t.FieldRendererProps) {
           hideAddButton
           renderFields={renderGroupedEndpointFields}
           entryIdPrefix={`section-${path.split('.')[0]}-custom`}
+          editSessionId={editSessionId}
         />
       )}
       <CreateCustomEndpointDialog

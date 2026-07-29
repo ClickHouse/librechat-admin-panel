@@ -615,4 +615,44 @@ describe('renderInlineField masked secrets (collection entries)', () => {
     expect(input).not.toBeDisabled();
     expect(input).toHaveValue('');
   });
+
+  it('an untyped array-entry Replace click does not survive a bumped editSessionId', () => {
+    const entry = { name: 'first', apiKeyPreview: 'sk-mist...4321' };
+    const { rerender } = render(
+      <>
+        {renderInlineField(
+          apiKeyField,
+          entry,
+          'endpoints.custom.0',
+          vi.fn(),
+          localize,
+          undefined,
+          undefined,
+          undefined,
+          0,
+        )}
+      </>,
+    );
+    fireEvent.click(screen.getByText('com_config_secret_replace'));
+    expect(screen.getByRole('textbox')).not.toBeDisabled();
+
+    rerender(
+      <>
+        {renderInlineField(
+          apiKeyField,
+          entry,
+          'endpoints.custom.0',
+          vi.fn(),
+          localize,
+          undefined,
+          undefined,
+          undefined,
+          1,
+        )}
+      </>,
+    );
+
+    expect(screen.getByDisplayValue('sk-mist...4321')).toBeDisabled();
+    expect(screen.getByText('com_config_secret_replace')).toBeInTheDocument();
+  });
 });

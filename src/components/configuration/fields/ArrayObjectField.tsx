@@ -25,6 +25,7 @@ export function ArrayObjectField({
   addTriggerRef,
   renderFields,
   entryIdPrefix,
+  editSessionId,
 }: t.ArrayObjectFieldProps) {
   const localize = useLocalize();
   const items = Array.isArray(value) ? (value as t.ConfigValue[]) : [];
@@ -115,6 +116,7 @@ export function ArrayObjectField({
           disabled={disabled}
           defaultExpanded={keys[index] === expandedKeyRef.current}
           renderFields={renderFields}
+          editSessionId={editSessionId}
         />
       ))}
       {items.length === 0 && !hideAddButton && (
