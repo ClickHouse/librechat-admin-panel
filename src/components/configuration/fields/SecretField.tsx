@@ -1,10 +1,11 @@
 import { useState } from 'react';
+import { Icon } from '@clickhouse/click-ui';
 import type * as t from '@/types';
 import { TextField } from './TextField';
 import { useLocalize } from '@/hooks';
 
 const ACTION_BUTTON_CLASSES =
-  'inline-flex cursor-pointer items-center gap-0.5 text-[11px] text-(--cui-color-text-muted) transition-colors hover:text-(--cui-color-text-default)';
+  'inline-flex cursor-pointer items-center gap-1 rounded-md border border-(--cui-color-stroke-default) px-1.5 py-1 text-[11px] text-(--cui-color-text-muted) transition-colors hover:bg-(--cui-color-background-hover) hover:text-(--cui-color-text-default) focus-visible:outline-1 focus-visible:outline-(--cui-color-outline)';
 
 /**
  * Renders a secret that is set but redacted by the backend: a read-only masked
@@ -23,6 +24,7 @@ export function SecretField({
   const localize = useLocalize();
   const [replacing, setReplacing] = useState(false);
   const showInput = replacing || value !== '';
+  const fieldName = ariaProps['aria-label'] ?? id;
 
   if (!showInput) {
     return (
@@ -32,17 +34,17 @@ export function SecretField({
           value={maskedValue}
           onChange={() => undefined}
           disabled
-          aria-label={localize('com_a11y_secret_configured', {
-            name: ariaProps['aria-label'] ?? id,
-          })}
+          aria-label={localize('com_a11y_secret_configured', { name: fieldName })}
         />
         {!disabled && (
           <button
             type="button"
             onClick={() => setReplacing(true)}
+            aria-label={localize('com_a11y_secret_replace', { name: fieldName })}
             className={ACTION_BUTTON_CLASSES}
           >
-            {localize('com_config_secret_replace')}
+            <Icon name="pencil" size="sm" />
+            <span>{localize('com_config_secret_replace')}</span>
           </button>
         )}
       </div>
@@ -59,9 +61,11 @@ export function SecretField({
             setReplacing(false);
             onCancel();
           }}
+          aria-label={localize('com_a11y_secret_cancel_replace', { name: fieldName })}
           className={ACTION_BUTTON_CLASSES}
         >
-          {localize('com_ui_cancel')}
+          <Icon name="cross" size="sm" />
+          <span>{localize('com_ui_cancel')}</span>
         </button>
       )}
     </div>

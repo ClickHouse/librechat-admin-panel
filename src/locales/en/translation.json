@@ -1220,6 +1220,8 @@
   "com_config_pending_reset": "Pending reset",
   "com_config_secret_replace": "Replace",
   "com_a11y_secret_configured": "{{name}} is configured; value hidden",
+  "com_a11y_secret_replace": "Replace {{name}}",
+  "com_a11y_secret_cancel_replace": "Cancel replacing {{name}}",
   "com_config_validation_more": "...and {{count}} more",
   "com_scope_delete_error": "Failed to delete configuration",
   "com_kv_type_string": "abc",
