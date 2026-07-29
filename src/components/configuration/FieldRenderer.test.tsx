@@ -597,4 +597,22 @@ describe('renderInlineField masked secrets (collection entries)', () => {
     fireEvent.click(screen.getByText('com_ui_cancel'));
     expect(onChange).toHaveBeenCalledWith('apiKey', undefined);
   });
+
+  it('keeps a cleared array-entry replacement visible instead of showing the stale mask', () => {
+    render(
+      <>
+        {renderInlineField(
+          apiKeyField,
+          { name: 'first', apiKey: '', apiKeyPreview: 'sk-mist...4321' },
+          'endpoints.custom.0',
+          vi.fn(),
+          localize,
+        )}
+      </>,
+    );
+    expect(screen.queryByDisplayValue('sk-mist...4321')).not.toBeInTheDocument();
+    const input = screen.getByRole('textbox');
+    expect(input).not.toBeDisabled();
+    expect(input).toHaveValue('');
+  });
 });

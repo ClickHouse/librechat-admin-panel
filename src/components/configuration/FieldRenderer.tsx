@@ -1073,7 +1073,13 @@ export function renderInlineField(
   }
 
   if (controlType === 'text') {
-    const stringValue = typeof fieldValue === 'string' ? fieldValue : '';
+    // A defined string (including '') means this field has a queued edit for
+    // this entry; an absent/undefined value means it still matches baseline.
+    // Distinguishing on the raw value (not just whether it's empty) keeps a
+    // queued empty replacement visible across a remount, matching the
+    // top-level SingleFieldRenderer fix.
+    const hasPendingEdit = typeof fieldValue === 'string';
+    const stringValue = hasPendingEdit ? fieldValue : '';
     const secretPreviewValue = getSecretPreviewValue(values, field.key);
     const maskedSecret =
       secretPreviewValue != null && stringValue === '' ? secretPreviewValue : null;
@@ -1087,6 +1093,7 @@ export function renderInlineField(
             maskedValue={maskedSecret}
             onChange={(v) => onChange(field.key, v)}
             onCancel={() => onChange(field.key, undefined)}
+            hasPendingEdit={hasPendingEdit}
             disabled={disabled}
             aria-label={fieldLabel}
           />
