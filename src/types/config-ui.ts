@@ -62,6 +62,8 @@ export interface ConfigTabContentProps {
   editedValues: FlatConfigMap;
   onFieldChange: (path: string, value: ConfigValue) => void;
   onResetField?: (path: string) => void;
+  /** See `SingleFieldRendererProps.onDiscardField`. */
+  onDiscardField?: (path: string) => void;
   profileMap?: Record<string, string[]>;
   previewMode?: boolean;
   previewScope?: ConfigScope;
@@ -82,6 +84,8 @@ export interface ConfigTabContentProps {
   /** YAML-defined entry keys per section, keyed by parent path. */
   baseRecordKeys?: Record<string, Set<string>>;
   onValidationError?: (message: string) => void;
+  /** See `SingleFieldRendererProps.editSessionId`. */
+  editSessionId?: number;
 }
 
 export interface ConfigTableOfContentsProps {
@@ -189,6 +193,24 @@ export interface SingleFieldRendererProps {
   getValue: (path: string, fallback: ConfigValue) => ConfigValue;
   onChange: (path: string, value: ConfigValue) => void;
   onResetField?: (path: string) => void;
+  /**
+   * Removes `path` from `editedValues`/`touchedPaths` directly, bypassing
+   * the baseline-match diffing `onChange` goes through. Used by SecretField's
+   * Cancel: abandoning an in-progress replacement is never a real edit, so it
+   * must not be representable as a pending reset (`onChange(path, undefined)`)
+   * whenever a scope-resolved baseline happens to also read as empty.
+   */
+  onDiscardField?: (path: string) => void;
+  /**
+   * Source of truth for whether a secret field currently has a queued
+   * replacement (`SecretField`'s `hasPendingEdit`). Membership in this map,
+   * not `touchedPaths`, since a replacement typed then cleared back to a
+   * baseline that itself reads as an empty string gets removed from here by
+   * `applyConfigEdit`'s baseline-match diffing, while `touchedPaths` keeps
+   * the path forever — using the latter would keep showing an open, empty
+   * replace input for a field with nothing actually queued to save.
+   */
+  editedValues?: FlatConfigMap;
   disabled?: boolean;
   permissions?: ScopePermissions;
   onProfileChange?: () => void;
@@ -203,6 +225,16 @@ export interface SingleFieldRendererProps {
   schemaDefaults?: FlatConfigMap;
   showConfiguredOnly?: boolean;
   isSoleField?: boolean;
+  /** Masked preview of a set-but-redacted secret, from the sibling `<field>Preview` companion. */
+  secretPreviewValue?: string;
+  /**
+   * Bumped by the parent on Discard, a successful save, a confirmed scope
+   * change, or a reset-to-default success — every bulk `editedValues`/
+   * `touchedPaths` clear. Used as part of `SecretField`'s `key` so an
+   * in-progress (possibly untyped) replacement doesn't survive past the
+   * edit session that started it.
+   */
+  editSessionId?: number;
 }
 
 export interface FieldRendererProps {
@@ -212,6 +244,8 @@ export interface FieldRendererProps {
   getValue: (path: string, fallback: ConfigValue) => ConfigValue;
   onChange: (path: string, value: ConfigValue) => void;
   onResetField?: (path: string) => void;
+  /** See `SingleFieldRendererProps.onDiscardField`. */
+  onDiscardField?: (path: string) => void;
   editedValues?: FlatConfigMap;
   disabled?: boolean;
   profileMap?: Record<string, string[]>;
@@ -232,6 +266,8 @@ export interface FieldRendererProps {
   /** YAML-defined entry keys for the section being rendered. */
   yamlBaseKeys?: Set<string>;
   onValidationError?: (message: string) => void;
+  /** See `SingleFieldRendererProps.editSessionId`. */
+  editSessionId?: number;
 }
 
 export interface ImportYamlDialogProps {
@@ -333,4 +369,10 @@ export interface SectionHeaderProps {
   titleAdornment?: ReactNode;
   subtitle?: ReactNode;
   children?: ReactNode;
+}
+
+export interface SavePayload {
+  touched: string[];
+  saves: Array<{ fieldPath: string; value: ConfigValue }>;
+  resets: string[];
 }

@@ -25,12 +25,20 @@ import {
   normalizeImportConfig,
   hasConfigCapability,
   getTabsWithPermission,
+  mapSecretPreviewPaths,
+  secretPathForPreviewPath,
+  stripSecretPreviewValues,
   notifySuccess,
   notifyError,
 } from '@/utils';
 import { useLocalize, useHighlightRef, useActiveSection, useCapabilities } from '@/hooks';
 import { CONFIG_TABS, OTHER_TAB, SECTION_META, HIDDEN_SECTIONS } from './configMeta';
-import { applyConfigEdit, mergeIndexedArrayEdits, partitionScopeResetPaths } from './utils';
+import {
+  applyConfigEdit,
+  buildSavePayload,
+  mergeIndexedArrayEdits,
+  partitionScopeResetPaths,
+} from './utils';
 import { validateMcpCrossField } from './sections/McpServersRenderer';
 import { ScopeSelector, ScopeTriggerButton } from './ScopeSelector';
 import { StickyActionBar } from '@/components/shared';
@@ -117,6 +125,10 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
   const flatBaseline = useMemo(() => flattenObject(configValues ?? {}), [configValues]);
   const [editedValues, setEditedValues] = useState<t.FlatConfigMap>({});
   const [touchedPaths, setTouchedPaths] = useState<Set<string>>(() => new Set());
+  const [editSessionId, setEditSessionId] = useState(0);
+
+  const fieldPaths = useMemo(() => collectFieldPaths(schemaTree), [schemaTree]);
+  const schemaPathSet = useMemo(() => new Set(fieldPaths), [fieldPaths]);
 
   const configuredPaths = useMemo(() => {
     const paths = new Set<string>();
@@ -126,13 +138,13 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
     if (dbOverrides) {
       for (const p of Object.keys(flattenObject(dbOverrides))) paths.add(p);
     }
-    return paths;
-  }, [configuredFromBase, dbOverrides]);
+    return mapSecretPreviewPaths(paths, schemaPathSet);
+  }, [configuredFromBase, dbOverrides, schemaPathSet]);
 
   const dbOverridePaths = useMemo(() => {
     if (!dbOverrides) return new Set<string>();
-    return new Set(Object.keys(flattenObject(dbOverrides)));
-  }, [dbOverrides]);
+    return mapSecretPreviewPaths(Object.keys(flattenObject(dbOverrides)), schemaPathSet);
+  }, [dbOverrides, schemaPathSet]);
 
   const baseRecordKeys = useMemo(() => {
     const result: Record<string, Set<string>> = {};
@@ -207,6 +219,7 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
         setEditedValues({});
         setTouchedPaths(new Set());
       }
+      setEditSessionId((id) => id + 1);
       setConfirmSaveOpen(false);
       setSelectedScope(newSelection);
       const scopeId =
@@ -255,7 +268,6 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
   const editingScope: t.ConfigScope | undefined =
     selectedScope.type === 'SCOPE' ? selectedScope.scope : undefined;
 
-  const fieldPaths = useMemo(() => collectFieldPaths(schemaTree), [schemaTree]);
   const { data: profileMap = {} } = useQuery(profileMapOptions(fieldPaths));
 
   const handleProfileChange = useCallback(() => {
@@ -283,8 +295,13 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
 
   const scopeConfiguredPaths = useMemo(() => {
     if (!scopeChangedPaths) return new Set<string>();
-    return new Set(scopeChangedPaths);
-  }, [scopeChangedPaths]);
+    return mapSecretPreviewPaths(scopeChangedPaths, schemaPathSet);
+  }, [scopeChangedPaths, schemaPathSet]);
+
+  const scopeChangedPathsMapped = useMemo(() => {
+    if (!scopeChangedPaths) return null;
+    return Array.from(mapSecretPreviewPaths(scopeChangedPaths, schemaPathSet));
+  }, [scopeChangedPaths, schemaPathSet]);
 
   const activeConfiguredPaths = isEditingScope ? scopeConfiguredPaths : configuredPaths;
 
@@ -397,6 +414,28 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
     [scopeBaseline, baselineIntermediates, baselineContainerPaths],
   );
 
+  /**
+   * Removes `path` from `editedValues`/`touchedPaths` directly, bypassing
+   * `applyConfigEdit`'s baseline-match diffing. Abandoning an in-progress
+   * SecretField replacement (Cancel) is never a real edit — representing it
+   * as `onChange(path, undefined)` would mean the same thing as a real reset
+   * whenever a scope-resolved baseline happens to also read as empty.
+   */
+  const handleDiscardField = useCallback((path: string) => {
+    setEditedValues((prev) => {
+      if (!(path in prev)) return prev;
+      const next = { ...prev };
+      delete next[path];
+      return next;
+    });
+    setTouchedPaths((prev) => {
+      if (!prev.has(path)) return prev;
+      const next = new Set(prev);
+      next.delete(path);
+      return next;
+    });
+  }, []);
+
   const isDirty = Object.keys(editedValues).length > 0;
 
   const pendingResets = useMemo(() => {
@@ -422,11 +461,13 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
   const handleDiscard = useCallback(() => {
     setEditedValues({});
     setTouchedPaths(new Set());
+    setEditSessionId((id) => id + 1);
   }, []);
 
   const clearEdits = useCallback(() => {
     setEditedValues({});
     setTouchedPaths(new Set());
+    setEditSessionId((id) => id + 1);
     setConfirmSaveOpen(false);
     setSaving(false);
     setSaveError(null);
@@ -471,6 +512,7 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
       ]);
       setEditedValues({});
       setTouchedPaths(new Set());
+      setEditSessionId((id) => id + 1);
       setResettingBase(false);
       setResetBaseOpen(false);
       notifySuccess(localize('com_config_reset_base_success'));
@@ -496,7 +538,7 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
 
   const handleConfirmSave = useCallback(async () => {
     if (saving) return;
-    const touched = [...touchedPaths].filter((p) => p in editedValues);
+    const { touched, saves, resets } = buildSavePayload(touchedPaths, editedValues, schemaPathSet);
     if (touched.length === 0) return;
 
     /** Per-leaf saves can land an MCP entry in a transport state whose required siblings are missing (e.g. type=stdio with no command/args). Server-side per-field validation only sees one path at a time, so do the cross-field check here against the merged effective entry before any PATCH fires. Use baseActiveConfigValues so scope-mode edits validate against the scope-resolved baseline (where prior scope overrides supply some required fields) instead of the base config alone. */
@@ -532,13 +574,6 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
       }
     }
 
-    const saves = touched
-      .filter((p) => editedValues[p] !== undefined)
-      .map((p) => ({
-        fieldPath: p,
-        value: deepSerializeKVPairs(editedValues[p]),
-      }));
-    const resets = touched.filter((p) => editedValues[p] === undefined);
     const inheritedMcpKeys = (() => {
       const source = isEditingScope ? configValues?.mcpServers : undefined;
       if (source && typeof source === 'object' && !Array.isArray(source)) {
@@ -614,6 +649,7 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
   }, [
     touchedPaths,
     editedValues,
+    schemaPathSet,
     saving,
     isEditingScope,
     baseActiveConfigValues,
@@ -628,16 +664,19 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
   const serializedEditedValues = useMemo(() => {
     const result: t.FlatConfigMap = {};
     for (const [k, v] of Object.entries(editedValues)) {
-      result[k] = deepSerializeKVPairs(v);
+      result[k] = stripSecretPreviewValues(deepSerializeKVPairs(v), k, schemaPathSet);
     }
     return result;
-  }, [editedValues]);
+  }, [editedValues, schemaPathSet]);
 
   const originalValuesForDialog = useMemo(() => {
     const baseline = isEditingScope ? scopeBaseline : flatBaseline;
     const result: t.FlatConfigMap = { ...baseline };
     for (const path of Object.keys(editedValues)) {
-      if (path in result) continue;
+      if (path in result) {
+        result[path] = stripSecretPreviewValues(result[path], path, schemaPathSet);
+        continue;
+      }
       const segments = path.split('.');
       let current: t.ConfigValue = configValues;
       for (const seg of segments) {
@@ -649,10 +688,11 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
           ? (current as t.ConfigValue[])[Number(seg)]
           : (current as Record<string, t.ConfigValue>)[seg];
       }
-      if (current !== undefined) result[path] = current;
+      if (current !== undefined)
+        result[path] = stripSecretPreviewValues(current, path, schemaPathSet);
     }
     return result;
-  }, [editedValues, flatBaseline, isEditingScope, scopeBaseline, configValues]);
+  }, [editedValues, flatBaseline, isEditingScope, scopeBaseline, configValues, schemaPathSet]);
 
   const [importSuccessMessage, setImportSuccessMessage] = useState<string | null>(null);
 
@@ -668,8 +708,14 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
       const normalized = normalizeImportConfig(appConfig);
       const flat = flattenObject(normalized);
       const entries = Object.entries(flat)
-        .filter(([, value]) => value != null)
-        .map(([fieldPath, value]) => ({ fieldPath, value }));
+        .filter(
+          ([fieldPath, value]) =>
+            value != null && secretPathForPreviewPath(fieldPath, schemaPathSet) == null,
+        )
+        .map(([fieldPath, value]) => ({
+          fieldPath,
+          value: stripSecretPreviewValues(value, fieldPath, schemaPathSet),
+        }));
       await bulkSaveProfileValuesFn({
         data: {
           principalType: scope.principalType,
@@ -689,7 +735,7 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
         }),
       );
     },
-    [queryClient, localize, showImportSuccess],
+    [queryClient, localize, showImportSuccess, schemaPathSet],
   );
 
   const handleImport = useCallback(
@@ -700,10 +746,21 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
           notifyError(err.message);
         });
       } else {
-        importMutation.mutate(normalized, { onSuccess: () => showImportSuccess() });
+        const stripped = stripSecretPreviewValues(normalized, '', schemaPathSet) as Record<
+          string,
+          t.ConfigValue
+        >;
+        importMutation.mutate(stripped, { onSuccess: () => showImportSuccess() });
       }
     },
-    [isEditingScope, editingScope, importMutation, showImportSuccess, handleImportAsProfile],
+    [
+      isEditingScope,
+      editingScope,
+      importMutation,
+      showImportSuccess,
+      handleImportAsProfile,
+      schemaPathSet,
+    ],
   );
 
   const highlightRef = useHighlightRef(highlightField);
@@ -930,10 +987,11 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
               editedValues={editedValues}
               onFieldChange={handleFieldChange}
               onResetField={handleResetField}
+              onDiscardField={handleDiscardField}
               profileMap={profileMap}
               previewMode={false}
               previewScope={editingScope}
-              previewChangedPaths={scopeChangedPaths}
+              previewChangedPaths={scopeChangedPathsMapped}
               resolvedValues={scopeResolvedValues}
               permissions={permissions}
               onProfileChange={handleProfileChange}
@@ -949,6 +1007,7 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
               isEditingScope={isEditingScope}
               baseRecordKeys={baseRecordKeys}
               onValidationError={(message) => notifyError(message)}
+              editSessionId={editSessionId}
             />
           </div>
         </div>

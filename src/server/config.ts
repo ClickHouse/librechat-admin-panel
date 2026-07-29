@@ -17,6 +17,7 @@ import {
   requireAllSectionCapabilities,
 } from './capabilities';
 import { BASE_CONFIG_PRINCIPAL_ID } from './constants';
+import { filterSecretPreviewFields, stripSecretPreviewValues } from '@/utils';
 import { safeFieldPath } from './utils/validation';
 import { flattenObject } from '@/utils/format';
 import { apiFetch } from './utils/api';
@@ -357,7 +358,7 @@ export function extractSchemaTree(
     }
   }
 
-  return fields;
+  return filterSecretPreviewFields(fields);
 }
 
 export function flattenTree(fields: t.SchemaField[]): t.SchemaField[] {
@@ -930,6 +931,25 @@ export const baseConfigOptions = queryOptions({
   staleTime: 30_000,
 });
 
+let cachedSchemaPathSet: Set<string> | undefined;
+
+/**
+ * Index-free schema field paths (e.g. `endpoints.custom.apiKey`), memoized
+ * since the schema is static. `extractSchemaTree` bakes `[]`/`{}` markers
+ * into array/record element paths for its own tree-walking bookkeeping;
+ * strip them so paths match the plain dotted convention `secretPathForPreviewPath`
+ * and `stripSecretPreviewValues` expect.
+ */
+export function getSchemaPathSet(): Set<string> {
+  if (!cachedSchemaPathSet) {
+    const paths = flattenTree(extractSchemaTree(configSchema)).map((f) =>
+      f.path.replace(/\.(\[\]|\{\})/g, ''),
+    );
+    cachedSchemaPathSet = new Set(paths);
+  }
+  return cachedSchemaPathSet;
+}
+
 export function mergeIndexedArrayEntriesIntoBase(
   entries: Array<{ fieldPath: string; value: unknown }>,
   baseConfig: Record<string, t.ConfigValue>,
@@ -966,7 +986,12 @@ export function mergeIndexedArrayEntriesIntoBase(
     for (const [idx, value] of updates) {
       arr[idx] = value;
     }
-    rest.push({ fieldPath: arrayPath, value: arr });
+    const strippedArr = stripSecretPreviewValues(
+      arr as t.ConfigValue[],
+      arrayPath,
+      getSchemaPathSet(),
+    );
+    rest.push({ fieldPath: arrayPath, value: strippedArr });
     mergedPaths?.add(arrayPath);
   }
 

@@ -38,6 +38,7 @@ export function ConfigTabContent({
   editedValues,
   onFieldChange,
   onResetField,
+  onDiscardField,
   profileMap,
   previewMode,
   previewScope,
@@ -57,6 +58,7 @@ export function ConfigTabContent({
   isEditingScope,
   baseRecordKeys,
   onValidationError,
+  editSessionId,
 }: t.ConfigTabContentProps) {
   const localize = useLocalize();
   const fieldsDisabled = readOnly;
@@ -167,6 +169,7 @@ export function ConfigTabContent({
       getValue,
       onChange: onFieldChange,
       onResetField,
+      onDiscardField,
       editedValues,
       disabled: sectionDisabled,
       profileMap,
@@ -186,6 +189,7 @@ export function ConfigTabContent({
       isEditingScope,
       yamlBaseKeys: baseRecordKeys?.[dataKey],
       onValidationError,
+      editSessionId,
     };
     return (
       <>

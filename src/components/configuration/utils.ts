@@ -1,6 +1,31 @@
 import type * as t from '@/types';
+import { deepSerializeKVPairs, secretPathForPreviewPath, stripSecretPreviewValues } from '@/utils';
 
 const INDEXED_ARRAY_PATH_RE = /^(.+)\.(\d+)$/;
+
+/**
+ * Builds the save payload from touched edits. Only admin-touched paths are
+ * submitted, secret display companion paths are dropped, and display
+ * companion strings nested inside object values are stripped — a masked
+ * display value (`sk-mist...4321`) must never reach the backend as a value.
+ */
+export function buildSavePayload(
+  touchedPaths: ReadonlySet<string>,
+  editedValues: t.FlatConfigMap,
+  schemaPaths: ReadonlySet<string>,
+): t.SavePayload {
+  const touched = [...touchedPaths].filter((p) => p in editedValues);
+  const saves = touched
+    .filter(
+      (p) => editedValues[p] !== undefined && secretPathForPreviewPath(p, schemaPaths) == null,
+    )
+    .map((p) => ({
+      fieldPath: p,
+      value: stripSecretPreviewValues(deepSerializeKVPairs(editedValues[p]), p, schemaPaths),
+    }));
+  const resets = touched.filter((p) => editedValues[p] === undefined);
+  return { touched, saves, resets };
+}
 
 export function inferKVType(v: t.ConfigValue): t.KVValueType {
   if (typeof v === 'boolean') return 'boolean';

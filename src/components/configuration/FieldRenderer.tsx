@@ -24,6 +24,7 @@ import { renderCollapsible } from './renderCollapsible';
 import { TextareaField } from './fields/TextareaField';
 import { KeyValueField } from './fields/KeyValueField';
 import { NumberField } from './fields/NumberField';
+import { SecretField } from './fields/SecretField';
 import { ToggleField } from './fields/ToggleField';
 import { SelectField } from './fields/SelectField';
 import { TextField } from './fields/TextField';
@@ -31,7 +32,7 @@ import { ListField } from './fields/ListField';
 import { CodeField } from './fields/CodeField';
 import { ConfigRow } from './ConfigRow';
 import { useLocalize } from '@/hooks';
-import { cn } from '@/utils';
+import { cn, getSecretPreviewValue } from '@/utils';
 
 function formatDefault(value: t.ConfigValue): string | null {
   if (value === undefined || value === null) return null;
@@ -52,6 +53,7 @@ function ArrayObjectNestedGroup({
   onChange,
   disabled,
   isSoleField,
+  editSessionId,
 }: {
   fieldId: string;
   fieldLabel: string;
@@ -61,6 +63,7 @@ function ArrayObjectNestedGroup({
   onChange: (path: string, value: t.ConfigValue) => void;
   disabled?: boolean;
   isSoleField?: boolean;
+  editSessionId?: number;
 }) {
   const items = Array.isArray(currentValue) ? currentValue : [];
   const addTriggerRef = useRef<(() => void) | null>(null);
@@ -82,6 +85,7 @@ function ArrayObjectNestedGroup({
       hideAddButton
       addTriggerRef={addTriggerRef}
       renderFields={renderCollectionEntryFields}
+      editSessionId={editSessionId}
     />
   );
   if (isSoleField) return arrayField;
@@ -112,6 +116,7 @@ function RecordObjectNestedGroup({
   onChange,
   disabled,
   isSoleField,
+  editSessionId,
 }: {
   fieldId: string;
   fieldLabel: string;
@@ -122,6 +127,7 @@ function RecordObjectNestedGroup({
   onChange: (path: string, value: t.ConfigValue) => void;
   disabled?: boolean;
   isSoleField?: boolean;
+  editSessionId?: number;
 }) {
   const addTriggerRef = useRef<(() => void) | null>(null);
   const handleAdd = disabled ? undefined : () => addTriggerRef.current?.();
@@ -136,6 +142,7 @@ function RecordObjectNestedGroup({
       allowPrimitiveValues={field.recordValueAllowsPrimitive}
       addTriggerRef={addTriggerRef}
       renderFields={renderCollectionEntryFields}
+      editSessionId={editSessionId}
     />
   );
   if (isSoleField) return recordField;
@@ -161,6 +168,8 @@ export function SingleFieldRenderer({
   getValue,
   onChange,
   onResetField,
+  onDiscardField,
+  editedValues,
   disabled,
   permissions,
   onProfileChange,
@@ -175,6 +184,8 @@ export function SingleFieldRenderer({
   schemaDefaults,
   showConfiguredOnly,
   isSoleField,
+  secretPreviewValue,
+  editSessionId,
 }: t.SingleFieldRendererProps) {
   const localize = useLocalize();
   const controlType = getControlType(field);
@@ -186,6 +197,7 @@ export function SingleFieldRenderer({
   const isDbOverride = dbOverridePaths?.has(path);
   const isTouched = touchedPaths?.has(path);
   const isPendingReset = pendingResets?.has(path) ?? false;
+  const hasPendingEdit = editedValues ? path in editedValues : false;
   const defaultHint = schemaDefaults ? formatDefault(schemaDefaults[path]) : null;
 
   if (showConfiguredOnly && !isConfigured && !hasDescendant(path, configuredPaths)) return null;
@@ -291,6 +303,7 @@ export function SingleFieldRenderer({
         onChange={onChange}
         disabled={disabled}
         isSoleField={isSoleField}
+        editSessionId={editSessionId}
       />
     );
   }
@@ -311,6 +324,7 @@ export function SingleFieldRenderer({
         onChange={onChange}
         disabled={disabled}
         isSoleField={isSoleField}
+        editSessionId={editSessionId}
       />
     );
   }
@@ -361,6 +375,38 @@ export function SingleFieldRenderer({
 
   if (controlType === 'text') {
     const stringValue = typeof currentValue === 'string' ? currentValue : '';
+    const baselineEmpty = typeof value !== 'string' || value === '';
+    const maskedSecret =
+      secretPreviewValue != null && baselineEmpty && !isPendingReset ? secretPreviewValue : null;
+
+    if (maskedSecret != null) {
+      const control = (
+        <SecretField
+          key={`${fieldId}-${editSessionId ?? 0}`}
+          id={fieldId}
+          value={stringValue}
+          maskedValue={maskedSecret}
+          onChange={(v) => onChange(path, v)}
+          onCancel={() => onDiscardField?.(path)}
+          hasPendingEdit={hasPendingEdit}
+          disabled={disabled}
+          aria-label={fieldLabel}
+        />
+      );
+      if (isSoleField) return control;
+      return (
+        <ConfigRow
+          title={fieldLabel}
+          description={description}
+          disabled={disabled}
+          fieldId={fieldId}
+          {...rowProps}
+        >
+          {control}
+        </ConfigRow>
+      );
+    }
+
     const isMultiline = stringValue.includes('\n') || field.key.toLowerCase().includes('content');
 
     if (isMultiline) {
@@ -551,10 +597,7 @@ function BooleanChip({ value }: { value: boolean }) {
   const localize = useLocalize();
   return (
     <span
-      className={cn(
-        'boolean-chip self-start',
-        value ? 'boolean-chip-true' : 'boolean-chip-false',
-      )}
+      className={cn('boolean-chip self-start', value ? 'boolean-chip-true' : 'boolean-chip-false')}
       aria-label={localize(value ? 'com_ui_true' : 'com_ui_false')}
     >
       {localize(value ? 'com_ui_true' : 'com_ui_false')}
@@ -651,9 +694,7 @@ export function NestedGroup({
           >
             <Icon name="chevron-right" size="xs" />
           </span>
-          <span className="text-sm font-medium text-(--cui-color-text-default)">
-            {label}
-          </span>
+          <span className="text-sm font-medium text-(--cui-color-text-default)">{label}</span>
           {totalCount > 0 && (
             <span
               className={cn(
@@ -709,6 +750,7 @@ export function renderCollectionEntryFields(
   parentPath: string,
   onChange: (path: string, value: t.ConfigValue) => void,
   addFieldTriggerRef?: React.MutableRefObject<(() => void) | null>,
+  editSessionId?: number,
 ): ReactNode {
   return (
     <InlineFieldRenderer
@@ -717,6 +759,7 @@ export function renderCollectionEntryFields(
       parentPath={parentPath}
       onChange={onChange}
       addFieldTriggerRef={addFieldTriggerRef}
+      editSessionId={editSessionId}
     />
   );
 }
@@ -743,6 +786,7 @@ function InlineFieldRenderer({
   disabled,
   addFieldTriggerRef,
   onHiddenFieldsChange,
+  editSessionId,
 }: {
   fields: t.SchemaField[];
   parentValue: t.ConfigValue;
@@ -751,6 +795,7 @@ function InlineFieldRenderer({
   disabled?: boolean;
   addFieldTriggerRef?: React.MutableRefObject<(() => void) | null>;
   onHiddenFieldsChange?: (hasHidden: boolean) => void;
+  editSessionId?: number;
 }) {
   const localize = useLocalize();
   const [addedKeys, setAddedKeys] = useState<Set<string>>(() => new Set());
@@ -832,7 +877,17 @@ function InlineFieldRenderer({
   return (
     <div className="flex flex-col gap-3">
       {visibleFields.map((field) =>
-        renderInlineField(field, parentValue, parentPath, onChange, localize, disabled),
+        renderInlineField(
+          field,
+          parentValue,
+          parentPath,
+          onChange,
+          localize,
+          disabled,
+          undefined,
+          undefined,
+          editSessionId,
+        ),
       )}
       {!disabled && hiddenFields.length > 0 && showDropdown && (
         <AddFieldDropdown
@@ -863,6 +918,7 @@ function NestedGroupWithAddField({
   parentPath,
   onChange,
   disabled,
+  editSessionId,
 }: {
   label: string;
   fields: t.SchemaField[];
@@ -870,6 +926,7 @@ function NestedGroupWithAddField({
   parentPath: string;
   onChange: (path: string, value: t.ConfigValue) => void;
   disabled?: boolean;
+  editSessionId?: number;
 }) {
   const addFieldRef = useRef<(() => void) | null>(null);
   const localize = useLocalize();
@@ -906,6 +963,7 @@ function NestedGroupWithAddField({
         disabled={disabled}
         addFieldTriggerRef={addFieldRef}
         onHiddenFieldsChange={setHasHideable}
+        editSessionId={editSessionId}
       />
     </NestedGroup>
   );
@@ -963,6 +1021,8 @@ export function renderInlineField(
   collectionRenderOverrides?: Record<string, t.CollectionRenderFields>,
   /** When true, non-optional fields show a required indicator (*). */
   showRequired?: boolean,
+  /** See `SingleFieldRendererProps.editSessionId`. */
+  editSessionId?: number,
 ): ReactNode {
   const values =
     typeof parentValue === 'object' && parentValue !== null && !Array.isArray(parentValue)
@@ -992,6 +1052,7 @@ export function renderInlineField(
           onChange(field.key, { ...current, [leafKey]: v });
         }}
         disabled={disabled}
+        editSessionId={editSessionId}
       />
     );
   }
@@ -1040,11 +1101,42 @@ export function renderInlineField(
   }
 
   if (controlType === 'text') {
+    // A defined string (including '') means this field has a queued edit for
+    // this entry; an absent/undefined value means it still matches baseline.
+    // Distinguishing on the raw value (not just whether it's empty) keeps a
+    // queued empty replacement visible across a remount, matching the
+    // top-level SingleFieldRenderer fix.
+    const hasPendingEdit = typeof fieldValue === 'string';
+    const stringValue = hasPendingEdit ? fieldValue : '';
+    const secretPreviewValue = getSecretPreviewValue(values, field.key);
+    const maskedSecret =
+      secretPreviewValue != null && stringValue === '' ? secretPreviewValue : null;
+
+    if (maskedSecret != null) {
+      return (
+        <InlineRow key={field.key} label={fieldLabel} fieldId={fieldId} required={required}>
+          <SecretField
+            key={`${fieldId}-${editSessionId ?? 0}`}
+            id={fieldId}
+            value={stringValue}
+            maskedValue={maskedSecret}
+            onChange={(v) => onChange(field.key, v)}
+            onCancel={() => {
+              if (hasPendingEdit) onChange(field.key, undefined);
+            }}
+            hasPendingEdit={hasPendingEdit}
+            disabled={disabled}
+            aria-label={fieldLabel}
+          />
+        </InlineRow>
+      );
+    }
+
     return (
       <InlineRow key={field.key} label={fieldLabel} fieldId={fieldId} required={required}>
         <TextField
           id={fieldId}
-          value={typeof fieldValue === 'string' ? fieldValue : ''}
+          value={stringValue}
           onChange={(v) => onChange(field.key, v)}
           disabled={disabled}
         />
@@ -1092,6 +1184,7 @@ export function renderInlineField(
           onChange={(v) => onChange(field.key, v)}
           disabled={disabled}
           renderFields={renderFn}
+          editSessionId={editSessionId}
         />
       </CollectionRow>
     );
@@ -1109,6 +1202,7 @@ export function renderInlineField(
           disabled={disabled}
           allowPrimitiveValues={field.recordValueAllowsPrimitive}
           renderFields={renderFn}
+          editSessionId={editSessionId}
         />
       </CollectionRow>
     );
@@ -1193,6 +1287,8 @@ export function FieldRenderer({
   getValue,
   onChange,
   onResetField,
+  onDiscardField,
+  editedValues,
   disabled,
   profileMap,
   previewMode,
@@ -1208,6 +1304,7 @@ export function FieldRenderer({
   pendingResets,
   schemaDefaults,
   showConfiguredOnly,
+  editSessionId,
 }: t.FieldRendererProps) {
   const localize = useLocalize();
   const values =
@@ -1269,6 +1366,8 @@ export function FieldRenderer({
                 getValue={getValue}
                 onChange={onChange}
                 onResetField={onResetField}
+                onDiscardField={onDiscardField}
+                editedValues={editedValues}
                 disabled={disabled}
                 profileMap={profileMap}
                 previewMode={previewMode}
@@ -1284,6 +1383,7 @@ export function FieldRenderer({
                 pendingResets={pendingResets}
                 schemaDefaults={schemaDefaults}
                 showConfiguredOnly={showConfiguredOnly}
+                editSessionId={editSessionId}
               />
             </NestedGroup>
           );
@@ -1298,6 +1398,8 @@ export function FieldRenderer({
             getValue={getValue}
             onChange={onChange}
             onResetField={onResetField}
+            onDiscardField={onDiscardField}
+            editedValues={editedValues}
             disabled={disabled}
             permissions={permissions}
             onProfileChange={onProfileChange}
@@ -1312,6 +1414,8 @@ export function FieldRenderer({
             schemaDefaults={schemaDefaults}
             showConfiguredOnly={showConfiguredOnly}
             isSoleField={false}
+            secretPreviewValue={getSecretPreviewValue(values, group.field.key)}
+            editSessionId={editSessionId}
           />
         );
       })}

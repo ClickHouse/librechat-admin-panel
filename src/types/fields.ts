@@ -34,6 +34,27 @@ export interface TextFieldProps {
   'aria-describedby'?: string;
 }
 
+export interface SecretFieldProps {
+  id: string;
+  /** Pending replacement value; empty string when no replacement is typed. */
+  value: string;
+  /** Masked display of the stored secret (e.g. `sk-mist...4321`). */
+  maskedValue: string;
+  onChange: (value: string) => void;
+  /** Invoked when the admin abandons the replace flow. */
+  onCancel: () => void;
+  /**
+   * True when the field has a queued edit for this path (including an
+   * explicitly cleared, empty-string replacement). Remounting this
+   * component (e.g. switching config tabs and back) resets its local
+   * replace-mode state, so an empty queued edit would otherwise render
+   * as the untouched masked secret and hide a save that will clear it.
+   */
+  hasPendingEdit?: boolean;
+  disabled?: boolean;
+  'aria-label'?: string;
+}
+
 export interface TextareaFieldProps {
   id: string;
   value: string;
@@ -111,6 +132,8 @@ export interface ArrayObjectFieldProps {
   renderFields: CollectionRenderFields;
   /** When set, each entry card gets an id of `{entryIdPrefix}-{index}` for TOC scroll targets. */
   entryIdPrefix?: string;
+  /** See `SingleFieldRendererProps.editSessionId`. Forwarded to `renderFields`. */
+  editSessionId?: number;
 }
 
 export interface RecordObjectFieldProps {
@@ -123,6 +146,8 @@ export interface RecordObjectFieldProps {
   /** Ref that gets populated with a function to open the add-key input. */
   addTriggerRef?: React.MutableRefObject<(() => void) | null>;
   renderFields: CollectionRenderFields;
+  /** See `SingleFieldRendererProps.editSessionId`. Forwarded to `renderFields`. */
+  editSessionId?: number;
 }
 
 export type CollectionRenderFields = (
@@ -132,6 +157,8 @@ export type CollectionRenderFields = (
   onChange: (path: string, value: ConfigValue) => void,
   /** Optional ref populated with a trigger to open the "add field" dropdown. */
   addFieldTriggerRef?: React.MutableRefObject<(() => void) | null>,
+  /** See `SingleFieldRendererProps.editSessionId`. */
+  editSessionId?: number,
 ) => React.ReactNode;
 
 export interface ObjectEntryCardProps {
@@ -145,6 +172,8 @@ export interface ObjectEntryCardProps {
   disabled?: boolean;
   defaultExpanded?: boolean;
   renderFields: CollectionRenderFields;
+  /** See `SingleFieldRendererProps.editSessionId`. Forwarded to `renderFields`. */
+  editSessionId?: number;
 }
 
 export interface SwitchObjectFieldProps {
