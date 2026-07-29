@@ -515,6 +515,27 @@ describe('buildSavePayload — masked secrets never reach the backend', () => {
     expect(resets).toEqual([]);
   });
 
+  it('documents why abandoning a replacement must not go through onChange(path, undefined)', () => {
+    // If a scope-resolved baseline ever reads back as '' for a redacted secret's
+    // real path (not undefined/absent, as the base config baseline always is),
+    // routing Cancel through the generic onChange/applyConfigEdit pipeline would
+    // register a real pending reset instead of a no-op. This is exactly why
+    // SecretField's Cancel calls a dedicated onDiscardField instead of
+    // onChange(path, undefined) — see FieldRenderer.test.tsx's
+    // "cancelling the replace flow discards the field directly" case.
+    const emptyBaseline: t.FlatConfigMap = { 'ocr.apiKey': '' };
+    const edited = applyConfigEdit(
+      {},
+      'ocr.apiKey',
+      undefined,
+      emptyBaseline,
+      noIntermediates,
+      noContainers,
+    );
+    const { resets } = buildSavePayload(new Set(['ocr.apiKey']), edited, schemaPaths);
+    expect(resets).toEqual(['ocr.apiKey']);
+  });
+
   it('resetting a masked secret produces a reset for the real path, not a save', () => {
     const edited: t.FlatConfigMap = { 'ocr.apiKey': undefined };
     const { saves, resets } = buildSavePayload(new Set(['ocr.apiKey']), edited, schemaPaths);

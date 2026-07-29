@@ -162,6 +162,7 @@ export function SingleFieldRenderer({
   getValue,
   onChange,
   onResetField,
+  onDiscardField,
   disabled,
   permissions,
   onProfileChange,
@@ -376,7 +377,7 @@ export function SingleFieldRenderer({
           value={stringValue}
           maskedValue={maskedSecret}
           onChange={(v) => onChange(path, v)}
-          onCancel={() => onChange(path, undefined)}
+          onCancel={() => onDiscardField?.(path)}
           disabled={disabled}
           aria-label={fieldLabel}
         />
@@ -1222,6 +1223,7 @@ export function FieldRenderer({
   getValue,
   onChange,
   onResetField,
+  onDiscardField,
   disabled,
   profileMap,
   previewMode,
@@ -1299,6 +1301,7 @@ export function FieldRenderer({
                 getValue={getValue}
                 onChange={onChange}
                 onResetField={onResetField}
+                onDiscardField={onDiscardField}
                 disabled={disabled}
                 profileMap={profileMap}
                 previewMode={previewMode}
@@ -1329,6 +1332,7 @@ export function FieldRenderer({
             getValue={getValue}
             onChange={onChange}
             onResetField={onResetField}
+            onDiscardField={onDiscardField}
             disabled={disabled}
             permissions={permissions}
             onProfileChange={onProfileChange}

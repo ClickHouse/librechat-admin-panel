@@ -62,6 +62,8 @@ export interface ConfigTabContentProps {
   editedValues: FlatConfigMap;
   onFieldChange: (path: string, value: ConfigValue) => void;
   onResetField?: (path: string) => void;
+  /** See `SingleFieldRendererProps.onDiscardField`. */
+  onDiscardField?: (path: string) => void;
   profileMap?: Record<string, string[]>;
   previewMode?: boolean;
   previewScope?: ConfigScope;
@@ -191,6 +193,14 @@ export interface SingleFieldRendererProps {
   getValue: (path: string, fallback: ConfigValue) => ConfigValue;
   onChange: (path: string, value: ConfigValue) => void;
   onResetField?: (path: string) => void;
+  /**
+   * Removes `path` from `editedValues`/`touchedPaths` directly, bypassing
+   * the baseline-match diffing `onChange` goes through. Used by SecretField's
+   * Cancel: abandoning an in-progress replacement is never a real edit, so it
+   * must not be representable as a pending reset (`onChange(path, undefined)`)
+   * whenever a scope-resolved baseline happens to also read as empty.
+   */
+  onDiscardField?: (path: string) => void;
   disabled?: boolean;
   permissions?: ScopePermissions;
   onProfileChange?: () => void;
@@ -224,6 +234,8 @@ export interface FieldRendererProps {
   getValue: (path: string, fallback: ConfigValue) => ConfigValue;
   onChange: (path: string, value: ConfigValue) => void;
   onResetField?: (path: string) => void;
+  /** See `SingleFieldRendererProps.onDiscardField`. */
+  onDiscardField?: (path: string) => void;
   editedValues?: FlatConfigMap;
   disabled?: boolean;
   profileMap?: Record<string, string[]>;

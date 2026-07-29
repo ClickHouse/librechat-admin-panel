@@ -414,6 +414,28 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
     [scopeBaseline, baselineIntermediates, baselineContainerPaths],
   );
 
+  /**
+   * Removes `path` from `editedValues`/`touchedPaths` directly, bypassing
+   * `applyConfigEdit`'s baseline-match diffing. Abandoning an in-progress
+   * SecretField replacement (Cancel) is never a real edit — representing it
+   * as `onChange(path, undefined)` would mean the same thing as a real reset
+   * whenever a scope-resolved baseline happens to also read as empty.
+   */
+  const handleDiscardField = useCallback((path: string) => {
+    setEditedValues((prev) => {
+      if (!(path in prev)) return prev;
+      const next = { ...prev };
+      delete next[path];
+      return next;
+    });
+    setTouchedPaths((prev) => {
+      if (!prev.has(path)) return prev;
+      const next = new Set(prev);
+      next.delete(path);
+      return next;
+    });
+  }, []);
+
   const isDirty = Object.keys(editedValues).length > 0;
 
   const pendingResets = useMemo(() => {
@@ -950,6 +972,7 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
               editedValues={editedValues}
               onFieldChange={handleFieldChange}
               onResetField={handleResetField}
+              onDiscardField={handleDiscardField}
               profileMap={profileMap}
               previewMode={false}
               previewScope={editingScope}

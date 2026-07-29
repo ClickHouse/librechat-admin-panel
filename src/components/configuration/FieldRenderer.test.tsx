@@ -477,12 +477,14 @@ describe('masked secret fields', () => {
     expect(onChange).toHaveBeenCalledWith('ocr.apiKey', 'brand-new-secret');
   });
 
-  it('cancelling the replace flow clears the pending replacement', () => {
+  it('cancelling the replace flow discards the field directly, never through onChange', () => {
     const onChange = vi.fn();
-    renderMasked(onChange);
+    const onDiscardField = vi.fn();
+    renderMasked(onChange, { onDiscardField });
     fireEvent.click(screen.getByText('com_config_secret_replace'));
     fireEvent.click(screen.getByText('com_ui_cancel'));
-    expect(onChange).toHaveBeenCalledWith('ocr.apiKey', undefined);
+    expect(onChange).not.toHaveBeenCalled();
+    expect(onDiscardField).toHaveBeenCalledWith('ocr.apiKey');
     expect(screen.getByDisplayValue('sk-mist...4321')).toBeDisabled();
   });
 
