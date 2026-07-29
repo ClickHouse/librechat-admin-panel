@@ -18,12 +18,13 @@ export function SecretField({
   maskedValue,
   onChange,
   onCancel,
+  hasPendingEdit,
   disabled,
   ...ariaProps
 }: t.SecretFieldProps) {
   const localize = useLocalize();
   const [replacing, setReplacing] = useState(false);
-  const showInput = replacing || value !== '';
+  const showInput = replacing || value !== '' || (hasPendingEdit ?? false);
   const fieldName = ariaProps['aria-label'] ?? id;
 
   if (!showInput) {

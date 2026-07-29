@@ -378,6 +378,7 @@ export function SingleFieldRenderer({
           maskedValue={maskedSecret}
           onChange={(v) => onChange(path, v)}
           onCancel={() => onDiscardField?.(path)}
+          hasPendingEdit={isTouched}
           disabled={disabled}
           aria-label={fieldLabel}
         />

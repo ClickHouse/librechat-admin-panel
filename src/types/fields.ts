@@ -43,6 +43,14 @@ export interface SecretFieldProps {
   onChange: (value: string) => void;
   /** Invoked when the admin abandons the replace flow. */
   onCancel: () => void;
+  /**
+   * True when the field has a queued edit for this path (including an
+   * explicitly cleared, empty-string replacement). Remounting this
+   * component (e.g. switching config tabs and back) resets its local
+   * replace-mode state, so an empty queued edit would otherwise render
+   * as the untouched masked secret and hide a save that will clear it.
+   */
+  hasPendingEdit?: boolean;
   disabled?: boolean;
   'aria-label'?: string;
 }

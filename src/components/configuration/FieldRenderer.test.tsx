@@ -512,6 +512,14 @@ describe('masked secret fields', () => {
     expect(screen.queryByText('com_config_secret_replace')).not.toBeInTheDocument();
   });
 
+  it('keeps a cleared replacement visible after remount instead of showing the stale mask', () => {
+    renderMasked(noop, { touchedPaths: new Set(['ocr.apiKey']) });
+    expect(screen.queryByDisplayValue('sk-mist...4321')).not.toBeInTheDocument();
+    const input = screen.getByRole('textbox');
+    expect(input).not.toBeDisabled();
+    expect(input).toHaveValue('');
+  });
+
   it('an untyped Replace click does not survive a bumped editSessionId', () => {
     const { rerender } = renderMasked(noop, { editSessionId: 0 });
     fireEvent.click(screen.getByText('com_config_secret_replace'));
