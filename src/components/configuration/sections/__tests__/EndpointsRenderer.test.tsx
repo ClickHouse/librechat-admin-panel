@@ -74,4 +74,20 @@ describe('ProvidersRenderer', () => {
     expect(screen.queryByDisplayValue('sk-test...1234')).not.toBeInTheDocument();
     expect(screen.getByRole('textbox')).not.toBeDisabled();
   });
+
+  it('forwards editedValues so a cleared-but-queued provider secret stays visible after remount', () => {
+    render(
+      <ProvidersRenderer
+        fields={providerFields}
+        parentValue={{ openAI: { apiKeyPreview: 'sk-test...1234' } }}
+        parentPath="endpoints"
+        getValue={getValue}
+        onChange={noop}
+        touchedPaths={new Set(['endpoints.openAI.apiKey'])}
+        editedValues={{ 'endpoints.openAI.apiKey': '' }}
+      />,
+    );
+    expect(screen.queryByDisplayValue('sk-test...1234')).not.toBeInTheDocument();
+    expect(screen.getByRole('textbox')).not.toBeDisabled();
+  });
 });

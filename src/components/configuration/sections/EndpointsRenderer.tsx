@@ -482,6 +482,7 @@ function ProviderSection({
   onChange,
   onResetField,
   onDiscardField,
+  editedValues,
   disabled,
   profileMap,
   permissions,
@@ -535,6 +536,7 @@ function ProviderSection({
     onChange,
     onResetField,
     onDiscardField,
+    editedValues,
     disabled,
     profileMap,
     permissions,
@@ -627,11 +629,7 @@ export function CustomEndpointsRenderer(props: t.FieldRendererProps) {
     <div className="flex flex-col gap-2">
       {!disabled && (
         <div className="flex items-center gap-3 py-2">
-          <button
-            type="button"
-            onClick={() => setCreateOpen(true)}
-            className="config-add-btn"
-          >
+          <button type="button" onClick={() => setCreateOpen(true)} className="config-add-btn">
             <Icon name="plus" size="sm" />
             <span>{localize('com_config_create_endpoint')}</span>
           </button>
@@ -678,6 +676,7 @@ export function ProvidersRenderer(props: t.FieldRendererProps) {
     onChange,
     onResetField,
     onDiscardField,
+    editedValues,
     disabled,
     profileMap,
     permissions,
@@ -713,6 +712,7 @@ export function ProvidersRenderer(props: t.FieldRendererProps) {
     onChange,
     onResetField,
     onDiscardField,
+    editedValues,
     disabled,
     profileMap,
     permissions,
