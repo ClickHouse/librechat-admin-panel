@@ -298,6 +298,11 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
     return mapSecretDisplayPaths(scopeChangedPaths, schemaPathSet);
   }, [scopeChangedPaths, schemaPathSet]);
 
+  const scopeChangedPathsMapped = useMemo(() => {
+    if (!scopeChangedPaths) return null;
+    return Array.from(mapSecretDisplayPaths(scopeChangedPaths, schemaPathSet));
+  }, [scopeChangedPaths, schemaPathSet]);
+
   const activeConfiguredPaths = isEditingScope ? scopeConfiguredPaths : configuredPaths;
 
   const tabConfiguredCounts = useMemo(() => {
@@ -948,7 +953,7 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
               profileMap={profileMap}
               previewMode={false}
               previewScope={editingScope}
-              previewChangedPaths={scopeChangedPaths}
+              previewChangedPaths={scopeChangedPathsMapped}
               resolvedValues={scopeResolvedValues}
               permissions={permissions}
               onProfileChange={handleProfileChange}
