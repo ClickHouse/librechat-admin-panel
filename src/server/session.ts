@@ -1,3 +1,4 @@
+import { createServerOnlyFn } from '@tanstack/react-start';
 import { useSession } from '@tanstack/react-start/server';
 import type * as t from '@/types';
 
@@ -42,16 +43,23 @@ if (!process.env.SESSION_SECRET && process.env.NODE_ENV === 'development') {
 
 const sessionCookiePath = process.env.VITE_BASE_PATH || '/';
 
-export function useAppSession(): ReturnType<typeof useSession<t.SessionData>> {
-  return useSession<t.SessionData>({
-    name: 'admin-session',
-    password: sessionSecret || '',
-    cookie: {
-      path: sessionCookiePath,
-      secure: sessionCookieSecure,
-      sameSite: 'lax',
-      httpOnly: true,
-      maxAge: 60 * 60 * 24 * 7,
-    },
-  });
-}
+/**
+ * `createServerOnlyFn`: this module is reachable from client-bundled routes
+ * transitively (e.g. via server/utils/refresh.ts -> server/session.ts, even
+ * though every real caller is server-only), so the bundler can't otherwise
+ * prove `useSession` is safe to keep out of the client build.
+ */
+export const useAppSession = createServerOnlyFn(
+  (): ReturnType<typeof useSession<t.SessionData>> =>
+    useSession<t.SessionData>({
+      name: 'admin-session',
+      password: sessionSecret || '',
+      cookie: {
+        path: sessionCookiePath,
+        secure: sessionCookieSecure,
+        sameSite: 'lax',
+        httpOnly: true,
+        maxAge: 60 * 60 * 24 * 7,
+      },
+    }),
+);
