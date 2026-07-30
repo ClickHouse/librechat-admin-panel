@@ -1,3 +1,4 @@
+import { createServerOnlyFn } from '@tanstack/react-start';
 import { useSession } from '@tanstack/react-start/server';
 import type * as t from '@/types';
 
@@ -7,51 +8,68 @@ const MIN_SESSION_SECRET_LENGTH = 32;
 const REVALIDATION_INTERVAL_MS = 60_000;
 const DEFAULT_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
 
-const envIdleTimeout = Number(process.env.ADMIN_SESSION_IDLE_TIMEOUT_MS);
-const effectiveIdleTimeout =
-  Number.isFinite(envIdleTimeout) && envIdleTimeout > 0 ? envIdleTimeout : DEFAULT_IDLE_TIMEOUT_MS;
+function resolveSessionSecret(): string {
+  const sessionSecret =
+    process.env.SESSION_SECRET || (process.env.NODE_ENV === 'development' ? DEV_SECRET : undefined);
 
-const sessionCookieSecure =
-  process.env.SESSION_COOKIE_SECURE !== undefined
-    ? process.env.SESSION_COOKIE_SECURE === 'true'
-    : process.env.NODE_ENV === 'production';
+  if (!sessionSecret) {
+    throw new Error('SESSION_SECRET environment variable must be set for admin session encryption.');
+  }
 
-export const SESSION_CONFIG = {
-  revalidationInterval: REVALIDATION_INTERVAL_MS,
-  idleTimeout: effectiveIdleTimeout,
-} as const;
+  if (sessionSecret.length < MIN_SESSION_SECRET_LENGTH) {
+    throw new Error(
+      `SESSION_SECRET must be at least ${MIN_SESSION_SECRET_LENGTH} characters for admin session encryption.`,
+    );
+  }
 
-const sessionSecret =
-  process.env.SESSION_SECRET || (process.env.NODE_ENV === 'development' ? DEV_SECRET : undefined);
+  if (!process.env.SESSION_SECRET && process.env.NODE_ENV === 'development') {
+    console.warn(
+      '[session] Using hardcoded DEV_SECRET — set SESSION_SECRET for production-like environments',
+    );
+  }
 
-if (!sessionSecret) {
-  throw new Error('SESSION_SECRET environment variable must be set for admin session encryption.');
+  return sessionSecret;
 }
 
-if (sessionSecret.length < MIN_SESSION_SECRET_LENGTH) {
-  throw new Error(
-    `SESSION_SECRET must be at least ${MIN_SESSION_SECRET_LENGTH} characters for admin session encryption.`,
-  );
-}
+/**
+ * `createServerOnlyFn`: this module is reachable from client-bundled routes
+ * transitively (e.g. via server/utils/refresh.ts -> server/session.ts, even
+ * though every real caller is server-only), so the bundler can't otherwise
+ * prove these are safe to keep out of the client build. Every env-dependent
+ * computation (including anything that can throw) has to live inside these
+ * wrapped closures rather than at module scope — module-level code still
+ * runs whenever the module is merely imported into the client bundle, even
+ * though the wrapped function bodies themselves get stubbed out.
+ */
+export const getSessionConfig = createServerOnlyFn(() => {
+  const envIdleTimeout = Number(process.env.ADMIN_SESSION_IDLE_TIMEOUT_MS);
+  const idleTimeout =
+    Number.isFinite(envIdleTimeout) && envIdleTimeout > 0 ? envIdleTimeout : DEFAULT_IDLE_TIMEOUT_MS;
 
-if (!process.env.SESSION_SECRET && process.env.NODE_ENV === 'development') {
-  console.warn(
-    '[session] Using hardcoded DEV_SECRET — set SESSION_SECRET for production-like environments',
-  );
-}
+  return {
+    revalidationInterval: REVALIDATION_INTERVAL_MS,
+    idleTimeout,
+  } as const;
+});
 
-const sessionCookiePath = process.env.VITE_BASE_PATH || '/';
+export const useAppSession = createServerOnlyFn(
+  (): ReturnType<typeof useSession<t.SessionData>> => {
+    const sessionCookieSecure =
+      process.env.SESSION_COOKIE_SECURE !== undefined
+        ? process.env.SESSION_COOKIE_SECURE === 'true'
+        : process.env.NODE_ENV === 'production';
+    const sessionCookiePath = process.env.VITE_BASE_PATH || '/';
 
-export function useAppSession(): ReturnType<typeof useSession<t.SessionData>> {
-  return useSession<t.SessionData>({
-    name: 'admin-session',
-    password: sessionSecret || '',
-    cookie: {
-      path: sessionCookiePath,
-      secure: sessionCookieSecure,
-      sameSite: 'lax',
-      httpOnly: true,
-      maxAge: 60 * 60 * 24 * 7,
-    },
-  });
-}
+    return useSession<t.SessionData>({
+      name: 'admin-session',
+      password: resolveSessionSecret(),
+      cookie: {
+        path: sessionCookiePath,
+        secure: sessionCookieSecure,
+        sameSite: 'lax',
+        httpOnly: true,
+        maxAge: 60 * 60 * 24 * 7,
+      },
+    });
+  },
+);

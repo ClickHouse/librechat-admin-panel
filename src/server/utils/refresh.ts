@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { createServerOnlyFn } from '@tanstack/react-start';
 import { getRequestHeader } from '@tanstack/react-start/server';
 import type * as t from '@/types';
 import { useAppSession } from '../session';
@@ -20,13 +21,18 @@ export interface RefreshedTokenset {
  * Forwards the deployment's tenant header to the LibreChat backend so that
  * `preAuthTenantMiddleware` can scope the refresh lookup. Returns `undefined`
  * (no header) when the BFF request didn't carry one — single-tenant deploys.
+ *
+ * `createServerOnlyFn` (not a plain function): this file is reachable from a
+ * client-bundled route (login.tsx -> @/server -> scopes.ts -> utils/api.ts)
+ * even though every actual caller here is server-only, so the bundler can't
+ * otherwise prove `getRequestHeader` is safe to keep out of the client build.
  */
-function readTenantHeader(): string | undefined {
+const readTenantHeader = createServerOnlyFn((): string | undefined => {
   const raw = getRequestHeader('x-tenant-id');
   if (typeof raw !== 'string') return undefined;
   const trimmed = raw.trim();
   return trimmed.length > 0 ? trimmed : undefined;
-}
+});
 
 function extractRefreshTokenCookie(response: Response): string | undefined {
   const setCookies = response.headers.getSetCookie();

@@ -25,10 +25,10 @@ vi.mock('@tanstack/react-query', () => ({
 }));
 
 vi.mock('./session', () => ({
-  SESSION_CONFIG: {
+  getSessionConfig: () => ({
     revalidationInterval: 60_000,
     idleTimeout: 30 * 60 * 1000,
-  },
+  }),
   useAppSession: vi.fn(async () => ({
     data: sessionState.data,
     update: updateSession,
