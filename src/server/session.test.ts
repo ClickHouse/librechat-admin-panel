@@ -1,12 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { SESSION_CONFIG } from './session';
+import { getSessionConfig } from './session';
 
-describe('SESSION_CONFIG', () => {
+describe('getSessionConfig', () => {
   it('revalidation interval is 60 seconds', () => {
-    expect(SESSION_CONFIG.revalidationInterval).toBe(60_000);
+    expect(getSessionConfig().revalidationInterval).toBe(60_000);
   });
 
   it('idle timeout defaults to 30 minutes', () => {
-    expect(SESSION_CONFIG.idleTimeout).toBe(30 * 60 * 1000);
+    expect(getSessionConfig().idleTimeout).toBe(30 * 60 * 1000);
   });
 });

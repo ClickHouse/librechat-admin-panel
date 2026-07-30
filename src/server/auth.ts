@@ -8,7 +8,7 @@ import type * as t from '@/types';
 import { getApiBaseUrl, getServerApiUrl } from './utils/url';
 import { refreshAdminTokenDeduped } from './utils/refresh';
 import { buildOAuthExchangePayload } from './utils/oauth';
-import { useAppSession, SESSION_CONFIG } from './session';
+import { useAppSession, getSessionConfig } from './session';
 
 /** Extract a named cookie value from `set-cookie` response headers. */
 function extractCookieValue(response: Response, name: string): string | undefined {
@@ -190,14 +190,14 @@ export const verifyAdminTokenFn = createServerFn({ method: 'GET' }).handler(asyn
     }
 
     const now = Date.now();
+    const sessionConfig = getSessionConfig();
 
-    if (lastActivity && now - lastActivity > SESSION_CONFIG.idleTimeout) {
+    if (lastActivity && now - lastActivity > sessionConfig.idleTimeout) {
       await clearSession(session);
       return { valid: false, error: 'Session expired due to inactivity' };
     }
 
-    const needsRevalidation =
-      !lastVerified || now - lastVerified > SESSION_CONFIG.revalidationInterval;
+    const needsRevalidation = !lastVerified || now - lastVerified > sessionConfig.revalidationInterval;
 
     if (needsRevalidation) {
       try {
