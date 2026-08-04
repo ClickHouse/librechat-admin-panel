@@ -250,6 +250,16 @@ export function hasDescendant(path: string, paths?: Set<string>): boolean {
   return false;
 }
 
+/** Include the dedicated Langfuse connection in generic configured-state UI. */
+export function withLangfuseConfiguredPath(
+  configuredPaths: Set<string>,
+  configured: boolean,
+): Set<string> {
+  const paths = new Set(configuredPaths);
+  if (configured) paths.add('langfuse.enabled');
+  return paths;
+}
+
 export function isMcpEntryPath(path: string): boolean {
   if (!path.startsWith('mcpServers.')) return false;
   const key = path.slice('mcpServers.'.length);

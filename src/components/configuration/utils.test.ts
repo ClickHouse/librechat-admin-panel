@@ -9,6 +9,7 @@ import {
   mergeIndexedArrayEdits,
   buildSavePayload,
   applyConfigEdit,
+  withLangfuseConfiguredPath,
 } from './utils';
 import { createField } from '@/test/fixtures';
 import { flattenObject } from '@/utils';
@@ -220,6 +221,23 @@ describe('splitUnionTypes', () => {
   it('handles nested parens without splitting inner content', () => {
     const result = splitUnionTypes('union(enum(a | b) | string)');
     expect(result).toEqual(['enum(a | b)', 'string']);
+  });
+});
+
+describe('withLangfuseConfiguredPath', () => {
+  it('includes a configured dedicated connection without mutating base paths', () => {
+    const basePaths = new Set(['interface.theme']);
+
+    const paths = withLangfuseConfiguredPath(basePaths, true);
+
+    expect(paths).toEqual(new Set(['interface.theme', 'langfuse.enabled']));
+    expect(basePaths).toEqual(new Set(['interface.theme']));
+  });
+
+  it('does not mark an unconfigured connection', () => {
+    expect(withLangfuseConfiguredPath(new Set(['interface.theme']), false)).toEqual(
+      new Set(['interface.theme']),
+    );
   });
 });
 

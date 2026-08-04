@@ -1,8 +1,8 @@
 import { z } from 'zod';
 import yaml from 'js-yaml';
 import { queryOptions } from '@tanstack/react-query';
-import { configSchema } from 'librechat-data-provider';
 import { createServerFn } from '@tanstack/react-start';
+import { configSchema } from 'librechat-data-provider';
 import { SystemCapabilities } from '@librechat/data-schemas/capabilities';
 import type { AdminConfigResponse } from '@librechat/data-schemas';
 import type * as t from '@/types';
@@ -21,6 +21,52 @@ import { filterSecretPreviewFields, stripSecretPreviewValues } from '@/utils';
 import { safeFieldPath } from './utils/validation';
 import { flattenObject } from '@/utils/format';
 import { apiFetch } from './utils/api';
+
+/**
+ * Forward-compat shim: the pinned `librechat-data-provider@^0.8.509` predates the
+ * `langfuse` config group. Inject the section node so the custom renderer remains
+ * discoverable until a data-provider release containing the group is pinned. The
+ * renderer persists through LibreChat's dedicated Langfuse connection API.
+ */
+const LANGFUSE_SHIM_FIELD: t.SchemaField = {
+  path: 'langfuse',
+  key: 'langfuse',
+  type: 'object',
+  isOptional: true,
+  isNullable: false,
+  isArray: false,
+  isObject: true,
+  depth: 0,
+  children: (['enabled', 'destination', 'publicKey', 'secretKey', 'displaySecretKey'] as const).map(
+    (key) => ({
+      path: `langfuse.${key}`,
+      key,
+      type: key === 'enabled' ? 'boolean' : 'string',
+      isOptional: true,
+      isNullable: false,
+      isArray: false,
+      isObject: false,
+      depth: 1,
+    }),
+  ),
+};
+
+export function applyLangfuseSchemaVisibility(
+  tree: t.SchemaField[],
+  fanoutEnabled: boolean | undefined,
+): t.SchemaField[] {
+  const langfuseIndex = tree.findIndex((section) => section.key === 'langfuse');
+  if (fanoutEnabled === false) {
+    if (langfuseIndex >= 0) {
+      tree.splice(langfuseIndex, 1);
+    }
+    return tree;
+  }
+  if (fanoutEnabled === true && langfuseIndex < 0) {
+    tree.push(LANGFUSE_SHIM_FIELD);
+  }
+  return tree;
+}
 
 const WRAPPER_TYPES = new Set([
   'ZodOptional',
@@ -653,6 +699,11 @@ export const configSchemaTreeOptions = queryOptions({
 export const getConfigSchemaFields = createServerFn({ method: 'GET' }).handler(async () => {
   try {
     const tree = extractSchemaTree(configSchema);
+    const startupConfigResponse = await apiFetch('/api/config');
+    const startupConfig = startupConfigResponse.ok
+      ? ((await startupConfigResponse.json()) as { langfuseFanoutEnabled?: boolean })
+      : undefined;
+    applyLangfuseSchemaVisibility(tree, startupConfig?.langfuseFanoutEnabled);
     for (const section of tree) {
       if (section.key === 'interface' && section.children) {
         section.children = filterInterfacePermissionChildren(section.children);
