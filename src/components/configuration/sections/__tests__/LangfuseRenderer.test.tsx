@@ -178,9 +178,26 @@ describe('LangfuseRenderer', () => {
     renderLangfuse({ disabled: true });
 
     expect(await screen.findByText('pk-lf-...cdef')).toBeVisible();
-    expect(mockTest).not.toHaveBeenCalled();
-    expect(screen.getByText('com_config_langfuse_not_verified')).toBeVisible();
+    expect(await screen.findByText('com_config_langfuse_not_verified')).toBeVisible();
     expect(screen.queryByText('com_config_langfuse_not_configured')).not.toBeInTheDocument();
+    expect(mockTest).not.toHaveBeenCalled();
+  });
+
+  it('keeps the disable action available when the stored destination is no longer allowlisted', async () => {
+    mockGet.mockResolvedValue({
+      configured: true,
+      enabled: true,
+      destinations,
+      destination: 'removed-region',
+      publicKey: 'pk-lf-1234567890abcdef',
+      displaySecretKey: 'sk-lf-...515f',
+    });
+    renderLangfuse();
+
+    expect(await screen.findByRole('button', { name: 'com_config_langfuse_disable' })).toBeVisible();
+    expect(
+      screen.queryByRole('button', { name: 'com_config_langfuse_save_and_enable' }),
+    ).not.toBeInTheDocument();
   });
 
   it('verifies then saves a new connection through the dedicated API', async () => {

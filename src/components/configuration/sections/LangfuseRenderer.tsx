@@ -97,11 +97,11 @@ export function LangfuseRenderer({ disabled, isEditingScope }: t.FieldRendererPr
     if (hasDraftRef.current) return;
     const nextStatus = connectionQuery.data;
     setStatus(nextStatus);
-    setDestination(
-      nextStatus.destinations.some(({ key }) => key === nextStatus.destination)
-        ? (nextStatus.destination ?? '')
-        : '',
-    );
+    // Preserve the stored destination for display even when the server dropped it from the
+    // allowlist. Blanking it made destinationChanged true, forcing edit mode and leaving an
+    // enabled connection impossible to disable until a replacement was picked; a de-allowlisted
+    // destination now simply shows as unselected in the picker while disable stays available.
+    setDestination(nextStatus.destination ?? '');
     setPublicKey(nextStatus.publicKey ?? '');
   }, [connectionQuery.data]);
 
@@ -266,11 +266,7 @@ export function LangfuseRenderer({ disabled, isEditingScope }: t.FieldRendererPr
     const latestStatus =
       queryClient.getQueryData<LangfuseConnectionStatus>(LANGFUSE_CONNECTION_QUERY_KEY) ?? status;
     setStatus(latestStatus);
-    const storedDestination = latestStatus?.destinations.some(
-      ({ key }) => key === latestStatus.destination,
-    )
-      ? latestStatus.destination
-      : undefined;
+    const storedDestination = latestStatus?.destination;
     setDestination(storedDestination ?? '');
     setPublicKey(latestStatus?.publicKey ?? '');
     setSecretKey('');
