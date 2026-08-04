@@ -166,6 +166,21 @@ describe('LangfuseRenderer', () => {
     expect(await screen.findByText('com_config_langfuse_verified')).toBeVisible();
   });
 
+  it('does not verify the connection on load for read-only (disabled) viewers', async () => {
+    mockGet.mockResolvedValue({
+      configured: true,
+      enabled: true,
+      destinations,
+      destination: 'eu',
+      publicKey: 'pk-lf-1234567890abcdef',
+      displaySecretKey: 'sk-lf-...515f',
+    });
+    renderLangfuse({ disabled: true });
+
+    expect(await screen.findByText('pk-lf-...cdef')).toBeVisible();
+    expect(mockTest).not.toHaveBeenCalled();
+  });
+
   it('verifies then saves a new connection through the dedicated API', async () => {
     mockUpdate.mockResolvedValue({
       configured: true,

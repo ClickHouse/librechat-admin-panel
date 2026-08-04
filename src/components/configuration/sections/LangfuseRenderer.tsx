@@ -106,6 +106,12 @@ export function LangfuseRenderer({ disabled, isEditingScope }: t.FieldRendererPr
   }, [connectionQuery.data]);
 
   useEffect(() => {
+    // Read-only viewers lack manage:configs:langfuse, so never fire the verification call for them.
+    if (disabled) {
+      setVerificationState('idle');
+      setVerificationMessage('');
+      return;
+    }
     const connectionKey = getConnectionKey(status);
     if (!connectionKey) {
       setVerificationState('idle');
@@ -137,7 +143,7 @@ export function LangfuseRenderer({ disabled, isEditingScope }: t.FieldRendererPr
         },
       },
     );
-  }, [status, connectionQuery.dataUpdatedAt]);
+  }, [status, connectionQuery.dataUpdatedAt, disabled]);
 
   if (isEditingScope) {
     return (
