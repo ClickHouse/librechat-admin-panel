@@ -106,15 +106,19 @@ export function LangfuseRenderer({ disabled, isEditingScope }: t.FieldRendererPr
   }, [connectionQuery.data]);
 
   useEffect(() => {
-    // Read-only viewers lack manage:configs:langfuse, so never fire the verification call for them.
-    if (disabled) {
+    const connectionKey = getConnectionKey(status);
+    if (!connectionKey) {
       setVerificationState('idle');
       setVerificationMessage('');
       return;
     }
-    const connectionKey = getConnectionKey(status);
-    if (!connectionKey) {
-      setVerificationState('idle');
+    // Read-only viewers lack manage:configs:langfuse and cannot run verification. Show the stored
+    // connection as unverified rather than "not configured", and clear the in-flight and
+    // tested-connection markers so switching back to editable re-verifies from scratch.
+    if (disabled) {
+      requestRef.current += 1;
+      testedConnectionRef.current = undefined;
+      setVerificationState('unverified');
       setVerificationMessage('');
       return;
     }

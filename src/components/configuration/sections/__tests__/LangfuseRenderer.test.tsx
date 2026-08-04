@@ -166,7 +166,7 @@ describe('LangfuseRenderer', () => {
     expect(await screen.findByText('com_config_langfuse_verified')).toBeVisible();
   });
 
-  it('does not verify the connection on load for read-only (disabled) viewers', async () => {
+  it('shows a configured connection as unverified without verifying it for read-only (disabled) viewers', async () => {
     mockGet.mockResolvedValue({
       configured: true,
       enabled: true,
@@ -179,6 +179,8 @@ describe('LangfuseRenderer', () => {
 
     expect(await screen.findByText('pk-lf-...cdef')).toBeVisible();
     expect(mockTest).not.toHaveBeenCalled();
+    expect(screen.getByText('com_config_langfuse_not_verified')).toBeVisible();
+    expect(screen.queryByText('com_config_langfuse_not_configured')).not.toBeInTheDocument();
   });
 
   it('verifies then saves a new connection through the dedicated API', async () => {
