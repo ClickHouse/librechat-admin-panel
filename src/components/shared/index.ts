@@ -5,6 +5,7 @@ export { EditButton } from './EditButton';
 export { EmptyState } from './EmptyState';
 export { FormDialog } from './FormDialog';
 export { KebabMenu } from './KebabMenu';
+export { OrganizationSwitcher } from './OrganizationSwitcher';
 export { LoadingState } from './LoadingState';
 export { Pagination } from './Pagination';
 export { PermissionsUnavailable } from './PermissionsUnavailable';

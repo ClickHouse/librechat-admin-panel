@@ -1228,5 +1228,10 @@
   "com_kv_type_number": "123",
   "com_kv_type_boolean": "T/F",
   "com_kv_type_json": "{ }",
-  "com_a11y_logo_alt": "LibreChat logo"
+  "com_a11y_logo_alt": "LibreChat logo",
+  "com_admin_return_to_librechat": "Return to LibreChat",
+  "com_admin_org_switcher_label": "Choose an organization where you have admin access",
+  "com_admin_org_switcher_placeholder": "Select an organization",
+  "com_admin_org_switcher_switching": "Switching organization...",
+  "com_admin_org_switcher_error": "We couldn't switch organizations. Please try again."
 }

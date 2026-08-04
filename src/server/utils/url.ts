@@ -8,6 +8,16 @@ export function getApiBaseUrl(): string {
   return 'http://localhost:3080';
 }
 
+export function getLibreChatUrl(): string {
+  if (typeof process !== 'undefined' && process.env?.VITE_LIBRECHAT_URL) {
+    return process.env.VITE_LIBRECHAT_URL;
+  }
+  if (typeof import.meta !== 'undefined' && import.meta.env?.VITE_LIBRECHAT_URL) {
+    return import.meta.env.VITE_LIBRECHAT_URL;
+  }
+  return getApiBaseUrl();
+}
+
 /** Server-to-server API URL. Falls back to getApiBaseUrl() if API_SERVER_URL is not set. */
 export function getServerApiUrl(): string {
   if (typeof process !== 'undefined' && process.env?.API_SERVER_URL) {

@@ -1,6 +1,7 @@
 import { Icon } from '@clickhouse/click-ui';
-import { Link } from '@tanstack/react-router';
 import { useLocalize } from '@/hooks';
+import { getLibreChatUrl } from '@/server/utils/url';
+import { OrganizationSwitcher } from './OrganizationSwitcher';
 
 export function AccessDenied() {
   const localize = useLocalize();
@@ -18,12 +19,13 @@ export function AccessDenied() {
       <p className="max-w-md text-center text-sm text-(--cui-color-text-muted)">
         {localize('com_access_denied_description')}
       </p>
-      <Link
-        to="/configuration"
+      <OrganizationSwitcher />
+      <a
+        href={getLibreChatUrl()}
         className="mt-2 rounded-lg border border-(--cui-color-stroke-default) bg-transparent px-4 py-2 text-sm font-medium text-(--cui-color-text-default) no-underline transition-colors hover:bg-(--cui-color-background-hover)"
       >
-        {localize('com_nav_go_home')}
-      </Link>
+        {localize('com_admin_return_to_librechat')}
+      </a>
     </div>
   );
 }

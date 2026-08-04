@@ -207,8 +207,8 @@ export const verifyAdminTokenFn = createServerFn({ method: 'GET' }).handler(asyn
 
         if (!response.ok) {
           if (response.status === 403) {
-            await clearSession(session);
-            return { valid: false, error: 'Admin privileges have been revoked' };
+            await session.update({ lastVerified: now, lastActivity: now });
+            return { valid: true, user, accessDenied: true };
           }
           if (response.status === 401) {
             if (refreshToken) {

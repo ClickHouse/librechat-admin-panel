@@ -30,6 +30,12 @@ export interface AdminVerifyResponse {
   user: SerializableUser;
 }
 
+export interface AdminOrganization {
+  id: string;
+  name: string;
+  isCurrent: boolean;
+}
+
 export interface OAuthExchangeResponse {
   token: string;
   refreshToken?: string;
