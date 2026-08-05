@@ -15,23 +15,19 @@ export function OrganizationSwitcher() {
   const switchMutation = useMutation({
     mutationFn: (targetOrgId: string) => switchAdminOrganizationFn({ data: { targetOrgId } }),
     onSuccess: async () => {
-      await queryClient.invalidateQueries();
-      await router.invalidate();
-      await router.navigate({ to: '/' });
+      try {
+        await queryClient.invalidateQueries();
+        await router.invalidate();
+        await router.navigate({ to: '/' });
+      } catch {
+        setSwitchingTo(null);
+      }
     },
     onError: () => {
       setSwitchingTo(null);
       setSelectedOrgId('');
     },
   });
-
-  const organizations = organizationsQuery.data ?? [];
-  if (organizations.length === 0) return null;
-
-  const startSwitch = (organization: { id: string; name: string }) => {
-    setSwitchingTo(organization.name);
-    switchMutation.mutate(organization.id);
-  };
 
   if (switchingTo) {
     return (
@@ -47,6 +43,14 @@ export function OrganizationSwitcher() {
     );
   }
 
+  const organizations = organizationsQuery.data ?? [];
+  if (organizations.length === 0) return null;
+
+  const startSwitch = (organization: { id: string; name: string }) => {
+    setSwitchingTo(organization.name);
+    switchMutation.mutate(organization.id);
+  };
+
   const error = switchMutation.isError && (
     <p role="alert" className="text-sm text-(--cui-color-text-danger)">
       {localize('com_admin_org_switcher_error')}
@@ -61,6 +65,7 @@ export function OrganizationSwitcher() {
           type="primary"
           label={localize('com_admin_org_switcher_continue', { org: organization.name })}
           onClick={() => startSwitch(organization)}
+          disabled={switchMutation.isPending}
         />
         {error}
       </div>
@@ -90,7 +95,7 @@ export function OrganizationSwitcher() {
             : localize('com_admin_org_switcher_switch')
         }
         onClick={() => selected && startSwitch(selected)}
-        disabled={!selected}
+        disabled={!selected || switchMutation.isPending}
       />
       {error}
     </div>

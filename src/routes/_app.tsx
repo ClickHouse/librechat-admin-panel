@@ -40,7 +40,7 @@ export const Route = createFileRoute('/_app')({
     const hasAdmin =
       caps.available && hasImpliedCapability(caps.capabilities, SystemCapabilities.ACCESS_ADMIN);
     if (!hasAdmin) {
-      await context.queryClient.ensureQueryData(adminOrganizationsQueryOptions);
+      await context.queryClient.ensureQueryData(adminOrganizationsQueryOptions).catch(() => {});
     }
   },
   pendingComponent: AppPending,
