@@ -170,7 +170,7 @@ describe('verifyAdminTokenFn', () => {
     expect(updateSession).toHaveBeenCalledWith({ lastActivity: expect.any(Number) });
   });
 
-  it('clears a delegated admin session when backend capability revalidation is denied', async () => {
+  it('keeps the authenticated session and flags access denied when the current org fails admin revalidation', async () => {
     const user = { id: 'user-4', role: 'department-admin', email: 'delegate4@example.com' };
     sessionState.data = {
       user,
@@ -182,16 +182,18 @@ describe('verifyAdminTokenFn', () => {
 
     const result = await verifyAdminTokenFn();
 
-    expect(result).toEqual({ valid: false, error: 'Admin privileges have been revoked' });
+    // A 403 for the current org is a recoverable non-admin state, not a revoked
+    // session: preserve authentication so the panel can offer org recovery.
+    expect(result).toEqual({ valid: true, user, accessDenied: true });
     expect(fetchMock).toHaveBeenCalledWith('http://librechat.test/api/admin/verify', {
       headers: { Authorization: 'Bearer jwt-token-4' },
     });
-    expect(updateSession).toHaveBeenCalledWith(
-      expect.objectContaining({
-        token: undefined,
-        user: undefined,
-        refreshToken: undefined,
-      }),
+    expect(updateSession).toHaveBeenCalledWith({
+      lastVerified: expect.any(Number),
+      lastActivity: expect.any(Number),
+    });
+    expect(updateSession).not.toHaveBeenCalledWith(
+      expect.objectContaining({ token: undefined, user: undefined }),
     );
   });
 });
