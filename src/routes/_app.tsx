@@ -1,13 +1,14 @@
 import { useState, useEffect } from 'react';
 import { Icon } from '@clickhouse/click-ui';
+import { useSuspenseQuery } from '@tanstack/react-query';
 import { createFileRoute, Outlet, useRouter, Link, redirect } from '@tanstack/react-router';
 import type { ErrorComponentProps } from '@tanstack/react-router';
-import { useCapabilities, useCommandMenu, useLocalize } from '@/hooks';
+import { capabilitiesQueryOptions, useCommandMenu, useLocalize } from '@/hooks';
 import { CommandMenu } from '@/components/CommandMenu';
-import { AccessDenied } from '@/components/shared';
-import { SystemCapabilities } from '@/constants';
+import { AccessDenied, LoadingState } from '@/components/shared';
+import { SystemCapabilities, hasImpliedCapability } from '@/constants';
 import { Sidebar } from '@/components/Sidebar';
-import { verifyAdminTokenFn } from '@/server';
+import { adminOrganizationsQueryOptions, verifyAdminTokenFn } from '@/server';
 import { Header } from '@/components/Header';
 
 const ROUTE_TITLE_KEYS: Record<string, string> = {
@@ -18,7 +19,6 @@ const ROUTE_TITLE_KEYS: Record<string, string> = {
   '/grants': 'com_grants_title',
   '/help': 'com_help_title',
 };
-
 
 export const Route = createFileRoute('/_app')({
   beforeLoad: async ({ location }) => {
@@ -33,14 +33,37 @@ export const Route = createFileRoute('/_app')({
 
     return { user: result.user };
   },
+  // Resolve the admin capability check at the route boundary so the layout
+  // renders a decided state (authorized or denied) and never flashes chrome.
+  // On the recovery (non-admin) path, also warm the admin-org list so the
+  // switcher is present on first paint instead of popping in.
+  loader: async ({ context }) => {
+    const caps = await context.queryClient.ensureQueryData(
+      capabilitiesQueryOptions(context.user.id),
+    );
+    const hasAdmin =
+      caps.available && hasImpliedCapability(caps.capabilities, SystemCapabilities.ACCESS_ADMIN);
+    if (!hasAdmin) {
+      await context.queryClient.ensureQueryData(adminOrganizationsQueryOptions);
+    }
+  },
+  pendingComponent: AppPending,
   component: AppLayout,
   errorComponent: AppError,
   notFoundComponent: AppNotFound,
 });
 
+function AppPending() {
+  return (
+    <div className="flex h-screen items-center justify-center">
+      <LoadingState />
+    </div>
+  );
+}
+
 function AppLayout() {
   const { user } = Route.useRouteContext();
-  const { hasCapability, isLoading, isError } = useCapabilities();
+  const { available, capabilities } = useSuspenseQuery(capabilitiesQueryOptions(user.id)).data;
   const router = useRouter();
   const localize = useLocalize();
   const { open, setOpen } = useCommandMenu();
@@ -68,8 +91,14 @@ function AppLayout() {
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-  if (!isLoading && !isError && !hasCapability(SystemCapabilities.ACCESS_ADMIN)) {
-    return <AccessDenied />;
+  // Capabilities are resolved in the route loader, so this renders a decided
+  // state — authorized or denied — with no in-component loading flash.
+  if (!available || !hasImpliedCapability(capabilities, SystemCapabilities.ACCESS_ADMIN)) {
+    return (
+      <div className="flex h-screen flex-col">
+        <AccessDenied />
+      </div>
+    );
   }
 
   const matchedKey = Object.keys(ROUTE_TITLE_KEYS).find((route) =>

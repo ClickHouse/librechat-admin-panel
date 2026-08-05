@@ -1232,6 +1232,10 @@
   "com_admin_return_to_librechat": "Return to LibreChat",
   "com_admin_org_switcher_label": "Choose an organization where you have admin access",
   "com_admin_org_switcher_placeholder": "Select an organization",
+  "com_admin_org_switcher_continue": "Continue to {{org}}",
+  "com_admin_org_switcher_switch": "Switch organization",
+  "com_admin_org_switcher_switch_to": "Switch to {{org}}",
+  "com_admin_org_switcher_switching_to": "Switching to {{org}}...",
   "com_admin_org_switcher_switching": "Switching organization...",
   "com_admin_org_switcher_error": "We couldn't switch organizations. Please try again."
 }
