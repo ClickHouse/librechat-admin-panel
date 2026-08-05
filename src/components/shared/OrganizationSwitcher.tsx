@@ -1,13 +1,9 @@
 import { useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from '@tanstack/react-router';
 import { Button, Icon, Select } from '@clickhouse/click-ui';
-import { useLocalize } from '@/hooks';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { adminOrganizationsQueryOptions, switchAdminOrganizationFn } from '@/server';
-
-/** Keep the switch interstitial on screen at least this long so a fast switch
- * reads as a deliberate transition rather than a jarring flash. */
-const MIN_INTERSTITIAL_MS = 400;
+import { useLocalize } from '@/hooks';
 
 export function OrganizationSwitcher() {
   const localize = useLocalize();
@@ -19,10 +15,6 @@ export function OrganizationSwitcher() {
   const switchMutation = useMutation({
     mutationFn: (targetOrgId: string) => switchAdminOrganizationFn({ data: { targetOrgId } }),
     onSuccess: async () => {
-      // Hold the named interstitial briefly so a fast switch does not flash,
-      // then refetch every query against the new session (the overlay hides the
-      // refetch, so no previous-org data is ever shown) and re-run the loaders.
-      await new Promise((resolve) => setTimeout(resolve, MIN_INTERSTITIAL_MS));
       await queryClient.invalidateQueries();
       await router.invalidate();
       await router.navigate({ to: '/' });
@@ -41,8 +33,6 @@ export function OrganizationSwitcher() {
     switchMutation.mutate(organization.id);
   };
 
-  // Named, full-screen transition that covers the mutation + refetch + reroute,
-  // so the context switch reads as intentional instead of snapping into place.
   if (switchingTo) {
     return (
       <div
@@ -63,8 +53,6 @@ export function OrganizationSwitcher() {
     </p>
   );
 
-  // Exactly one administered org: a single explicit action reads better than a
-  // one-item dropdown, and still requires a deliberate click (no silent switch).
   if (organizations.length === 1) {
     const organization = organizations[0];
     return (
@@ -79,8 +67,6 @@ export function OrganizationSwitcher() {
     );
   }
 
-  // Multiple orgs: selecting only sets the target; the switch is a separate,
-  // deliberate click so a stray selection never navigates the user away.
   const selected = organizations.find((organization) => organization.id === selectedOrgId);
   return (
     <div className="flex w-full max-w-sm flex-col gap-2">

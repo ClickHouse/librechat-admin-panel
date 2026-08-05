@@ -1,6 +1,6 @@
 import { useCallback } from 'react';
-import { queryOptions, useQuery } from '@tanstack/react-query';
 import { getRouteApi } from '@tanstack/react-router';
+import { queryOptions, useQuery } from '@tanstack/react-query';
 import { getEffectiveCapabilitiesFn } from '@/server';
 import { hasImpliedCapability } from '@/constants';
 
@@ -16,15 +16,6 @@ interface CapabilitiesData {
   capabilities: string[];
 }
 
-/**
- * Shared query for the current admin's effective capabilities.
- *
- * Errors are classified into `available` (grants system reachable) plus a
- * capability list rather than thrown, so the admin gate can be resolved from
- * data alone. Prefetch this in a route loader with `ensureQueryData` so the
- * layout never renders in a loading state; `useCapabilities` reads the same
- * cache entry for per-feature checks.
- */
 export const capabilitiesQueryOptions = (userId: string) =>
   queryOptions({
     queryKey: ['effectiveCapabilities', userId],

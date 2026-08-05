@@ -182,8 +182,6 @@ describe('verifyAdminTokenFn', () => {
 
     const result = await verifyAdminTokenFn();
 
-    // A 403 for the current org is a recoverable non-admin state, not a revoked
-    // session: preserve authentication so the panel can offer org recovery.
     expect(result).toEqual({ valid: true, user, accessDenied: true });
     expect(fetchMock).toHaveBeenCalledWith('http://librechat.test/api/admin/verify', {
       headers: { Authorization: 'Bearer jwt-token-4' },

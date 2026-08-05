@@ -11,8 +11,8 @@ import {
   Scripts,
   createRootRouteWithContext,
 } from '@tanstack/react-router';
-import type { QueryClient } from '@tanstack/react-query';
 import type { ErrorComponentProps } from '@tanstack/react-router';
+import type { QueryClient } from '@tanstack/react-query';
 import { ThemeProvider, useTheme } from '../contexts/ThemeContext';
 import appCss from '../styles.css?url';
 import { useLocalize } from '@/hooks';
