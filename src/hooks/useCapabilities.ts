@@ -1,6 +1,7 @@
 import { useCallback } from 'react';
 import { getRouteApi } from '@tanstack/react-router';
 import { queryOptions, useQuery } from '@tanstack/react-query';
+import type * as t from '@/types';
 import { getEffectiveCapabilitiesFn } from '@/server';
 import { hasImpliedCapability } from '@/constants';
 
@@ -11,15 +12,10 @@ const GRANTS_UNAVAILABLE_PATTERN = /\b(404|503)\b|endpoint not found|fetch faile
 const AUTH_DENIED_PATTERN =
   /\b(401|403)\b|forbidden|unauthorized|authentication required|no admin session token/i;
 
-interface CapabilitiesData {
-  available: boolean;
-  capabilities: string[];
-}
-
 export const capabilitiesQueryOptions = (userId: string) =>
   queryOptions({
     queryKey: ['effectiveCapabilities', userId],
-    queryFn: async (): Promise<CapabilitiesData> => {
+    queryFn: async (): Promise<t.CapabilitiesData> => {
       try {
         const res = await getEffectiveCapabilitiesFn();
         return { available: true, capabilities: res.capabilities };
