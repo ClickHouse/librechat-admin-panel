@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { PrincipalType } from 'librechat-data-provider';
 import { Icon, Button, Dialog } from '@clickhouse/click-ui';
 import type * as t from '@/types';
-import { getEnumOptions, getArrayItemType, toKVPair } from './utils';
+import { getEnumOptions, getArrayItemType, kvPairsEditValue, toKVPair } from './utils';
 import { KeyValueField } from './fields/KeyValueField';
 import { TrashButton } from '@/components/shared';
 import { getScopeTypeConfig } from '@/constants';
@@ -208,7 +208,7 @@ function ModalValueControl({
       <KeyValueField
         id="profile-kv"
         pairs={pairs}
-        onChange={onChange}
+        onChange={(p) => onChange(kvPairsEditValue(p))}
         aria-label={localize('com_ui_value')}
       />
     );
@@ -318,7 +318,7 @@ export function getDefaultValue(controlType: string, fieldSchema?: t.SchemaField
     return opts.length > 0 ? opts[0].value : '';
   }
   if (controlType === 'array') return [];
-  if (controlType === 'record') return [];
+  if (controlType === 'record') return {};
   if (controlType === 'object' || controlType === 'code') return {};
   return '';
 }

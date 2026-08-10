@@ -215,6 +215,22 @@ describe('SingleFieldRenderer', () => {
     expect(screen.getByDisplayValue('Authorization')).toBeInTheDocument();
     expect(screen.getByDisplayValue('Bearer token')).toBeInTheDocument();
   });
+
+  it('emits an empty record, not an empty array, when the last key-value row is removed', () => {
+    const field = createField({ key: 'headers', type: 'record' });
+    const onChange = vi.fn();
+    render(
+      <SingleFieldRenderer
+        field={field}
+        value={{ Authorization: 'Bearer token' }}
+        path="section.headers"
+        getValue={getValue}
+        onChange={onChange}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'com_ui_delete com_ui_entry 1' }));
+    expect(onChange).toHaveBeenCalledWith('section.headers', {});
+  });
 });
 
 describe('FieldRenderer with imported config values', () => {

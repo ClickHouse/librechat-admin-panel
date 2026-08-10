@@ -10,6 +10,7 @@ import {
   getControlType,
   getEnumOptions,
   hasDescendant,
+  kvPairsEditValue,
   toKVPair,
   isStringLikeItemType,
   splitUnionTypes,
@@ -23,6 +24,7 @@ import { ListRecordField } from './fields/ListRecordField';
 import { renderCollapsible } from './renderCollapsible';
 import { TextareaField } from './fields/TextareaField';
 import { KeyValueField } from './fields/KeyValueField';
+import { cn, getSecretPreviewValue } from '@/utils';
 import { NumberField } from './fields/NumberField';
 import { SecretField } from './fields/SecretField';
 import { ToggleField } from './fields/ToggleField';
@@ -32,7 +34,6 @@ import { ListField } from './fields/ListField';
 import { CodeField } from './fields/CodeField';
 import { ConfigRow } from './ConfigRow';
 import { useLocalize } from '@/hooks';
-import { cn, getSecretPreviewValue } from '@/utils';
 
 function formatDefault(value: t.ConfigValue): string | null {
   if (value === undefined || value === null) return null;
@@ -477,7 +478,7 @@ export function SingleFieldRenderer({
         <KeyValueField
           id={fieldId}
           pairs={pairs}
-          onChange={(newPairs) => onChange(path, newPairs)}
+          onChange={(newPairs) => onChange(path, kvPairsEditValue(newPairs))}
           disabled={disabled}
           valueTypes={field.recordValueKVTypes}
           aria-label={fieldLabel}
@@ -1221,7 +1222,7 @@ export function renderInlineField(
         <KeyValueField
           id={fieldId}
           pairs={pairs}
-          onChange={(p) => onChange(field.key, p)}
+          onChange={(p) => onChange(field.key, kvPairsEditValue(p))}
           disabled={disabled}
           valueTypes={field.recordValueKVTypes}
           aria-label={fieldLabel}

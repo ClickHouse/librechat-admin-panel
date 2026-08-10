@@ -8,6 +8,7 @@ import {
   enumerateLeafPaths,
   validateMcpCrossField,
 } from '../McpServersRenderer';
+import { applyConfigEdit, buildSavePayload } from '../../utils';
 import { createField } from '@/test/fixtures';
 
 vi.mock('@/hooks/useLocalize', () => ({
@@ -1056,5 +1057,62 @@ describe('McpServersRenderer — create then edit then rename preserves nested d
       ([p, v]) => p === 'mcpServers.kapa2.headers' && typeof v === 'object' && v !== null,
     );
     expect(wholeHeadersWrite).toBeUndefined();
+  });
+});
+
+describe('McpServersRenderer — header KV pairs never leak into the save payload (issue #56)', () => {
+  function renderWithHeaders(baseRecord: Record<string, t.ConfigValue>) {
+    const onChange = vi.fn();
+    const fields = [
+      ...fieldsForMcp(),
+      createField({ key: 'headers', type: 'record', isOptional: true }),
+    ];
+    const props: t.FieldRendererProps = {
+      fields,
+      parentValue: baseRecord,
+      parentPath: 'mcpServers',
+      getValue: (path, fallback) => (path === 'mcpServers' ? baseRecord : fallback),
+      onChange,
+      editedValues: {},
+    };
+    return { ...render(<McpServersRenderer {...props} />), onChange };
+  }
+
+  const baseRecord = {
+    srv: {
+      type: 'streamable-http',
+      url: 'https://example.com/api/mcp',
+      headers: { Authorization: 'Bearer old' },
+    },
+  };
+
+  it('serializes an edited Authorization header to a plain record in the save payload', () => {
+    const { onChange } = renderWithHeaders(baseRecord);
+
+    fireEvent.click(screen.getByText('srv'));
+    const valueInput = screen.getByLabelText('com_ui_value 1');
+    fireEvent.change(valueInput, { target: { value: 'Bearer {{API_KEY}}' } });
+    fireEvent.blur(valueInput);
+
+    const headerEdits = onChange.mock.calls.filter(([p]) => p === 'mcpServers.srv.headers');
+    expect(headerEdits.length).toBeGreaterThan(0);
+    const [path, emitted] = headerEdits[headerEdits.length - 1] as [string, t.ConfigValue];
+
+    const edited = applyConfigEdit({}, path, emitted, {}, new Set(), new Set());
+    const { saves } = buildSavePayload(new Set([path]), edited, new Set());
+    expect(saves).toEqual([
+      { fieldPath: 'mcpServers.srv.headers', value: { Authorization: 'Bearer {{API_KEY}}' } },
+    ]);
+  });
+
+  it('emits an empty record, not an empty array, when the last header row is removed', () => {
+    const { onChange } = renderWithHeaders(baseRecord);
+
+    fireEvent.click(screen.getByText('srv'));
+    fireEvent.click(screen.getByRole('button', { name: 'com_ui_delete com_ui_entry 1' }));
+
+    const headerEdits = onChange.mock.calls.filter(([p]) => p === 'mcpServers.srv.headers');
+    expect(headerEdits.length).toBeGreaterThan(0);
+    expect(headerEdits[headerEdits.length - 1][1]).toEqual({});
   });
 });
