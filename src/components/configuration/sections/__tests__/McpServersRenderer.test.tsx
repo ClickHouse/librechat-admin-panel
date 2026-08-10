@@ -59,6 +59,7 @@ interface NumberFieldProps {
 interface IconButtonProps {
   icon: string;
   onClick?: () => void;
+  disabled?: boolean;
   'aria-label'?: string;
 }
 
@@ -89,9 +90,10 @@ vi.mock('@clickhouse/click-ui', () => ({
   Button: ({ label, onClick, children }: ButtonProps) => (
     <button onClick={onClick}>{label ?? children}</button>
   ),
-  IconButton: ({ icon, onClick, ...props }: IconButtonProps) => (
+  IconButton: ({ icon, onClick, disabled, ...props }: IconButtonProps) => (
     <button
       onClick={onClick}
+      disabled={disabled}
       aria-label={props['aria-label'] ?? icon}
       data-testid={`icon-button-${icon}`}
     />
@@ -163,6 +165,7 @@ function fieldsForMcp(): t.SchemaField[] {
     createField({ key: 'command', type: 'string', isOptional: true }),
     createField({ key: 'title', type: 'string', isOptional: true }),
     createField({ key: 'description', type: 'string', isOptional: true }),
+    createField({ key: 'apiKey', type: 'string', isOptional: true }),
     createField({ key: 'tools', type: 'array<string>', isOptional: true, isArray: true }),
     createField({ key: 'source', type: 'string', isOptional: true }),
   ];
@@ -173,16 +176,22 @@ function renderRenderer({
   editedValues = {},
   dbOverridePaths,
   yamlBaseKeys,
+  dbOverrideKeys,
   isEditingScope,
+  editSessionId,
   onChange = vi.fn(),
+  onResetEntryOverrides,
   onValidationError = vi.fn(),
 }: {
   baseRecord: Record<string, t.ConfigValue>;
   editedValues?: t.FlatConfigMap;
   dbOverridePaths?: Set<string>;
   yamlBaseKeys?: Set<string>;
+  dbOverrideKeys?: Set<string>;
   isEditingScope?: boolean;
+  editSessionId?: number;
   onChange?: (path: string, value: t.ConfigValue) => void;
+  onResetEntryOverrides?: (target: t.EntryResetTarget) => void;
   onValidationError?: (message: string) => void;
 }) {
   const fields = fieldsForMcp();
@@ -199,11 +208,17 @@ function renderRenderer({
     editedValues,
     dbOverridePaths,
     yamlBaseKeys,
+    dbOverrideKeys,
     isEditingScope,
+    editSessionId,
+    onResetEntryOverrides,
     onValidationError,
   };
+  const result = render(<McpServersRenderer {...props} />);
   return {
-    ...render(<McpServersRenderer {...props} />),
+    ...result,
+    rerenderWithSession: (sessionId: number) =>
+      result.rerender(<McpServersRenderer {...props} editSessionId={sessionId} />),
     onChange,
     onValidationError,
     fields,
@@ -341,6 +356,129 @@ describe('McpServersRenderer — YAML source detection', () => {
     expect(url!.hasAttribute('disabled')).toBe(false);
     expect(container.querySelector('button[aria-label^="com_ui_delete"]')).not.toBeNull();
     expect(container.querySelector('button[aria-label^="com_a11y_rename_entry"]')).not.toBeNull();
+  });
+});
+
+describe('McpServersRenderer — per-entry clear overrides (issue #73)', () => {
+  it('shows a reset-to-YAML action on a YAML server with DB overrides and reports the entry target', () => {
+    const onResetEntryOverrides = vi.fn();
+    const baseRecord = {
+      kapa: { type: 'sse', url: 'https://example.com', title: 'Overridden title' },
+    };
+    const { container } = renderRenderer({
+      baseRecord,
+      yamlBaseKeys: new Set(['kapa']),
+      dbOverrideKeys: new Set(['kapa']),
+      onResetEntryOverrides,
+    });
+
+    expect(container.querySelector('button[aria-label^="com_ui_delete"]')).toBeNull();
+    const resetBtn = screen.getByTestId('icon-button-refresh');
+    fireEvent.click(resetBtn);
+    expect(onResetEntryOverrides).toHaveBeenCalledWith({
+      fieldPath: 'mcpServers.kapa',
+      label: 'kapa',
+    });
+  });
+
+  it('hides the reset action when the YAML server has no DB overrides', () => {
+    const baseRecord = {
+      kapa: { type: 'sse', url: 'https://example.com' },
+    };
+    renderRenderer({
+      baseRecord,
+      yamlBaseKeys: new Set(['kapa']),
+      dbOverrideKeys: new Set<string>(),
+      onResetEntryOverrides: vi.fn(),
+    });
+    expect(screen.queryByTestId('icon-button-refresh')).toBeNull();
+  });
+
+  it('hides the reset action for keys the field-path validator rejects', () => {
+    const baseRecord = {
+      constructor: { type: 'sse', url: 'https://example.com', title: 'Overridden' },
+    };
+    renderRenderer({
+      baseRecord,
+      yamlBaseKeys: new Set(['constructor']),
+      dbOverrideKeys: new Set(['constructor']),
+      onResetEntryOverrides: vi.fn(),
+    });
+    expect(screen.queryByTestId('icon-button-refresh')).toBeNull();
+    expect(screen.queryByRole('button', { name: /com_ui_delete/ })).toBeNull();
+  });
+
+  it('hides the reset action for admin-only servers (they have delete instead)', () => {
+    const baseRecord = {
+      adminOnly: { type: 'sse', url: 'https://admin.example.com' },
+    };
+    const { container } = renderRenderer({
+      baseRecord,
+      yamlBaseKeys: new Set<string>(),
+      dbOverrideKeys: new Set(['adminOnly']),
+      onResetEntryOverrides: vi.fn(),
+    });
+    expect(screen.queryByTestId('icon-button-refresh')).toBeNull();
+    expect(container.querySelector('button[aria-label^="com_ui_delete"]')).not.toBeNull();
+  });
+
+  it('hides the reset action in scope mode (scope overrides are not the base override layer)', () => {
+    const baseRecord = {
+      kapa: { type: 'sse', url: 'https://example.com' },
+    };
+    renderRenderer({
+      baseRecord,
+      yamlBaseKeys: new Set(['kapa']),
+      dbOverrideKeys: new Set(['kapa']),
+      isEditingScope: true,
+      onResetEntryOverrides: vi.fn(),
+    });
+    expect(screen.queryByTestId('icon-button-refresh')).toBeNull();
+  });
+
+  it('disables the reset action while edits are pending', () => {
+    const baseRecord = {
+      kapa: { type: 'sse', url: 'https://example.com' },
+    };
+    renderRenderer({
+      baseRecord,
+      editedValues: { 'mcpServers.kapa.title': 'staged' },
+      yamlBaseKeys: new Set(['kapa']),
+      dbOverrideKeys: new Set(['kapa']),
+      onResetEntryOverrides: vi.fn(),
+    });
+    const resetBtn = screen.getByTestId('icon-button-refresh');
+    expect(resetBtn.hasAttribute('disabled')).toBe(true);
+  });
+});
+
+describe('McpServersRenderer — editSessionId remounts secret replacement state', () => {
+  it('abandons an open untouched Replace input when the edit session changes (e.g. after an entry reset)', () => {
+    const baseRecord = {
+      kapa: { type: 'sse', url: 'https://x.com', apiKeyPreview: 'sk-test...1234' },
+    };
+    const { container, rerenderWithSession } = renderRenderer({
+      baseRecord,
+      yamlBaseKeys: new Set<string>(),
+      editSessionId: 0,
+    });
+
+    fireEvent.click(screen.getByText('kapa'));
+    fireEvent.click(screen.getByText('com_config_group_authentication'));
+    const replaceBtn = container.querySelector(
+      'button[aria-label^="com_a11y_secret_replace"]',
+    ) as HTMLButtonElement | null;
+    expect(replaceBtn).not.toBeNull();
+    fireEvent.click(replaceBtn!);
+    expect(
+      container.querySelector('button[aria-label^="com_a11y_secret_cancel_replace"]'),
+    ).not.toBeNull();
+
+    rerenderWithSession(1);
+    expect(
+      container.querySelector('button[aria-label^="com_a11y_secret_cancel_replace"]'),
+    ).toBeNull();
+    expect(container.querySelector('button[aria-label^="com_a11y_secret_replace"]')).not.toBeNull();
   });
 });
 

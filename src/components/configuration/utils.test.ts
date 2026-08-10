@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import type * as t from '@/types';
 import {
   getControlType,
@@ -9,6 +9,9 @@ import {
   mergeIndexedArrayEdits,
   buildSavePayload,
   applyConfigEdit,
+  buildEntryOverridesResetPlan,
+  executeEntryOverridesReset,
+  collectEntryOverrideKeys,
 } from './utils';
 import { createField } from '@/test/fixtures';
 import { flattenObject } from '@/utils';
@@ -541,5 +544,297 @@ describe('buildSavePayload — masked secrets never reach the backend', () => {
     const { saves, resets } = buildSavePayload(new Set(['ocr.apiKey']), edited, schemaPaths);
     expect(saves).toEqual([]);
     expect(resets).toEqual(['ocr.apiKey']);
+  });
+});
+
+describe('buildEntryOverridesResetPlan', () => {
+  const schemaPaths = new Set(['endpoints.custom.apiKey', 'endpoints.custom.name']);
+
+  it('resets the whole override subtree for a record entry (MCP server)', () => {
+    const dbOverrides = {
+      mcpServers: { kapa: { title: 'Overridden', timeout: 5000 } },
+    };
+    expect(
+      buildEntryOverridesResetPlan({ fieldPath: 'mcpServers.kapa' }, dbOverrides, schemaPaths),
+    ).toEqual({ resetPaths: ['mcpServers.kapa'], saves: [] });
+  });
+
+  it('rewrites the override array without the named item when other overrides remain', () => {
+    const dbOverrides = {
+      endpoints: {
+        custom: [
+          { name: 'yamlEp', baseURL: 'https://overridden.example' },
+          { name: 'adminEp', baseURL: 'https://admin.example' },
+        ],
+      },
+    };
+    expect(
+      buildEntryOverridesResetPlan(
+        { fieldPath: 'endpoints.custom', itemName: 'yamlEp' },
+        dbOverrides,
+        schemaPaths,
+      ),
+    ).toEqual({
+      resetPaths: [],
+      saves: [
+        {
+          fieldPath: 'endpoints.custom',
+          value: [{ name: 'adminEp', baseURL: 'https://admin.example' }],
+        },
+      ],
+    });
+  });
+
+  it('resets the array path outright when the named item was the only override', () => {
+    const dbOverrides = {
+      endpoints: { custom: [{ name: 'yamlEp', baseURL: 'https://overridden.example' }] },
+    };
+    expect(
+      buildEntryOverridesResetPlan(
+        { fieldPath: 'endpoints.custom', itemName: 'yamlEp' },
+        dbOverrides,
+        schemaPaths,
+      ),
+    ).toEqual({ resetPaths: ['endpoints.custom'], saves: [] });
+  });
+
+  it('produces a no-op plan when the named item has no stored override', () => {
+    const dbOverrides = {
+      endpoints: { custom: [{ name: 'adminEp', baseURL: 'https://admin.example' }] },
+    };
+    expect(
+      buildEntryOverridesResetPlan(
+        { fieldPath: 'endpoints.custom', itemName: 'missing' },
+        dbOverrides,
+        schemaPaths,
+      ),
+    ).toEqual({ resetPaths: [], saves: [] });
+  });
+
+  it('produces a no-op plan when there is no override array at all', () => {
+    expect(
+      buildEntryOverridesResetPlan(
+        { fieldPath: 'endpoints.custom', itemName: 'yamlEp' },
+        undefined,
+        schemaPaths,
+      ),
+    ).toEqual({ resetPaths: [], saves: [] });
+  });
+
+  it('emits sibling items in the omit shape the backend secret preservation expects', () => {
+    /** LibreChat's PATCH handler restores secrets omitted from same-name items (preserveArraySecrets omit-to-keep), so the rewritten array must carry NO apiKey or apiKeyPreview key on redacted siblings. Passthrough references like env placeholders come back readable from the redacted GET and round-trip verbatim. */
+    const dbOverrides = {
+      endpoints: {
+        custom: [
+          { name: 'yamlEp', apiKeyPreview: 'sk-yaml...1111' },
+          { name: 'adminEp', apiKeyPreview: 'sk-admi...2222', baseURL: 'https://a.example' },
+          { name: 'envEp', apiKey: '${MY_KEY}' },
+        ],
+      },
+    };
+    const plan = buildEntryOverridesResetPlan(
+      { fieldPath: 'endpoints.custom', itemName: 'yamlEp' },
+      dbOverrides,
+      schemaPaths,
+    );
+    expect(plan.saves).toEqual([
+      {
+        fieldPath: 'endpoints.custom',
+        value: [
+          { name: 'adminEp', baseURL: 'https://a.example' },
+          { name: 'envEp', apiKey: '${MY_KEY}' },
+        ],
+      },
+    ]);
+  });
+
+  it('strips masked secret previews from the rewritten override array', () => {
+    const dbOverrides = {
+      endpoints: {
+        custom: [
+          { name: 'yamlEp', apiKeyPreview: 'sk-yaml...1111' },
+          { name: 'adminEp', apiKeyPreview: 'sk-admi...2222' },
+        ],
+      },
+    };
+    const plan = buildEntryOverridesResetPlan(
+      { fieldPath: 'endpoints.custom', itemName: 'yamlEp' },
+      dbOverrides,
+      schemaPaths,
+    );
+    expect(plan.saves).toEqual([{ fieldPath: 'endpoints.custom', value: [{ name: 'adminEp' }] }]);
+  });
+});
+
+describe('executeEntryOverridesReset — builds the rewrite from a fresh override document', () => {
+  const schemaPaths = new Set(['endpoints.custom.apiKey', 'endpoints.custom.name']);
+  const target: t.EntryResetTarget = {
+    fieldPath: 'endpoints.custom',
+    itemName: 'yamlEp',
+    label: 'yamlEp',
+  };
+
+  it('preserves an item another admin added after this page cached its snapshot', async () => {
+    /** The stale client cache only knew about yamlEp; the fresh document also holds adminEp, added concurrently. The rewrite must come from the fresh document so adminEp survives the reset. */
+    const freshOverrides = {
+      endpoints: {
+        custom: [
+          { name: 'yamlEp', baseURL: 'https://overridden.example' },
+          { name: 'adminEp', baseURL: 'https://concurrent.example' },
+        ],
+      },
+    };
+    const fetchOverrides = vi.fn().mockResolvedValue(freshOverrides);
+    const resetField = vi.fn().mockResolvedValue(undefined);
+    const saveEntries = vi.fn().mockResolvedValue(undefined);
+
+    await executeEntryOverridesReset(target, schemaPaths, {
+      fetchOverrides,
+      resetField,
+      saveEntries,
+    });
+
+    expect(fetchOverrides).toHaveBeenCalledTimes(1);
+    expect(resetField).not.toHaveBeenCalled();
+    expect(saveEntries).toHaveBeenCalledWith([
+      {
+        fieldPath: 'endpoints.custom',
+        value: [{ name: 'adminEp', baseURL: 'https://concurrent.example' }],
+      },
+    ]);
+  });
+
+  it('is a no-op when another admin already removed the item from the fresh document', async () => {
+    const freshOverrides = {
+      endpoints: { custom: [{ name: 'adminEp', baseURL: 'https://concurrent.example' }] },
+    };
+    const fetchOverrides = vi.fn().mockResolvedValue(freshOverrides);
+    const resetField = vi.fn().mockResolvedValue(undefined);
+    const saveEntries = vi.fn().mockResolvedValue(undefined);
+
+    await executeEntryOverridesReset(target, schemaPaths, {
+      fetchOverrides,
+      resetField,
+      saveEntries,
+    });
+
+    expect(resetField).not.toHaveBeenCalled();
+    expect(saveEntries).not.toHaveBeenCalled();
+  });
+
+  it('unsets the array path when the fresh document holds only the named item', async () => {
+    const freshOverrides = {
+      endpoints: { custom: [{ name: 'yamlEp', baseURL: 'https://overridden.example' }] },
+    };
+    const fetchOverrides = vi.fn().mockResolvedValue(freshOverrides);
+    const resetField = vi.fn().mockResolvedValue(undefined);
+    const saveEntries = vi.fn().mockResolvedValue(undefined);
+
+    await executeEntryOverridesReset(target, schemaPaths, {
+      fetchOverrides,
+      resetField,
+      saveEntries,
+    });
+
+    expect(resetField).toHaveBeenCalledWith('endpoints.custom');
+    expect(saveEntries).not.toHaveBeenCalled();
+  });
+
+  it('unsets the record path for MCP targets regardless of the fetched document', async () => {
+    const fetchOverrides = vi.fn().mockResolvedValue(undefined);
+    const resetField = vi.fn().mockResolvedValue(undefined);
+    const saveEntries = vi.fn().mockResolvedValue(undefined);
+
+    await executeEntryOverridesReset({ fieldPath: 'mcpServers.kapa', label: 'kapa' }, schemaPaths, {
+      fetchOverrides,
+      resetField,
+      saveEntries,
+    });
+
+    expect(resetField).toHaveBeenCalledWith('mcpServers.kapa');
+    expect(saveEntries).not.toHaveBeenCalled();
+  });
+});
+
+describe('buildEntryOverridesResetPlan — legacy numeric-key object storage', () => {
+  const schemaPaths = new Set(['endpoints.custom.apiKey', 'endpoints.custom.name']);
+
+  /** Panels prior to #92 PATCHed indexed field paths (endpoints.custom.2) directly; Mongo's $set on a missing parent stores those as a numeric-key object rather than an array. */
+  it('rewrites a numeric-key object override as a dense array without the named item', () => {
+    const dbOverrides = {
+      endpoints: {
+        custom: {
+          '0': { name: 'yamlEp', baseURL: 'https://overridden.example' },
+          '2': { name: 'adminEp', baseURL: 'https://admin.example' },
+        },
+      },
+    };
+    expect(
+      buildEntryOverridesResetPlan(
+        { fieldPath: 'endpoints.custom', itemName: 'yamlEp' },
+        dbOverrides,
+        schemaPaths,
+      ),
+    ).toEqual({
+      resetPaths: [],
+      saves: [
+        {
+          fieldPath: 'endpoints.custom',
+          value: [{ name: 'adminEp', baseURL: 'https://admin.example' }],
+        },
+      ],
+    });
+  });
+
+  it('resets the array path when the numeric-key object held only the named item', () => {
+    const dbOverrides = {
+      endpoints: { custom: { '1': { name: 'yamlEp', baseURL: 'https://overridden.example' } } },
+    };
+    expect(
+      buildEntryOverridesResetPlan(
+        { fieldPath: 'endpoints.custom', itemName: 'yamlEp' },
+        dbOverrides,
+        schemaPaths,
+      ),
+    ).toEqual({ resetPaths: ['endpoints.custom'], saves: [] });
+  });
+
+  it('is a no-op for an object whose keys are not array indices', () => {
+    const dbOverrides = {
+      endpoints: { custom: { yamlEp: { name: 'yamlEp' } } },
+    };
+    expect(
+      buildEntryOverridesResetPlan(
+        { fieldPath: 'endpoints.custom', itemName: 'yamlEp' },
+        dbOverrides,
+        schemaPaths,
+      ),
+    ).toEqual({ resetPaths: [], saves: [] });
+  });
+});
+
+describe('collectEntryOverrideKeys', () => {
+  it('collects MCP record keys and endpoint names from an array override', () => {
+    const dbOverrides = {
+      mcpServers: { kapa: { title: 'X' }, other: { timeout: 1 } },
+      endpoints: { custom: [{ name: 'yamlEp' }, { name: 'adminEp' }, { baseURL: 'nameless' }] },
+    };
+    expect(collectEntryOverrideKeys(dbOverrides)).toEqual({
+      mcpServers: new Set(['kapa', 'other']),
+      endpoints: new Set(['yamlEp', 'adminEp']),
+    });
+  });
+
+  it('collects endpoint names from a legacy numeric-key object override', () => {
+    const dbOverrides = {
+      endpoints: { custom: { '0': { name: 'yamlEp' }, '3': { name: 'adminEp' } } },
+    };
+    expect(collectEntryOverrideKeys(dbOverrides)).toEqual({
+      endpoints: new Set(['yamlEp', 'adminEp']),
+    });
+  });
+
+  it('returns an empty map when there is no override document', () => {
+    expect(collectEntryOverrideKeys(undefined)).toEqual({});
   });
 });

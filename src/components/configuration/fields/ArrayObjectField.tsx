@@ -25,6 +25,7 @@ export function ArrayObjectField({
   addTriggerRef,
   renderFields,
   entryIdPrefix,
+  entryControls,
   editSessionId,
 }: t.ArrayObjectFieldProps) {
   const localize = useLocalize();
@@ -104,21 +105,29 @@ export function ArrayObjectField({
           onClick={handleAdd}
         />
       )}
-      {items.map((item, index) => (
-        <ObjectEntryCard
-          key={keys[index] ?? index}
-          id={entryIdPrefix ? `${entryIdPrefix}-${index}` : undefined}
-          entryKey={getEntryLabel(item) ?? localize('com_config_entry_n', { n: String(index + 1) })}
-          fields={fields}
-          value={item}
-          onValueChange={(v) => handleEntryChange(index, v)}
-          onRemove={disabled ? undefined : () => handleRemove(index)}
-          disabled={disabled}
-          defaultExpanded={keys[index] === expandedKeyRef.current}
-          renderFields={renderFields}
-          editSessionId={editSessionId}
-        />
-      ))}
+      {items.map((item, index) => {
+        const controls = entryControls?.(index, item);
+        return (
+          <ObjectEntryCard
+            key={keys[index] ?? index}
+            id={entryIdPrefix ? `${entryIdPrefix}-${index}` : undefined}
+            entryKey={
+              getEntryLabel(item) ?? localize('com_config_entry_n', { n: String(index + 1) })
+            }
+            fields={fields}
+            value={item}
+            onValueChange={(v) => handleEntryChange(index, v)}
+            onRemove={
+              disabled || controls?.canRemove === false ? undefined : () => handleRemove(index)
+            }
+            resetOverrides={controls?.resetOverrides}
+            disabled={disabled}
+            defaultExpanded={keys[index] === expandedKeyRef.current}
+            renderFields={renderFields}
+            editSessionId={editSessionId}
+          />
+        );
+      })}
       {items.length === 0 && !hideAddButton && (
         <p className="py-2 text-sm text-(--cui-color-text-muted)">
           {localize('com_config_no_entries')}

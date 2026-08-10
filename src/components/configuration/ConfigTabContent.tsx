@@ -57,6 +57,8 @@ export function ConfigTabContent({
   showConfiguredOnly,
   isEditingScope,
   baseRecordKeys,
+  dbOverrideKeys,
+  onResetEntryOverrides,
   onValidationError,
   editSessionId,
 }: t.ConfigTabContentProps) {
@@ -188,6 +190,8 @@ export function ConfigTabContent({
       showConfiguredOnly,
       isEditingScope,
       yamlBaseKeys: baseRecordKeys?.[dataKey],
+      dbOverrideKeys: dbOverrideKeys?.[dataKey],
+      onResetEntryOverrides,
       onValidationError,
       editSessionId,
     };

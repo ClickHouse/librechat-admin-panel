@@ -43,6 +43,9 @@ const TRANSPORT_TYPE_OPTIONS: { label: string; value: string }[] = [
 
 const ALWAYS_REQUIRED = new Set(['type']);
 
+/** Segments `safeFieldPath` rejects server-side; a server key matching one can never round-trip through the field-path API. */
+const UNADDRESSABLE_SEGMENTS = new Set(['__proto__', 'constructor', 'prototype']);
+
 /** Stable empty record used as the fallback for `baseRecord`/`parentValue` when no data is available, so the downstream `useMemo` chain on `editsByEntry`/`record` does not re-fire on every render with a fresh `{}` literal. */
 const EMPTY_RECORD: Record<string, t.ConfigValue> = Object.freeze({}) as Record<
   string,
@@ -212,6 +215,7 @@ function flattenGroupFields(
   disabled?: boolean,
   collectionRenderOverrides?: Record<string, t.CollectionRenderFields>,
   lockedKeys?: Set<string>,
+  editSessionId?: number,
 ): ReactNode[] {
   const values = isPlainObject(parentValue) ? parentValue : {};
 
@@ -264,6 +268,7 @@ function flattenGroupFields(
             fieldDisabled,
             collectionRenderOverrides,
             true,
+            editSessionId,
           ),
         );
       }
@@ -278,6 +283,7 @@ function flattenGroupFields(
           fieldDisabled,
           collectionRenderOverrides,
           true,
+          editSessionId,
         ),
       );
     }
@@ -340,6 +346,7 @@ function FieldGroup({
   defaultExpanded,
   transportType,
   lockedKeys,
+  editSessionId,
 }: {
   labelKey: string;
   fields: t.SchemaField[];
@@ -350,6 +357,7 @@ function FieldGroup({
   defaultExpanded: boolean;
   transportType: string;
   lockedKeys?: Set<string>;
+  editSessionId?: number;
 }) {
   const localize = useLocalize();
   const { isExpanded, hasEverExpanded, sectionRef, toggle } = useCollapsibleSection({
@@ -394,6 +402,7 @@ function FieldGroup({
             disabled,
             undefined,
             lockedKeys,
+            editSessionId,
           )}
         </div>,
       )}
@@ -408,6 +417,7 @@ function McpEntryFields({
   onChange,
   disabled,
   lockedKeys,
+  editSessionId,
 }: {
   fields: t.SchemaField[];
   parentValue: t.ConfigValue;
@@ -415,6 +425,7 @@ function McpEntryFields({
   onChange: (path: string, value: t.ConfigValue) => void;
   disabled?: boolean;
   lockedKeys?: Set<string>;
+  editSessionId?: number;
 }) {
   const localize = useLocalize();
   const values = isPlainObject(parentValue) ? parentValue : {};
@@ -479,6 +490,7 @@ function McpEntryFields({
                 disabled,
                 undefined,
                 lockedKeys,
+                editSessionId,
               )}
             </div>
           )}
@@ -494,6 +506,7 @@ function McpEntryFields({
               defaultExpanded={child.defaultExpanded}
               transportType={currentType}
               lockedKeys={lockedKeys}
+              editSessionId={editSessionId}
             />
           ))}
         </FieldGroupSection>
@@ -512,6 +525,7 @@ function McpEntryFields({
         defaultExpanded={group.defaultExpanded}
         transportType={currentType}
         lockedKeys={lockedKeys}
+        editSessionId={editSessionId}
       />
     );
   };
@@ -530,6 +544,7 @@ function McpEntryFields({
           defaultExpanded={false}
           transportType={currentType}
           lockedKeys={lockedKeys}
+          editSessionId={editSessionId}
         />
       )}
     </div>
@@ -662,8 +677,11 @@ export function McpServersRenderer(props: t.FieldRendererProps) {
     disabled,
     editedValues,
     yamlBaseKeys,
+    dbOverrideKeys,
     isEditingScope,
+    onResetEntryOverrides,
     onValidationError,
+    editSessionId,
   } = props;
   const localize = useLocalize();
   const [createOpen, setCreateOpen] = useState(false);
@@ -785,6 +803,21 @@ export function McpServersRenderer(props: t.FieldRendererProps) {
   useEffect(() => {
     localizeRef.current = localize;
   }, [localize]);
+
+  const onResetEntryOverridesRef = useRef(onResetEntryOverrides);
+  useEffect(() => {
+    onResetEntryOverridesRef.current = onResetEntryOverrides;
+  }, [onResetEntryOverrides]);
+
+  const handleResetOverrides = useCallback(
+    (key: string) => {
+      onResetEntryOverridesRef.current?.({ fieldPath: `${path}.${key}`, label: key });
+    },
+    [path],
+  );
+
+  /** Immediate reset would interleave with staged edits, so it stays locked until they are saved or discarded (same rule as the global reset button). */
+  const hasPendingEdits = !!editedValues && Object.keys(editedValues).length > 0;
 
   const handleCreate = useCallback(
     (serverName: string, entry: Record<string, t.ConfigValue>) => {
@@ -942,10 +975,16 @@ export function McpServersRenderer(props: t.FieldRendererProps) {
           disabled={disabled}
           isEditingScope={!!isEditingScope}
           isYamlSource={yamlSourceKeys.has(key)}
+          canResetOverrides={
+            !isEditingScope && yamlSourceKeys.has(key) && (dbOverrideKeys?.has(key) ?? false)
+          }
+          resetDisabled={hasPendingEdits}
           onChange={onChange}
           onRemove={handleRemove}
           onRename={handleRename}
+          onResetOverrides={onResetEntryOverrides ? handleResetOverrides : undefined}
           justAdded={key === justAddedKey}
+          editSessionId={editSessionId}
         />
       ))}
       {!disabled && entries.length === 0 && (
@@ -981,10 +1020,14 @@ const McpEntryRow = memo(function McpEntryRowImpl({
   disabled,
   isEditingScope,
   isYamlSource,
+  canResetOverrides,
+  resetDisabled,
   onChange,
   onRemove,
   onRename,
+  onResetOverrides,
   justAdded,
+  editSessionId,
 }: {
   entryKey: string;
   entryValue: t.ConfigValue;
@@ -993,11 +1036,16 @@ const McpEntryRow = memo(function McpEntryRowImpl({
   disabled?: boolean;
   isEditingScope: boolean;
   isYamlSource: boolean;
+  canResetOverrides: boolean;
+  resetDisabled: boolean;
   onChange: (path: string, value: t.ConfigValue) => void;
   onRemove: (key: string) => void;
   onRename: (oldKey: string, newKey: string) => void;
+  onResetOverrides?: (key: string) => void;
   justAdded: boolean;
+  editSessionId?: number;
 }) {
+  const localize = useLocalize();
   const entryObj = isPlainObject(entryValue) ? entryValue : {};
   const rawType = typeof entryObj.type === 'string' ? entryObj.type : '';
   const inferred = rawType || inferTransportType(entryObj);
@@ -1006,18 +1054,18 @@ const McpEntryRow = memo(function McpEntryRowImpl({
     effectiveType !== rawType ? { ...entryObj, type: effectiveType } : entryValue;
 
   const entryPathBase = `${path}.${entryKey}`;
-  /** Dotted entry names predate the dot-rejecting create/rename validators; the save endpoint parses fieldPath as dot-delimited so any per-leaf write under such a key collides with a parallel "legacy" → "dotted" nested-object interpretation. Render them read-only so they stay visible in the list but never round-trip through the per-field save API. */
-  const isDottedLegacy = entryKey.includes('.');
-  const isReadOnly = !!disabled || isDottedLegacy;
-  const isLockedIdentity = (!isEditingScope && isYamlSource) || isDottedLegacy;
-  const lockedKeys = isYamlSource && !isDottedLegacy ? YAML_LOCKED_FIELDS : undefined;
+  /** Dotted entry names predate the dot-rejecting create/rename validators; the save endpoint parses fieldPath as dot-delimited so any per-leaf write under such a key collides with a parallel "legacy" → "dotted" nested-object interpretation. Keys matching `safeFieldPath`'s rejected segments are equally unaddressable: every field-path write or unset for them fails server-side validation. Render both read-only so they stay visible in the list but never round-trip through the per-field save API. */
+  const isUnaddressableKey = entryKey.includes('.') || UNADDRESSABLE_SEGMENTS.has(entryKey);
+  const isReadOnly = !!disabled || isUnaddressableKey;
+  const isLockedIdentity = (!isEditingScope && isYamlSource) || isUnaddressableKey;
+  const lockedKeys = isYamlSource && !isUnaddressableKey ? YAML_LOCKED_FIELDS : undefined;
 
   const entryOnChange = useCallback(
     (leafKey: string, leafValue: t.ConfigValue) => {
-      if (isDottedLegacy) return;
+      if (isUnaddressableKey) return;
       onChange(`${entryPathBase}.${leafKey}`, leafValue);
     },
-    [onChange, entryPathBase, isDottedLegacy],
+    [onChange, entryPathBase, isUnaddressableKey],
   );
 
   const renderEntryFields: t.CollectionRenderFields = useCallback(
@@ -1029,19 +1077,29 @@ const McpEntryRow = memo(function McpEntryRowImpl({
         onChange={entryOnChange}
         disabled={isReadOnly}
         lockedKeys={lockedKeys}
+        editSessionId={editSessionId}
       />
     ),
-    [entryOnChange, isReadOnly, lockedKeys],
+    [entryOnChange, isReadOnly, lockedKeys, editSessionId],
   );
 
   /** Required by ObjectEntryCard's onValueChange contract; unused on leaf edits. */
   const handleWholeEntryChange = useCallback(
     (v: t.ConfigValue) => {
-      if (isDottedLegacy) return;
+      if (isUnaddressableKey) return;
       onChange(entryPathBase, v);
     },
-    [onChange, entryPathBase, isDottedLegacy],
+    [onChange, entryPathBase, isUnaddressableKey],
   );
+
+  const resetOverrides: t.EntryResetAction | undefined =
+    !isReadOnly && canResetOverrides && onResetOverrides
+      ? {
+          onClick: () => onResetOverrides(entryKey),
+          disabled: resetDisabled,
+          title: resetDisabled ? localize('com_config_reset_base_dirty') : undefined,
+        }
+      : undefined;
 
   return (
     <ObjectEntryCard
@@ -1054,6 +1112,7 @@ const McpEntryRow = memo(function McpEntryRowImpl({
       onRename={
         isReadOnly || isLockedIdentity ? undefined : (renamed) => onRename(entryKey, renamed)
       }
+      resetOverrides={resetOverrides}
       disabled={isReadOnly}
       defaultExpanded={justAdded}
       renderFields={renderEntryFields}

@@ -14,7 +14,7 @@
  * relevant subset. New fields added to the schema surface automatically.
  */
 
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useCallback } from 'react';
 import { Icon, MultiAccordion } from '@clickhouse/click-ui';
 import type { ReactNode } from 'react';
 import type * as t from '@/types';
@@ -94,6 +94,15 @@ const FIELD_GROUPS: Record<string, FieldGroupDef[]> = {
  */
 const REQUIRED_ENDPOINT_KEYS = new Set(['name', 'apiKey', 'baseURL']);
 
+/**
+ * LibreChat merges the `endpoints.custom` override array into the YAML array
+ * by item `name`, so `name` is the entry's identity across config layers.
+ * Renaming a YAML-defined endpoint can never work: the renamed override item
+ * no longer matches its YAML counterpart, which survives unchanged while the
+ * override is appended as a duplicate entry.
+ */
+const YAML_LOCKED_ENDPOINT_FIELDS = new Set(['name']);
+
 function withRequired(field: t.SchemaField): t.SchemaField {
   if (REQUIRED_ENDPOINT_KEYS.has(field.key)) {
     return { ...field, isOptional: false };
@@ -129,6 +138,7 @@ function flattenGroupFields(
   disabled?: boolean,
   collectionRenderOverrides?: Record<string, t.CollectionRenderFields>,
   editSessionId?: number,
+  lockedKeys?: Set<string>,
 ): ReactNode[] {
   const values =
     typeof parentValue === 'object' && parentValue !== null && !Array.isArray(parentValue)
@@ -137,6 +147,7 @@ function flattenGroupFields(
 
   const nodes: ReactNode[] = [];
   for (const field of fields) {
+    const fieldDisabled = disabled || (lockedKeys?.has(field.key) ?? false);
     if (field.children && field.children.length > 0 && !field.isArray && field.type !== 'record') {
       const nested = values[field.key];
       const nestedObj =
@@ -153,7 +164,7 @@ function flattenGroupFields(
               onChange(field.key, { ...nestedObj, [childKey]: childValue });
             },
             localize,
-            disabled,
+            fieldDisabled,
             collectionRenderOverrides,
             true,
             editSessionId,
@@ -168,7 +179,7 @@ function flattenGroupFields(
           parentPath,
           onChange,
           localize,
-          disabled,
+          fieldDisabled,
           collectionRenderOverrides,
           true,
           editSessionId,
@@ -189,6 +200,7 @@ function FieldGroup({
   defaultExpanded,
   collectionRenderOverrides,
   editSessionId,
+  lockedKeys,
 }: {
   labelKey: string;
   fields: t.SchemaField[];
@@ -199,6 +211,7 @@ function FieldGroup({
   defaultExpanded: boolean;
   collectionRenderOverrides?: Record<string, t.CollectionRenderFields>;
   editSessionId?: number;
+  lockedKeys?: Set<string>;
 }) {
   const localize = useLocalize();
   const { isExpanded, hasEverExpanded, sectionRef, toggle } = useCollapsibleSection({
@@ -242,6 +255,7 @@ function FieldGroup({
             disabled,
             collectionRenderOverrides,
             editSessionId,
+            lockedKeys,
           )}
         </div>,
       )}
@@ -258,6 +272,7 @@ function GroupedFieldRenderer({
   disabled,
   collectionRenderOverrides,
   editSessionId,
+  lockedKeys,
 }: {
   groupKey: string;
   fields: t.SchemaField[];
@@ -267,6 +282,7 @@ function GroupedFieldRenderer({
   disabled?: boolean;
   collectionRenderOverrides?: Record<string, t.CollectionRenderFields>;
   editSessionId?: number;
+  lockedKeys?: Set<string>;
 }) {
   const groups = FIELD_GROUPS[groupKey];
   if (!groups) return null;
@@ -293,6 +309,7 @@ function GroupedFieldRenderer({
             defaultExpanded={group.defaultExpanded}
             collectionRenderOverrides={collectionRenderOverrides}
             editSessionId={editSessionId}
+            lockedKeys={lockedKeys}
           />
         );
       })}
@@ -307,6 +324,7 @@ function GroupedFieldRenderer({
           defaultExpanded={false}
           collectionRenderOverrides={collectionRenderOverrides}
           editSessionId={editSessionId}
+          lockedKeys={lockedKeys}
         />
       )}
     </div>
@@ -466,7 +484,10 @@ const COLLECTION_RENDER_OVERRIDES: Record<string, t.CollectionRenderFields> = {
  * Matches the `CollectionRenderFields` signature so it can be injected
  * into `ArrayObjectField` and `ObjectEntryCard`.
  */
-function makeGroupedEndpointFields(disabled?: boolean): t.CollectionRenderFields {
+function makeGroupedEndpointFields(
+  disabled?: boolean,
+  isEntryNameLocked?: (entry: t.ConfigValue) => boolean,
+): t.CollectionRenderFields {
   return (fields, parentValue, parentPath, onChange, _addFieldTriggerRef, editSessionId) => (
     <GroupedFieldRenderer
       groupKey="custom"
@@ -477,6 +498,7 @@ function makeGroupedEndpointFields(disabled?: boolean): t.CollectionRenderFields
       disabled={disabled}
       collectionRenderOverrides={COLLECTION_RENDER_OVERRIDES}
       editSessionId={editSessionId}
+      lockedKeys={isEntryNameLocked?.(parentValue) ? YAML_LOCKED_ENDPOINT_FIELDS : undefined}
     />
   );
 }
@@ -611,12 +633,86 @@ function ProviderSection({
 // ---------------------------------------------------------------------------
 
 export function CustomEndpointsRenderer(props: t.FieldRendererProps) {
-  const { fields, parentPath, parentValue, getValue, onChange, disabled, editSessionId } = props;
+  const {
+    fields,
+    parentPath,
+    parentValue,
+    getValue,
+    onChange,
+    disabled,
+    editedValues,
+    yamlBaseKeys,
+    dbOverrideKeys,
+    isEditingScope,
+    onResetEntryOverrides,
+    editSessionId,
+  } = props;
   const localize = useLocalize();
   const [createOpen, setCreateOpen] = useState(false);
+
+  /** `yamlBaseKeys` is undefined only when the YAML provenance (baseOnly) fetch failed. Fail closed: with unknown provenance any entry could be YAML-defined, and a staged delete or rename would both fail (the name-based merge restores the YAML entry) and freeze the whole array into the override document. */
+  const provenanceUnknown = !isEditingScope && yamlBaseKeys === undefined;
+
+  /** YAML identity locks apply in base mode only; scope overrides layer on top of the resolved base and keep their own affordances. */
+  const yamlNames = useMemo(
+    () => (isEditingScope ? new Set<string>() : (yamlBaseKeys ?? new Set<string>())),
+    [isEditingScope, yamlBaseKeys],
+  );
+
+  const isEntryNameLocked = useCallback(
+    (entry: t.ConfigValue) => {
+      if (provenanceUnknown) return true;
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return false;
+      const name = (entry as Record<string, t.ConfigValue>).name;
+      return typeof name === 'string' && yamlNames.has(name);
+    },
+    [provenanceUnknown, yamlNames],
+  );
+
   const renderGroupedEndpointFields = useMemo(
-    () => makeGroupedEndpointFields(disabled),
-    [disabled],
+    () => makeGroupedEndpointFields(disabled, isEntryNameLocked),
+    [disabled, isEntryNameLocked],
+  );
+
+  const renderCreateEndpointFields = useMemo(() => makeGroupedEndpointFields(disabled), [disabled]);
+
+  const hasPendingEdits = !!editedValues && Object.keys(editedValues).length > 0;
+
+  const entryControls = useCallback(
+    (_index: number, item: t.ConfigValue): t.EntryCardControls => {
+      if (provenanceUnknown) return { canRemove: false };
+      const obj =
+        item && typeof item === 'object' && !Array.isArray(item)
+          ? (item as Record<string, t.ConfigValue>)
+          : {};
+      const name = typeof obj.name === 'string' ? obj.name : '';
+      const isYamlSource = name !== '' && yamlNames.has(name);
+      if (!isYamlSource) return {};
+      /** YAML-defined endpoints cannot be deleted from the admin panel: the merge preserves unmatched YAML items, so the entry would reappear on the next load. Offer clearing the override layer instead. */
+      const resetOverrides: t.EntryResetAction | undefined =
+        onResetEntryOverrides && dbOverrideKeys?.has(name)
+          ? {
+              onClick: () =>
+                onResetEntryOverrides({
+                  fieldPath: `${parentPath}.custom`,
+                  itemName: name,
+                  label: name,
+                }),
+              disabled: hasPendingEdits,
+              title: hasPendingEdits ? localize('com_config_reset_base_dirty') : undefined,
+            }
+          : undefined;
+      return { canRemove: false, resetOverrides };
+    },
+    [
+      provenanceUnknown,
+      yamlNames,
+      dbOverrideKeys,
+      onResetEntryOverrides,
+      parentPath,
+      hasPendingEdits,
+      localize,
+    ],
   );
 
   const customField = fields.find((f) => f.key === 'custom');
@@ -661,6 +757,7 @@ export function CustomEndpointsRenderer(props: t.FieldRendererProps) {
           hideAddButton
           renderFields={renderGroupedEndpointFields}
           entryIdPrefix={`section-${path.split('.')[0]}-custom`}
+          entryControls={entryControls}
           editSessionId={editSessionId}
         />
       )}
@@ -669,7 +766,7 @@ export function CustomEndpointsRenderer(props: t.FieldRendererProps) {
         onClose={() => setCreateOpen(false)}
         onSave={handleCreate}
         fields={customField.children ?? []}
-        renderFields={renderGroupedEndpointFields}
+        renderFields={renderCreateEndpointFields}
       />
     </div>
   );

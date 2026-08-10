@@ -902,6 +902,7 @@ export const getBaseConfigFn = createServerFn({ method: 'GET' }).handler(async (
 
   let yamlMcpKeys: string[] | undefined;
   let yamlMcpServers: Record<string, t.ConfigValue> | undefined;
+  let yamlCustomEndpointKeys: string[] | undefined;
   if (baseOnlyResponse.ok) {
     const { config: baseOnlyRaw } = (await baseOnlyResponse.json()) as {
       config: Record<string, t.ConfigValue>;
@@ -913,6 +914,7 @@ export const getBaseConfigFn = createServerFn({ method: 'GET' }).handler(async (
       yamlMcpServers = mcp as Record<string, t.ConfigValue>;
       yamlMcpKeys = Object.keys(yamlMcpServers);
     }
+    yamlCustomEndpointKeys = extractCustomEndpointNames(baseOnly.endpoints);
   }
 
   return {
@@ -922,13 +924,56 @@ export const getBaseConfigFn = createServerFn({ method: 'GET' }).handler(async (
     schemaDefaults: flatDefaults,
     yamlMcpKeys,
     yamlMcpServers,
+    yamlCustomEndpointKeys,
   };
 });
+
+/**
+ * LibreChat merges `endpoints.custom` override arrays into the YAML array by
+ * item `name`, so names are the stable entry identity across layers. Always
+ * returns an array: a missing or malformed `endpoints.custom` in a
+ * successfully fetched baseOnly config means "no YAML-defined endpoints"
+ * (known-empty provenance). `yamlCustomEndpointKeys` is only ever `undefined`
+ * when the baseOnly fetch itself failed, which the client treats as
+ * provenance-unavailable and fails closed on identity actions.
+ */
+export function extractCustomEndpointNames(endpoints: t.ConfigValue): string[] {
+  if (!endpoints || typeof endpoints !== 'object' || Array.isArray(endpoints)) return [];
+  const custom = (endpoints as Record<string, t.ConfigValue>).custom;
+  if (!Array.isArray(custom)) return [];
+  const names: string[] = [];
+  for (const item of custom) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
+    const name = (item as Record<string, t.ConfigValue>).name;
+    if (typeof name === 'string' && name) names.push(name);
+  }
+  return names;
+}
 
 export const baseConfigOptions = queryOptions({
   queryKey: ['baseConfig'],
   queryFn: () => getBaseConfigFn(),
   staleTime: 30_000,
+});
+
+/**
+ * Fetches only the current base override document, bypassing the client
+ * cache. Read-modify-write flows (per-entry overrides reset) must build
+ * their replacement value from a fresh copy: `baseConfigOptions` keeps data
+ * for 30 seconds and an open tab keeps it far longer, so rewriting
+ * `endpoints.custom` from the cached snapshot could silently discard a
+ * concurrent admin's change. A 404 means no override document exists.
+ */
+export const getBaseConfigOverridesFn = createServerFn({ method: 'GET' }).handler(async () => {
+  const response = await apiFetch(`/api/admin/config/role/${BASE_CONFIG_PRINCIPAL_ID}`);
+  if (response.status === 404) {
+    return { overrides: undefined };
+  }
+  if (!response.ok) {
+    throw new Error(`Failed to fetch base config overrides: ${response.status}`);
+  }
+  const { config: dbConfig } = (await response.json()) as AdminConfigResponse;
+  return { overrides: dbConfig.overrides as Record<string, t.ConfigValue> | undefined };
 });
 
 let cachedSchemaPathSet: Set<string> | undefined;

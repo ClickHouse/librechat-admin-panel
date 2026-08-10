@@ -10,6 +10,7 @@ import {
   tombstoneFieldProfileValueFn,
   bulkSaveProfileValuesFn,
   getBatchFieldProfilesFn,
+  getBaseConfigOverridesFn,
   availableScopesOptions,
   resetBaseConfigFieldFn,
   getResolvedConfigFn,
@@ -38,12 +39,15 @@ import {
   buildSavePayload,
   mergeIndexedArrayEdits,
   partitionScopeResetPaths,
+  collectEntryOverrideKeys,
+  executeEntryOverridesReset,
 } from './utils';
 import { validateMcpCrossField } from './sections/McpServersRenderer';
 import { ScopeSelector, ScopeTriggerButton } from './ScopeSelector';
 import { StickyActionBar } from '@/components/shared';
 import { ConfigTableOfContents } from './ConfigTableOfContents';
 import { ResetBaseConfigDialog } from './ResetBaseConfigDialog';
+import { ResetOverridesDialog } from './ResetOverridesDialog';
 import { ConfirmSaveDialog } from './ConfirmSaveDialog';
 import { ConfigTabContent } from './ConfigTabContent';
 import { ImportYamlDialog } from './ImportYamlDialog';
@@ -152,8 +156,14 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
     if (yamlMcpKeys && Array.isArray(yamlMcpKeys)) {
       result.mcpServers = new Set(yamlMcpKeys);
     }
+    const yamlCustomEndpointKeys = baseConfigData?.yamlCustomEndpointKeys;
+    if (yamlCustomEndpointKeys && Array.isArray(yamlCustomEndpointKeys)) {
+      result.endpoints = new Set(yamlCustomEndpointKeys);
+    }
     return result;
   }, [baseConfigData]);
+
+  const dbOverrideKeys = useMemo(() => collectEntryOverrideKeys(dbOverrides), [dbOverrides]);
 
   const hasUnmappedSections = useMemo(
     () =>
@@ -535,6 +545,39 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
       setEditedValues((prev) => ({ ...prev, [fieldPath]: undefined }));
     });
   }, []);
+
+  const [entryResetTarget, setEntryResetTarget] = useState<t.EntryResetTarget | null>(null);
+  const [entryResetting, setEntryResetting] = useState(false);
+  const [entryResetError, setEntryResetError] = useState<string | null>(null);
+
+  const handleEntryOverridesReset = useCallback((target: t.EntryResetTarget) => {
+    setEntryResetError(null);
+    setEntryResetTarget(target);
+  }, []);
+
+  const handleEntryResetConfirm = useCallback(async () => {
+    if (!entryResetTarget || entryResetting) return;
+    setEntryResetting(true);
+    setEntryResetError(null);
+    try {
+      await executeEntryOverridesReset(entryResetTarget, schemaPathSet, {
+        fetchOverrides: () => getBaseConfigOverridesFn().then((r) => r.overrides),
+        resetField: (fieldPath) => resetBaseConfigFieldFn({ data: { fieldPath } }),
+        saveEntries: (entries) => saveBaseConfigFn({ data: { entries } }),
+      });
+      await queryClient.invalidateQueries({ queryKey: ['baseConfig'] });
+      /** Remount session-keyed field state (e.g. a SecretField opened for Replace but left untouched, which no invalidation reaches) so nothing local survives past the reset. */
+      setEditSessionId((id) => id + 1);
+      setEntryResetting(false);
+      setEntryResetTarget(null);
+      notifySuccess(localize('com_config_reset_entry_success', { name: entryResetTarget.label }));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setEntryResetting(false);
+      setEntryResetError(message);
+      notifyError(message);
+    }
+  }, [entryResetTarget, entryResetting, schemaPathSet, queryClient, localize]);
 
   const handleConfirmSave = useCallback(async () => {
     if (saving) return;
@@ -1006,6 +1049,8 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
               showConfiguredOnly={showConfiguredOnly}
               isEditingScope={isEditingScope}
               baseRecordKeys={baseRecordKeys}
+              dbOverrideKeys={isEditingScope ? undefined : dbOverrideKeys}
+              onResetEntryOverrides={isEditingScope ? undefined : handleEntryOverridesReset}
               onValidationError={(message) => notifyError(message)}
               editSessionId={editSessionId}
             />
@@ -1066,6 +1111,18 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
           if (resettingBase) return;
           setResetBaseOpen(false);
           setResetBaseError(null);
+        }}
+      />
+
+      <ResetOverridesDialog
+        target={entryResetTarget}
+        resetting={entryResetting}
+        error={entryResetError}
+        onConfirm={handleEntryResetConfirm}
+        onCancel={() => {
+          if (entryResetting) return;
+          setEntryResetTarget(null);
+          setEntryResetError(null);
         }}
       />
     </div>

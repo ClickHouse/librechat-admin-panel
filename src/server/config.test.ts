@@ -18,6 +18,7 @@ import {
   toConfigArraySource,
   normalizeAppServiceKeys,
   mergeConfigArraySources,
+  extractCustomEndpointNames,
   mergeIndexedArrayEntriesIntoBase,
 } from './config';
 
@@ -1281,5 +1282,22 @@ describe('validateFieldValue for endpoints', () => {
   it('gracefully handles unknown deep paths', () => {
     const result = validateFieldValue('endpoints.custom.0.nonexistent.deep', 'value');
     expect(result).toEqual({ success: true });
+  });
+});
+
+describe('extractCustomEndpointNames', () => {
+  it('collects named custom endpoints from a baseOnly endpoints section', () => {
+    const endpoints = {
+      custom: [{ name: 'yamlEp' }, { baseURL: 'https://nameless.example' }, { name: 'other' }],
+    };
+    expect(extractCustomEndpointNames(endpoints)).toEqual(['yamlEp', 'other']);
+  });
+
+  /** A successfully fetched baseOnly config without endpoints.custom means known-empty provenance, never undefined. The client reserves undefined yamlCustomEndpointKeys for a failed provenance fetch and fails closed on identity actions. */
+  it('returns an empty array when endpoints.custom is absent or malformed', () => {
+    expect(extractCustomEndpointNames(undefined)).toEqual([]);
+    expect(extractCustomEndpointNames({})).toEqual([]);
+    expect(extractCustomEndpointNames({ custom: 'not-an-array' })).toEqual([]);
+    expect(extractCustomEndpointNames([{ name: 'x' }])).toEqual([]);
   });
 });

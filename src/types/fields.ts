@@ -132,6 +132,8 @@ export interface ArrayObjectFieldProps {
   renderFields: CollectionRenderFields;
   /** When set, each entry card gets an id of `{entryIdPrefix}-{index}` for TOC scroll targets. */
   entryIdPrefix?: string;
+  /** Per-entry header control overrides, resolved from the entry's identity. */
+  entryControls?: (index: number, item: ConfigValue) => EntryCardControls;
   /** See `SingleFieldRendererProps.editSessionId`. Forwarded to `renderFields`. */
   editSessionId?: number;
 }
@@ -161,6 +163,19 @@ export type CollectionRenderFields = (
   editSessionId?: number,
 ) => React.ReactNode;
 
+/** Header action that clears an entry's admin overrides so it reverts to the YAML config. */
+export interface EntryResetAction {
+  onClick: () => void;
+  disabled?: boolean;
+  title?: string;
+}
+
+/** Per-entry header controls for collection entries (YAML-defined entries hide the trash and may expose a reset-overrides action). */
+export interface EntryCardControls {
+  canRemove?: boolean;
+  resetOverrides?: EntryResetAction;
+}
+
 export interface ObjectEntryCardProps {
   id?: string;
   entryKey: string;
@@ -169,6 +184,7 @@ export interface ObjectEntryCardProps {
   onValueChange: (value: ConfigValue) => void;
   onRemove?: () => void;
   onRename?: (newKey: string) => void;
+  resetOverrides?: EntryResetAction;
   disabled?: boolean;
   defaultExpanded?: boolean;
   renderFields: CollectionRenderFields;

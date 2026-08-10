@@ -1,4 +1,4 @@
-import { Icon } from '@clickhouse/click-ui';
+import { Icon, IconButton } from '@clickhouse/click-ui';
 import { useState, useCallback, useRef, useEffect } from 'react';
 import type * as t from '@/types';
 import { TrashButton } from '@/components/shared';
@@ -14,6 +14,7 @@ export function ObjectEntryCard({
   onValueChange,
   onRemove,
   onRename,
+  resetOverrides,
   disabled,
   defaultExpanded = false,
   renderFields,
@@ -190,6 +191,24 @@ export function ObjectEntryCard({
             <Icon name="plus" size="sm" />
             <span>{localize('com_config_add_field')}</span>
           </button>
+        )}
+        {!disabled && resetOverrides && (
+          <span
+            className="opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100"
+            onClick={(e) => e.stopPropagation()}
+            title={resetOverrides.title}
+          >
+            <IconButton
+              icon="refresh"
+              size="sm"
+              onClick={(e) => {
+                e.preventDefault();
+                resetOverrides.onClick();
+              }}
+              disabled={resetOverrides.disabled}
+              aria-label={localize('com_a11y_reset_entry_overrides', { name: entryKey })}
+            />
+          </span>
         )}
         {!disabled && onRemove && (
           <span

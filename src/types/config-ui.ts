@@ -83,6 +83,9 @@ export interface ConfigTabContentProps {
   isEditingScope?: boolean;
   /** YAML-defined entry keys per section, keyed by parent path. */
   baseRecordKeys?: Record<string, Set<string>>;
+  /** Entry identities present in the base DB override document, keyed by parent path. */
+  dbOverrideKeys?: Record<string, Set<string>>;
+  onResetEntryOverrides?: (target: EntryResetTarget) => void;
   onValidationError?: (message: string) => void;
   /** See `SingleFieldRendererProps.editSessionId`. */
   editSessionId?: number;
@@ -162,6 +165,38 @@ export interface DeleteProfileValueModalProps {
 
 export interface ResetBaseConfigDialogProps {
   open: boolean;
+  resetting: boolean;
+  error?: string | null;
+  onConfirm: () => void;
+  onCancel: () => void;
+}
+
+/**
+ * Identifies the admin-override layer to clear for a single collection entry.
+ * `fieldPath` is the override document path to unset (`mcpServers.<key>`), or
+ * the array container path (`endpoints.custom`) when `itemName` identifies the
+ * item to drop from the override array (LibreChat merges that array by `name`).
+ */
+export interface EntryResetTarget {
+  fieldPath: string;
+  itemName?: string;
+  label: string;
+}
+
+export interface EntryResetPlan {
+  resetPaths: string[];
+  saves: Array<{ fieldPath: string; value: ConfigValue }>;
+}
+
+/** Server-call seams for `executeEntryOverridesReset`, injected so the flow is unit-testable. */
+export interface EntryResetDeps {
+  fetchOverrides: () => Promise<Record<string, ConfigValue> | undefined>;
+  resetField: (fieldPath: string) => Promise<unknown>;
+  saveEntries: (entries: Array<{ fieldPath: string; value: ConfigValue }>) => Promise<unknown>;
+}
+
+export interface ResetOverridesDialogProps {
+  target: EntryResetTarget | null;
   resetting: boolean;
   error?: string | null;
   onConfirm: () => void;
@@ -265,6 +300,9 @@ export interface FieldRendererProps {
   isEditingScope?: boolean;
   /** YAML-defined entry keys for the section being rendered. */
   yamlBaseKeys?: Set<string>;
+  /** Entry identities present in the base DB override document for the section being rendered. */
+  dbOverrideKeys?: Set<string>;
+  onResetEntryOverrides?: (target: EntryResetTarget) => void;
   onValidationError?: (message: string) => void;
   /** See `SingleFieldRendererProps.editSessionId`. */
   editSessionId?: number;
