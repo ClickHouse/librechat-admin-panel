@@ -5,6 +5,7 @@ import {
   extractSchemaTree,
   getZodTypeName,
   flattenTree,
+  parseYamlConfig,
   resolveSubSchema,
   validateFieldValue,
   parseIndexedArrayPath,
@@ -740,6 +741,20 @@ describe('validateFieldValue', () => {
     const bad = validateFieldValue('mcpServers.foo.headers.Authorization', 42);
     expect(bad.success).toBe(false);
   });
+
+  it('accepts unknown string enum values for agent capabilities (forward compatibility)', () => {
+    const result = validateFieldValue('endpoints.agents.capabilities', [
+      'execute_code',
+      'capability_from_newer_librechat',
+      'web_search',
+    ]);
+    expect(result).toEqual({ success: true });
+  });
+
+  it('rejects numeric values in enum arrays', () => {
+    const result = validateFieldValue('endpoints.agents.capabilities', ['execute_code', 123]);
+    expect(result.success).toBe(false);
+  });
 });
 
 /* ---------------------------------------------------------------------------
@@ -1333,5 +1348,170 @@ describe('validateFieldValue for endpoints', () => {
   it('gracefully handles unknown deep paths', () => {
     const result = validateFieldValue('endpoints.custom.0.nonexistent.deep', 'value');
     expect(result).toEqual({ success: true });
+  });
+});
+
+/* ---------------------------------------------------------------------------
+ * Regression — issue #72. Configs written for a LibreChat release newer than
+ * the bundled librechat-data-provider schema must still import: unknown string
+ * enum values (new agent capabilities, etc.) are preserved as-is instead of
+ * hard-failing, while structurally invalid configs keep failing.
+ * -----------------------------------------------------------------------*/
+
+describe('parseYamlConfig', () => {
+  const issue72Capabilities = [
+    'execute_code',
+    'file_search',
+    'web_search',
+    'artifacts',
+    'subagents',
+    'actions',
+    'context',
+    'skills',
+    'tools',
+    'chain',
+    'ocr',
+  ];
+
+  const issue72Yaml = `
+version: 1.3.12
+endpoints:
+  bedrock:
+    disabled: false
+  agents:
+    disableBuilder: false
+    allowedProviders:
+      - "bedrock"
+    capabilities:
+${issue72Capabilities.map((c) => `      - '${c}'`).join('\n')}
+`;
+
+  const yamlWithCapabilities = (capabilities: string[]) => `
+version: 1.3.12
+endpoints:
+  agents:
+    capabilities:
+${capabilities.map((c) => `      - '${c}'`).join('\n')}
+`;
+
+  const capabilitiesOf = (appConfig: Record<string, t.ConfigValue> | null) => {
+    const endpoints = appConfig?.endpoints as Record<string, t.ConfigValue> | undefined;
+    const agents = endpoints?.agents as Record<string, t.ConfigValue> | undefined;
+    return agents?.capabilities;
+  };
+
+  it('imports the issue #72 config including subagents and skills capabilities', () => {
+    const result = parseYamlConfig(issue72Yaml);
+    expect(result.success).toBe(true);
+    expect(result.error).toBeUndefined();
+    expect(result.preservedValues).toBeUndefined();
+    expect(capabilitiesOf(result.appConfig)).toEqual(issue72Capabilities);
+  });
+
+  it('preserves enum values from LibreChat releases newer than the bundled schema', () => {
+    const result = parseYamlConfig(
+      yamlWithCapabilities(['execute_code', 'capability_from_newer_librechat', 'web_search']),
+    );
+    expect(result.success).toBe(true);
+    expect(capabilitiesOf(result.appConfig)).toEqual([
+      'execute_code',
+      'capability_from_newer_librechat',
+      'web_search',
+    ]);
+  });
+
+  it('reports which values were preserved so the UI can surface them', () => {
+    const result = parseYamlConfig(
+      yamlWithCapabilities(['execute_code', 'capability_from_newer_librechat', 'web_search']),
+    );
+    expect(result.preservedValues).toEqual([
+      { path: 'endpoints.agents.capabilities.1', value: 'capability_from_newer_librechat' },
+    ]);
+  });
+
+  it('preserves multiple unknown enum values at their original positions', () => {
+    const result = parseYamlConfig(
+      yamlWithCapabilities(['future_first', 'tools', 'future_mid', 'ocr', 'future_last']),
+    );
+    expect(result.success).toBe(true);
+    expect(capabilitiesOf(result.appConfig)).toEqual([
+      'future_first',
+      'tools',
+      'future_mid',
+      'ocr',
+      'future_last',
+    ]);
+    expect(result.preservedValues?.map((p) => p.value)).toEqual([
+      'future_first',
+      'future_mid',
+      'future_last',
+    ]);
+  });
+
+  it('still parses the rest of the config when unknown enum values are preserved', () => {
+    const result = parseYamlConfig(`
+version: 1.3.12
+cache: true
+endpoints:
+  agents:
+    disableBuilder: false
+    capabilities:
+      - 'capability_from_newer_librechat'
+`);
+    expect(result.success).toBe(true);
+    expect(result.appConfig?.version).toBe('1.3.12');
+    expect(result.appConfig?.cache).toBe(true);
+  });
+
+  it('rejects structurally invalid configs', () => {
+    const result = parseYamlConfig(`
+version: 1.3.12
+endpoints:
+  agents:
+    capabilities: 'not-an-array'
+`);
+    expect(result.success).toBe(false);
+    expect(result.error).toBe('Config validation failed');
+    expect(result.appConfig).toBeNull();
+  });
+
+  it('rejects configs mixing unknown enum values with structural errors', () => {
+    const result = parseYamlConfig(`
+version: 1.3.12
+endpoints:
+  agents:
+    disableBuilder: 'not-a-boolean'
+    capabilities:
+      - 'capability_from_newer_librechat'
+`);
+    expect(result.success).toBe(false);
+    expect(result.error).toBe('Config validation failed');
+    expect(result.validationErrors).toEqual([
+      expect.objectContaining({ path: 'endpoints.agents.disableBuilder' }),
+    ]);
+  });
+
+  it('rejects numeric values in enum arrays', () => {
+    const result = parseYamlConfig(`
+version: 1.3.12
+endpoints:
+  agents:
+    capabilities:
+      - 123
+`);
+    expect(result.success).toBe(false);
+    expect(result.error).toBe('Config validation failed');
+  });
+
+  it('rejects invalid YAML syntax', () => {
+    const result = parseYamlConfig('version: [unclosed');
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('Invalid YAML syntax');
+  });
+
+  it('rejects YAML that is not an object', () => {
+    const result = parseYamlConfig('just a string');
+    expect(result.success).toBe(false);
+    expect(result.error).toBe('YAML did not produce a valid configuration object');
   });
 });

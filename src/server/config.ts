@@ -602,6 +602,14 @@ export function resolveSubSchema(
   return current;
 }
 
+/** Enum mismatches where the received value is a string are forward-compatible:
+ *  newer LibreChat releases add enum members (e.g. agent capabilities) that the
+ *  bundled `librechat-data-provider` schema does not know about yet. Numeric or
+ *  otherwise non-string values are genuine type errors and stay blocking. */
+function isUnknownEnumIssue(issue: t.ZodIssueLike): boolean {
+  return issue.code === 'invalid_enum_value' && typeof issue.received === 'string';
+}
+
 export function validateFieldValue(
   fieldPath: string,
   value: unknown,
@@ -620,12 +628,15 @@ export function validateFieldValue(
       subSchema as {
         safeParse: (v: unknown) => {
           success: boolean;
-          error?: { issues: Array<{ message: string; path: (string | number)[] }> };
+          error?: { issues: t.ZodIssueLike[] };
         };
       }
     ).safeParse(value);
     if (!result.success && result.error) {
-      const messages = result.error.issues.map((i) => i.message);
+      const issues = result.error.issues ?? [];
+      const blocking = issues.filter((i) => !isUnknownEnumIssue(i));
+      if (issues.length > 0 && blocking.length === 0) return { success: true };
+      const messages = blocking.map((i) => i.message);
       return { success: false, error: messages.join('; ') || 'Validation failed' };
     }
   }
@@ -721,65 +732,172 @@ export const getConfigSchemaFields = createServerFn({ method: 'GET' }).handler(a
   }
 });
 
+function getContainerAt(
+  root: Record<string, unknown>,
+  path: (string | number)[],
+): Record<string, unknown> | unknown[] | null {
+  let current: unknown = root;
+  for (const segment of path) {
+    if (!current || typeof current !== 'object') return null;
+    current = (current as Record<string, unknown>)[segment as string];
+  }
+  if (!current || typeof current !== 'object') return null;
+  return current as Record<string, unknown> | unknown[];
+}
+
+/**
+ * Removes the unknown enum values behind forward-compatible issues so the
+ * config re-parses cleanly (applying schema defaults, transforms, and
+ * unknown-key stripping), then splices the original values back into the
+ * parsed output at their original positions. Returns `null` when any value
+ * cannot be safely removed and restored, in which case the caller falls back
+ * to the regular hard validation failure — never a silently mutated config.
+ */
+function preserveUnknownEnumValues(
+  rawConfig: Record<string, unknown>,
+  issues: t.ZodIssueLike[],
+): Record<string, t.ConfigValue> | null {
+  const cleaned = structuredClone(rawConfig);
+  const arrayRemovals = new Map<
+    string,
+    { path: (string | number)[]; entries: Array<{ index: number; value: unknown }> }
+  >();
+  const scalarRemovals: Array<{ path: (string | number)[]; value: unknown }> = [];
+
+  for (const issue of issues) {
+    if (issue.path.length === 0) return null;
+    const parentPath = issue.path.slice(0, -1);
+    const lastSegment = issue.path[issue.path.length - 1];
+    const container = getContainerAt(cleaned, parentPath);
+    if (!container) return null;
+    if (Array.isArray(container)) {
+      if (typeof lastSegment !== 'number') return null;
+      const key = parentPath.join('.');
+      const removal = arrayRemovals.get(key) ?? { path: parentPath, entries: [] };
+      removal.entries.push({ index: lastSegment, value: container[lastSegment] });
+      arrayRemovals.set(key, removal);
+    } else {
+      scalarRemovals.push({ path: issue.path, value: container[lastSegment as string] });
+      delete container[lastSegment as string];
+    }
+  }
+
+  for (const { path, entries } of arrayRemovals.values()) {
+    const arrayValue = getContainerAt(cleaned, path);
+    if (!Array.isArray(arrayValue)) return null;
+    entries.sort((a, b) => b.index - a.index);
+    for (const { index } of entries) arrayValue.splice(index, 1);
+  }
+
+  const reparsed = configSchema.safeParse(cleaned);
+  if (!reparsed.success) return null;
+  const output = reparsed.data as Record<string, unknown>;
+
+  for (const { path, entries } of arrayRemovals.values()) {
+    const arrayValue = getContainerAt(output, path);
+    if (!Array.isArray(arrayValue)) return null;
+    entries.sort((a, b) => a.index - b.index);
+    for (const { index, value } of entries) arrayValue.splice(index, 0, value);
+  }
+  for (const { path, value } of scalarRemovals) {
+    const container = getContainerAt(output, path.slice(0, -1));
+    if (!container || Array.isArray(container)) return null;
+    container[path[path.length - 1] as string] = value;
+  }
+
+  return output as Record<string, t.ConfigValue>;
+}
+
+export function parseYamlConfig(yamlContent: string): {
+  success: boolean;
+  error: string | undefined;
+  validationErrors: t.ImportValidationError[] | undefined;
+  preservedValues: t.ImportPreservedValue[] | undefined;
+  appConfig: Record<string, t.ConfigValue> | null;
+} {
+  let rawConfig: unknown;
+  try {
+    rawConfig = yaml.load(yamlContent, { schema: yaml.JSON_SCHEMA });
+  } catch (parseError) {
+    console.error('Failed to parse imported YAML content:', parseError);
+    return {
+      success: false,
+      error: 'Invalid YAML syntax. Please check the content for syntax errors.',
+      validationErrors: undefined,
+      preservedValues: undefined,
+      appConfig: null,
+    };
+  }
+
+  if (!rawConfig || typeof rawConfig !== 'object') {
+    return {
+      success: false,
+      error: 'YAML did not produce a valid configuration object',
+      validationErrors: undefined,
+      preservedValues: undefined,
+      appConfig: null,
+    };
+  }
+
+  const result = configSchema.safeParse(rawConfig);
+
+  if (!result.success) {
+    const issues = result.error.errors as t.ZodIssueLike[];
+    const blocking = issues.filter((i) => !isUnknownEnumIssue(i));
+
+    if (blocking.length === 0) {
+      const appConfig = preserveUnknownEnumValues(rawConfig as Record<string, unknown>, issues);
+      if (appConfig) {
+        return {
+          success: true,
+          error: undefined,
+          validationErrors: undefined,
+          preservedValues: issues.map((i) => ({
+            path: i.path.join('.'),
+            value: i.received as string,
+          })),
+          appConfig,
+        };
+      }
+    }
+
+    return {
+      success: false,
+      error: 'Config validation failed',
+      validationErrors: (blocking.length > 0 ? blocking : issues).map((e) => ({
+        path: e.path.join('.'),
+        message: e.message,
+      })),
+      preservedValues: undefined,
+      appConfig: null,
+    };
+  }
+
+  /**
+   * `librechat-data-provider` and `@librechat/data-schemas` both migrated
+   * to tsdown (upstream #13578, #13597) and now ship dual `.d.cts` + `.d.mts`
+   * declaration files. Under `moduleResolution: bundler`, TS treats
+   * `TCustomConfig` resolved through one declaration path as nominally
+   * distinct from `TCustomConfig` resolved through the other, even when
+   * structurally identical. That collision shows up here as "Two different
+   * types with this name exist, but they are unrelated" in the ServerFn
+   * registration. The consumer (ImportYamlDialog) treats appConfig as
+   * `Record<string, ConfigValue>`, so widening the return is the local fix.
+   */
+  return {
+    success: true,
+    error: undefined,
+    validationErrors: undefined,
+    preservedValues: undefined,
+    appConfig: result.data as Record<string, t.ConfigValue>,
+  };
+}
+
 export const parseImportedYaml = createServerFn({ method: 'POST' })
   .inputValidator(z.object({ yamlContent: z.string() }))
-  .handler(async ({ data }: { data: { yamlContent: string } }) => {
-    let rawConfig: unknown;
-    try {
-      rawConfig = yaml.load(data.yamlContent, { schema: yaml.JSON_SCHEMA });
-    } catch (parseError) {
-      console.error('Failed to parse imported YAML content:', parseError);
-      return {
-        success: false,
-        error: 'Invalid YAML syntax. Please check the content for syntax errors.',
-        validationErrors: undefined,
-        appConfig: null,
-      };
-    }
-
-    if (!rawConfig || typeof rawConfig !== 'object') {
-      return {
-        success: false,
-        error: 'YAML did not produce a valid configuration object',
-        validationErrors: undefined,
-        appConfig: null,
-      };
-    }
-
-    const result = configSchema.safeParse(rawConfig);
-
-    if (!result.success) {
-      return {
-        success: false,
-        error: 'Config validation failed',
-        validationErrors: result.error.errors.map(
-          (e: { path: (string | number)[]; message: string }) => ({
-            path: e.path.join('.'),
-            message: e.message,
-          }),
-        ),
-        appConfig: null,
-      };
-    }
-
-    /**
-     * `librechat-data-provider` and `@librechat/data-schemas` both migrated
-     * to tsdown (upstream #13578, #13597) and now ship dual `.d.cts` + `.d.mts`
-     * declaration files. Under `moduleResolution: bundler`, TS treats
-     * `TCustomConfig` resolved through one declaration path as nominally
-     * distinct from `TCustomConfig` resolved through the other, even when
-     * structurally identical. That collision shows up here as "Two different
-     * types with this name exist, but they are unrelated" in the ServerFn
-     * registration. The consumer (ImportYamlDialog) treats appConfig as
-     * `Record<string, ConfigValue>`, so widening the return is the local fix.
-     */
-    return {
-      success: true,
-      error: undefined,
-      validationErrors: undefined,
-      appConfig: result.data as Record<string, t.ConfigValue>,
-    };
-  });
+  .handler(async ({ data }: { data: { yamlContent: string } }) =>
+    parseYamlConfig(data.yamlContent),
+  );
 
 function getFieldDefault(schema: t.ZodSchemaLike): { hasDefault: boolean; value: unknown } {
   let current = schema;

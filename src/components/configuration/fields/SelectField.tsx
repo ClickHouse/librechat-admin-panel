@@ -12,6 +12,7 @@ export function SelectField({
   'aria-label': ariaLabel,
 }: t.SelectFieldProps) {
   const localize = useLocalize();
+  const isUnknownValue = value !== '' && !options.some((o) => o.value === value);
 
   return (
     <div className="select-field-a11y max-w-75" id={id}>
@@ -22,6 +23,7 @@ export function SelectField({
         disabled={disabled}
         aria-label={ariaLabel}
       >
+        {isUnknownValue && <Select.Item value={value}>{value}</Select.Item>}
         {options.map((option) => (
           <Select.Item key={option.value} value={option.value}>
             {option.label}

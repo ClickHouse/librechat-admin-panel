@@ -5,6 +5,7 @@ import { Icon, Button, Dialog, Tabs } from '@clickhouse/click-ui';
 import type * as t from '@/types';
 import { availableScopesOptions, createGroupFn, createRoleFn, parseImportedYaml } from '@/server';
 import { getScopeTypeConfig } from '@/constants';
+import { InfoBanner } from './InfoBanner';
 import { useLocalize } from '@/hooks';
 import { cn } from '@/utils';
 
@@ -24,6 +25,7 @@ export function ImportYamlDialog({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>();
   const [validationErrors, setValidationErrors] = useState<t.ImportValidationError[]>();
+  const [preservedValues, setPreservedValues] = useState<t.ImportPreservedValue[]>([]);
 
   const [step, setStep] = useState<t.ImportStep>('input');
   const [parsedConfig, setParsedConfig] = useState<Record<string, t.ConfigValue> | null>(null);
@@ -52,6 +54,7 @@ export function ImportYamlDialog({
     setLoading(false);
     setError(undefined);
     setValidationErrors(undefined);
+    setPreservedValues([]);
     setStep('input');
     setParsedConfig(null);
     setTargetMode('base');
@@ -117,6 +120,7 @@ export function ImportYamlDialog({
 
       if (result.appConfig && typeof result.appConfig === 'object') {
         setParsedConfig(result.appConfig as Record<string, t.ConfigValue>);
+        setPreservedValues(result.preservedValues ?? []);
         setStep('target');
       }
     } catch (err) {
@@ -277,6 +281,17 @@ export function ImportYamlDialog({
 
           {step === 'target' && (
             <div ref={targetRef}>
+              {preservedValues.length > 0 && (
+                <div className="mb-3">
+                  <InfoBanner
+                    dismissible={false}
+                    text={localize('com_config_import_preserved_notice', {
+                      count: preservedValues.length,
+                      values: [...new Set(preservedValues.map((p) => p.value))].join(', '),
+                    })}
+                  />
+                </div>
+              )}
               <p className="mb-3 text-sm text-(--cui-color-text-muted)">
                 {localize('com_config_import_target')}
               </p>

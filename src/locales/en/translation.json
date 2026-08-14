@@ -149,6 +149,7 @@
   "com_config_import_validate": "Validate & import",
   "com_config_import_success": "Configuration imported successfully.",
   "com_config_import_error": "Import failed",
+  "com_config_import_preserved_notice": "Imported with {{count}} values this panel version does not recognize: {{values}}. They were preserved as-is and may come from a newer LibreChat release.",
   "com_config_import_target": "Import target",
   "com_config_import_apply": "Apply",
   "com_config_import_back": "Back",

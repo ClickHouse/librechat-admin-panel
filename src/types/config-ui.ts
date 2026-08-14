@@ -286,6 +286,11 @@ export interface ImportValidationError {
   message: string;
 }
 
+export interface ImportPreservedValue {
+  path: string;
+  value: string;
+}
+
 export interface InfoBannerProps {
   text: string;
   dismissible?: boolean;

@@ -62,6 +62,13 @@ export interface ZodSchemaLike {
   shape?: Record<string, ZodSchemaLike>;
 }
 
+export interface ZodIssueLike {
+  code?: string;
+  received?: unknown;
+  message: string;
+  path: (string | number)[];
+}
+
 export interface FieldValidationError {
   fieldPath: string;
   error: string;
