@@ -7,6 +7,7 @@ import type {
   ScopePermissions,
 } from './scope';
 import type { ConfigValue, FlatConfigMap, SchemaField } from './config';
+import type { ConfigRevisionListItem } from './revision';
 
 export interface ConfigTab {
   id: string;
@@ -165,6 +166,16 @@ export interface ResetBaseConfigDialogProps {
   resetting: boolean;
   error?: string | null;
   onConfirm: () => void;
+  onCancel: () => void;
+}
+
+export interface RevisionHistoryDialogProps {
+  open: boolean;
+  loading: boolean;
+  restoring: boolean;
+  error?: string | null;
+  revisions: ConfigRevisionListItem[];
+  onRestore: (id: string) => void;
   onCancel: () => void;
 }
 

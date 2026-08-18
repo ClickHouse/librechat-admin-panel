@@ -39,6 +39,7 @@ vi.mock('@tanstack/react-start', () => ({
       handler: (fn: (...args: unknown[]) => unknown) => fn,
     }),
   }),
+  createServerOnlyFn: <T extends (...args: never[]) => unknown>(fn: T) => fn,
 }));
 
 vi.mock('@tanstack/react-query', () => ({

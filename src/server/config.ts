@@ -20,6 +20,7 @@ import { BASE_CONFIG_PRINCIPAL_ID } from './constants';
 import { filterSecretPreviewFields, stripSecretPreviewValues } from '@/utils';
 import { safeFieldPath } from './utils/validation';
 import { flattenObject } from '@/utils/format';
+import { snapshotCurrentBaseConfig } from './revisions';
 import { apiFetch } from './utils/api';
 
 /**
@@ -1113,6 +1114,8 @@ export const saveBaseConfigFn = createServerFn({ method: 'POST' })
       throw new Error(`Validation failed — ${details}`);
     }
 
+    await snapshotCurrentBaseConfig('save');
+
     const response = await apiFetch(`/api/admin/config/role/${BASE_CONFIG_PRINCIPAL_ID}/fields`, {
       method: 'PATCH',
       body: JSON.stringify({ entries: filtered, priority: 0 }),
@@ -1143,6 +1146,8 @@ export const importBaseConfigFn = createServerFn({ method: 'POST' })
         overrides.interface as Record<string, unknown>,
       );
     }
+
+    await snapshotCurrentBaseConfig('import');
 
     const response = await apiFetch(`/api/admin/config/role/${BASE_CONFIG_PRINCIPAL_ID}`, {
       method: 'PUT',
@@ -1186,6 +1191,7 @@ export const resetBaseConfigFieldFn = createServerFn({ method: 'POST' })
  *  override to begin with, which is treated as success. */
 export const resetBaseConfigFn = createServerFn({ method: 'POST' }).handler(async () => {
   await requireCapability(SystemCapabilities.MANAGE_CONFIGS);
+  await snapshotCurrentBaseConfig('reset');
   const response = await apiFetch(`/api/admin/config/role/${BASE_CONFIG_PRINCIPAL_ID}`, {
     method: 'DELETE',
   });

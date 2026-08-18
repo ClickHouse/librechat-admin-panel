@@ -19,6 +19,8 @@ import {
   saveBaseConfigFn,
   getLangfuseConnectionFn,
   LANGFUSE_CONNECTION_QUERY_KEY,
+  configRevisionsOptions,
+  restoreConfigRevisionFn,
 } from '@/server';
 import {
   flattenObject,
@@ -47,6 +49,7 @@ import { ScopeSelector, ScopeTriggerButton } from './ScopeSelector';
 import { StickyActionBar } from '@/components/shared';
 import { ConfigTableOfContents } from './ConfigTableOfContents';
 import { ResetBaseConfigDialog } from './ResetBaseConfigDialog';
+import { RevisionHistoryDialog } from './RevisionHistoryDialog';
 import { ConfirmSaveDialog } from './ConfirmSaveDialog';
 import { ConfigTabContent } from './ConfigTabContent';
 import { ImportYamlDialog } from './ImportYamlDialog';
@@ -514,6 +517,14 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
   const [resetBaseOpen, setResetBaseOpen] = useState(false);
   const [resettingBase, setResettingBase] = useState(false);
   const [resetBaseError, setResetBaseError] = useState<string | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [restoringRevision, setRestoringRevision] = useState(false);
+  const [restoreError, setRestoreError] = useState<string | null>(null);
+
+  const revisionsQuery = useQuery({
+    ...configRevisionsOptions,
+    enabled: historyOpen && canManageConfig && !isEditingScope,
+  });
 
   const handleResetBaseConfig = useCallback(async () => {
     if (resettingBase) return;
@@ -542,6 +553,34 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
       notifyError(message);
     }
   }, [resettingBase, queryClient, localize]);
+
+  const handleRestoreRevision = useCallback(
+    async (id: string) => {
+      if (restoringRevision) return;
+      setRestoringRevision(true);
+      setRestoreError(null);
+      try {
+        await restoreConfigRevisionFn({ data: { id } });
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: ['baseConfig'] }),
+          queryClient.invalidateQueries({ queryKey: ['resolvedConfig'] }),
+          queryClient.invalidateQueries({ queryKey: ['configRevisions'] }),
+        ]);
+        setEditedValues({});
+        setTouchedPaths(new Set());
+        setEditSessionId((n) => n + 1);
+        setRestoringRevision(false);
+        setHistoryOpen(false);
+        notifySuccess(localize('com_config_revision_success'));
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        setRestoringRevision(false);
+        setRestoreError(message);
+        notifyError(message);
+      }
+    },
+    [restoringRevision, queryClient, localize],
+  );
 
   const handleResetField = useCallback((fieldPath: string) => {
     startTransition(() => {
@@ -952,6 +991,14 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
     return undefined;
   })();
 
+  const historyTitle = (() => {
+    if (!canManageConfig) {
+      return localize('com_cap_no_permission', { cap: SystemCapabilities.MANAGE_CONFIGS });
+    }
+    if (isDirty) return localize('com_config_revision_dirty');
+    return undefined;
+  })();
+
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden pt-2">
       <div className="shrink-0 px-4">
@@ -971,6 +1018,13 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
           onResetClick={() => {
             setResetBaseError(null);
             setResetBaseOpen(true);
+          }}
+          showHistory={!isEditingScope}
+          historyDisabled={isDirty || !canManageConfig}
+          historyTitle={historyTitle}
+          onHistoryClick={() => {
+            setRestoreError(null);
+            setHistoryOpen(true);
           }}
           showScope={permissions.canView}
           scopeSelection={selectedScope}
@@ -1087,6 +1141,20 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
           setResetBaseError(null);
         }}
       />
+
+      <RevisionHistoryDialog
+        open={historyOpen}
+        loading={revisionsQuery.isLoading}
+        restoring={restoringRevision}
+        error={restoreError ?? (revisionsQuery.error instanceof Error ? revisionsQuery.error.message : null)}
+        revisions={revisionsQuery.data?.revisions ?? []}
+        onRestore={handleRestoreRevision}
+        onCancel={() => {
+          if (restoringRevision) return;
+          setHistoryOpen(false);
+          setRestoreError(null);
+        }}
+      />
     </div>
   );
 }
@@ -1100,6 +1168,10 @@ function HeaderActions({
   resetDisabled,
   resetTitle,
   onResetClick,
+  showHistory,
+  historyDisabled,
+  historyTitle,
+  onHistoryClick,
   showScope,
   scopeSelection,
   onScopeClick,
@@ -1112,6 +1184,10 @@ function HeaderActions({
   resetDisabled: boolean;
   resetTitle?: string;
   onResetClick: () => void;
+  showHistory: boolean;
+  historyDisabled: boolean;
+  historyTitle?: string;
+  onHistoryClick: () => void;
   showScope: boolean;
   scopeSelection: t.ScopeSelection;
   onScopeClick: () => void;
@@ -1153,6 +1229,21 @@ function HeaderActions({
             <Icon name="refresh" size="xs" />
           </span>
           {localize('com_config_reset_base')}
+        </button>
+      )}
+      {showHistory && (
+        <button
+          type="button"
+          onClick={onHistoryClick}
+          disabled={historyDisabled}
+          aria-disabled={historyDisabled || undefined}
+          title={historyTitle}
+          className="flex shrink-0 cursor-pointer items-center gap-1.5 rounded-lg border border-(--cui-color-stroke-default) bg-transparent px-3 py-1.5 text-sm text-(--cui-color-text-default) transition-colors hover:bg-(--cui-color-background-hover) disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <span aria-hidden="true">
+            <Icon name="clock" size="xs" />
+          </span>
+          {localize('com_config_revision_history')}
         </button>
       )}
       {showScope && <ScopeTriggerButton currentSelection={scopeSelection} onClick={onScopeClick} />}
