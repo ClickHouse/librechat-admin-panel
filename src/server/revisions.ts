@@ -56,6 +56,18 @@ function mongoUri(): string | undefined {
   return uri && uri.length > 0 ? uri : undefined;
 }
 
+function mongoDbName(uri: string): string {
+  if (process.env.MONGO_DB_NAME) return process.env.MONGO_DB_NAME;
+  try {
+    const parsed = new URL(uri.replace(/^mongodb(\+srv)?:/i, 'https:'));
+    const fromPath = decodeURIComponent(parsed.pathname.replace(/^\//, ''));
+    if (fromPath.length > 0) return fromPath;
+  } catch {
+    /* fall through */
+  }
+  return 'LibreChat';
+}
+
 const getDefaultStore = createServerOnlyFn((): t.RevisionStore => {
   if (defaultStore) return defaultStore;
   const uri = mongoUri();
@@ -86,7 +98,8 @@ function createMongoRevisionStore(uri: string): t.RevisionStore {
         const { MongoClient } = await import('mongodb');
         const client = new MongoClient(uri);
         await client.connect();
-        return client.db().collection<t.ConfigRevision>(CONFIG_REVISIONS_COLLECTION);
+        const dbName = mongoDbName(uri);
+        return client.db(dbName).collection<t.ConfigRevision>(CONFIG_REVISIONS_COLLECTION);
       })();
     }
     return clientPromise;
