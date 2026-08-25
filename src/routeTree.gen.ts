@@ -18,6 +18,7 @@ import { Route as AppGrantsRouteImport } from './routes/_app/grants'
 import { Route as AppAccessRouteImport } from './routes/_app/access'
 import { Route as AppConfigurationIndexRouteImport } from './routes/_app/configuration/index'
 import { Route as AuthOpenidCallbackRouteImport } from './routes/auth/openid/callback'
+import { Route as AuthGoogleCallbackRouteImport } from './routes/auth/google/callback'
 
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
@@ -63,6 +64,11 @@ const AuthOpenidCallbackRoute = AuthOpenidCallbackRouteImport.update({
   path: '/auth/openid/callback',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AuthGoogleCallbackRoute = AuthGoogleCallbackRouteImport.update({
+  id: '/auth/google/callback',
+  path: '/auth/google/callback',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof AppIndexRoute
@@ -71,6 +77,7 @@ export interface FileRoutesByFullPath {
   '/grants': typeof AppGrantsRoute
   '/help': typeof AppHelpRoute
   '/users': typeof AppUsersRoute
+  '/auth/google/callback': typeof AuthGoogleCallbackRoute
   '/auth/openid/callback': typeof AuthOpenidCallbackRoute
   '/configuration/': typeof AppConfigurationIndexRoute
 }
@@ -81,6 +88,7 @@ export interface FileRoutesByTo {
   '/help': typeof AppHelpRoute
   '/users': typeof AppUsersRoute
   '/': typeof AppIndexRoute
+  '/auth/google/callback': typeof AuthGoogleCallbackRoute
   '/auth/openid/callback': typeof AuthOpenidCallbackRoute
   '/configuration': typeof AppConfigurationIndexRoute
 }
@@ -93,6 +101,7 @@ export interface FileRoutesById {
   '/_app/help': typeof AppHelpRoute
   '/_app/users': typeof AppUsersRoute
   '/_app/': typeof AppIndexRoute
+  '/auth/google/callback': typeof AuthGoogleCallbackRoute
   '/auth/openid/callback': typeof AuthOpenidCallbackRoute
   '/_app/configuration/': typeof AppConfigurationIndexRoute
 }
@@ -105,6 +114,7 @@ export interface FileRouteTypes {
     | '/grants'
     | '/help'
     | '/users'
+    | '/auth/google/callback'
     | '/auth/openid/callback'
     | '/configuration/'
   fileRoutesByTo: FileRoutesByTo
@@ -115,6 +125,7 @@ export interface FileRouteTypes {
     | '/help'
     | '/users'
     | '/'
+    | '/auth/google/callback'
     | '/auth/openid/callback'
     | '/configuration'
   id:
@@ -126,6 +137,7 @@ export interface FileRouteTypes {
     | '/_app/help'
     | '/_app/users'
     | '/_app/'
+    | '/auth/google/callback'
     | '/auth/openid/callback'
     | '/_app/configuration/'
   fileRoutesById: FileRoutesById
@@ -133,6 +145,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   AppRoute: typeof AppRouteWithChildren
   LoginRoute: typeof LoginRoute
+  AuthGoogleCallbackRoute: typeof AuthGoogleCallbackRoute
   AuthOpenidCallbackRoute: typeof AuthOpenidCallbackRoute
 }
 
@@ -201,6 +214,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthOpenidCallbackRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/auth/google/callback': {
+      id: '/auth/google/callback'
+      path: '/auth/google/callback'
+      fullPath: '/auth/google/callback'
+      preLoaderRoute: typeof AuthGoogleCallbackRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -227,6 +247,7 @@ const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
 const rootRouteChildren: RootRouteChildren = {
   AppRoute: AppRouteWithChildren,
   LoginRoute: LoginRoute,
+  AuthGoogleCallbackRoute: AuthGoogleCallbackRoute,
   AuthOpenidCallbackRoute: AuthOpenidCallbackRoute,
 }
 export const routeTree = rootRouteImport
