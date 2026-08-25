@@ -16,18 +16,19 @@ import type {
   AdminConfig,
 } from '@librechat/data-schemas';
 import type * as t from '@/types';
-import { isInterfacePermissionPath } from '@/utils/interfacePermissions';
-import { stripSecretPreviewValues } from '@/utils';
-import { BASE_CONFIG_PRINCIPAL_ID } from './constants';
-import { requireAnyCapability } from './capabilities';
-import { safeFieldPath } from './utils/validation';
-import { apiFetch } from './utils/api';
 import {
   normalizeAppServiceKeys,
   parseIndexedArrayPath,
   mergeConfigArraySources,
   getSchemaPathSet,
 } from './config';
+import { isInterfacePermissionPath } from '@/utils/interfacePermissions';
+import { BASE_CONFIG_PRINCIPAL_ID } from './constants';
+import { requireAnyCapability } from './capabilities';
+import { stripSecretPreviewValues } from '@/utils';
+import { safeFieldPath } from './utils/validation';
+import { fetchGroupNamesByIds } from './groups';
+import { apiFetch } from './utils/api';
 
 // ── Dot-path helpers ─────────────────────────────────────────────────
 
@@ -134,20 +135,18 @@ function apiConfigToScope(config: AdminConfig, nameMap?: Map<string, string>): t
  * Fetch all available scopes (all config overrides in the DB).
  */
 export const getAvailableScopesFn = createServerFn({ method: 'GET' }).handler(async () => {
-  const [configRes, groupsRes] = await Promise.all([
-    apiFetch('/api/admin/config'),
-    apiFetch('/api/admin/groups?limit=200').catch(() => null),
-  ]);
+  const configRes = await apiFetch('/api/admin/config');
   if (!configRes.ok) {
     throw new Error(`Failed to fetch scopes: ${configRes.status}`);
   }
   const { configs } = (await configRes.json()) as AdminConfigListResponse;
 
-  const nameMap = new Map<string, string>();
-  if (groupsRes?.ok) {
-    const { groups } = (await groupsRes.json()) as { groups: { _id: string; name: string }[] };
-    for (const g of groups) nameMap.set(g._id, g.name);
-  }
+  const groupIds = configs
+    .filter(
+      (c) => c.principalType === PrincipalType.GROUP && c.principalId !== BASE_CONFIG_PRINCIPAL_ID,
+    )
+    .map((c) => c.principalId);
+  const nameMap = await fetchGroupNamesByIds(groupIds).catch(() => new Map<string, string>());
 
   const scopes: t.ConfigScope[] = configs
     .filter((c) => c.principalId !== BASE_CONFIG_PRINCIPAL_ID)

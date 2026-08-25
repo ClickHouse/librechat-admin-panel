@@ -4,6 +4,7 @@ interface DebouncedFilter {
   readonly value: string;
   readonly debouncedValue: string;
   readonly onChange: (next: string) => void;
+  readonly reset: () => void;
 }
 
 /** Two-state debounced text filter: `value` mirrors keystrokes for controlled
@@ -39,5 +40,12 @@ export function useDebouncedFilter(
     [delay],
   );
 
-  return { value, debouncedValue, onChange };
+  /** Synchronously restore the initial value, cancelling any pending commit. */
+  const reset = useCallback(() => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+    setValue(initial);
+    setDebouncedValue(initial);
+  }, [initial]);
+
+  return { value, debouncedValue, onChange, reset };
 }

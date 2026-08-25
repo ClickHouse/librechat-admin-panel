@@ -10,12 +10,12 @@ import type * as t from '@/types';
 import {
   availableScopesOptions,
   allRolesQueryOptions,
-  allGroupsQueryOptions,
   createScopeFn,
   deleteScopeFn,
 } from '@/server';
+import { SearchInput, Pagination } from '@/components/shared';
+import { useGroupSearch, useLocalize } from '@/hooks';
 import { getScopeTypeConfig } from '@/constants';
-import { useLocalize } from '@/hooks';
 import { cn } from '@/utils';
 
 // ── Main selector ───────────────────────────────────────────────────
@@ -47,22 +47,25 @@ export function ScopeSelector({
     enabled: open && showCreate,
   });
 
-  const { data: allGroups = [] } = useQuery({
-    ...allGroupsQueryOptions,
-    enabled: open && showCreate,
-  });
+  const groupSearch = useGroupSearch(open && showCreate);
+  const { reset: resetGroupSearch } = groupSearch;
 
   const handleSearchChange = useCallback((value: string) => {
     setSearch(value);
     if (listRef.current) listRef.current.scrollTop = 0;
   }, []);
 
-  const resetState = useCallback(() => {
+  const closeCreate = useCallback(() => {
     setShowCreate(false);
+    resetGroupSearch();
+  }, [resetGroupSearch]);
+
+  const resetState = useCallback(() => {
     setCreating(false);
     setDeleteTarget(null);
     setDeleting(false);
-  }, []);
+    closeCreate();
+  }, [closeCreate]);
 
   const close = useCallback(() => {
     onOpenChange(false);
@@ -103,9 +106,9 @@ export function ScopeSelector({
     [allRoles, existingScopeKeys],
   );
 
-  const availableGroups = useMemo(
-    () => allGroups.filter((g) => !existingScopeKeys.has(`${PrincipalType.GROUP}:${g.id}`)),
-    [allGroups, existingScopeKeys],
+  const isGroupConfigured = useCallback(
+    (group: AdminGroup) => existingScopeKeys.has(`${PrincipalType.GROUP}:${group.id}`),
+    [existingScopeKeys],
   );
 
   const handleCreateForRole = useCallback(
@@ -259,7 +262,93 @@ export function ScopeSelector({
 
   if (showCreate) {
     const noRoles = availableRoles.length === 0;
-    const noGroups = availableGroups.length === 0;
+    const noGroups = groupSearch.groups.length === 0;
+    const groupsBusy = groupSearch.isFetching || groupSearch.isSearchPending;
+    const groupsEmptyKey = groupSearch.search
+      ? 'com_scope_no_matching_groups'
+      : 'com_access_groups_empty';
+
+    const handleGroupPageChange = (page: number) => {
+      if (!groupsBusy) groupSearch.setPage(page);
+    };
+
+    const renderGroupsContent = () => {
+      if (groupSearch.isLoading) {
+        return (
+          <div className="flex items-center justify-center px-4 py-4">
+            <span aria-hidden="true">
+              <Icon name="loading-animated" size="sm" />
+            </span>
+          </div>
+        );
+      }
+      if (groupSearch.isError) {
+        return (
+          <div className="flex flex-col items-center gap-2 px-4 py-4">
+            <p className="text-center text-xs text-(--cui-color-foreground-danger)">
+              {localize('com_error_load_groups')}
+            </p>
+            <Button
+              type="secondary"
+              label={localize('com_ui_retry')}
+              onClick={groupSearch.refetch}
+            />
+          </div>
+        );
+      }
+      if (noGroups) {
+        return (
+          <p className="px-4 py-4 text-center text-xs text-(--cui-color-text-muted)">
+            {localize(groupsEmptyKey)}
+          </p>
+        );
+      }
+      return (
+        <div className={cn(groupsBusy && 'pointer-events-none opacity-60 transition-opacity')}>
+          {groupSearch.groups.map((group) => {
+            const configured = isGroupConfigured(group);
+            return (
+              <button
+                key={group.id}
+                type="button"
+                onClick={() => handleCreateForGroup(group)}
+                disabled={creating || configured || groupsBusy}
+                className={cn(
+                  'scope-item w-full text-left',
+                  creating && 'pointer-events-none opacity-50',
+                  configured && 'pointer-events-none opacity-60',
+                )}
+              >
+                <span
+                  aria-hidden="true"
+                  className="scope-icon"
+                  style={{ color: groupConfig.color }}
+                >
+                  <Icon name={groupConfig.icon} size="sm" />
+                </span>
+                <span className="flex min-w-0 flex-1 flex-col">
+                  <span className="flex items-center gap-2">
+                    <span className="text-sm font-medium text-(--cui-color-text-default)">
+                      {group.name}
+                    </span>
+                    {configured && (
+                      <span className="rounded-sm bg-(--cui-color-background-secondary) px-1.5 py-0.5 text-[10px] font-medium text-(--cui-color-text-muted)">
+                        {localize('com_scope_already_configured')}
+                      </span>
+                    )}
+                  </span>
+                  {group.description && (
+                    <span className="text-xs text-(--cui-color-text-muted)">
+                      {group.description}
+                    </span>
+                  )}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      );
+    };
 
     return (
       <Command.Dialog
@@ -276,7 +365,8 @@ export function ScopeSelector({
         <div className="flex items-center gap-2 border-b border-(--cui-color-stroke-default) px-4 py-3">
           <button
             type="button"
-            onClick={() => setShowCreate(false)}
+            onClick={closeCreate}
+            aria-label={localize('com_scope_create_back')}
             className="flex cursor-pointer items-center text-(--cui-color-text-muted) hover:text-(--cui-color-text-default)"
           >
             <Icon name="chevron-left" size="sm" />
@@ -335,41 +425,28 @@ export function ScopeSelector({
           {/* Groups section */}
           <div className="cmdk-group">
             <div className="cmdk-group-heading">{localize('com_scope_groups')}</div>
-            {noGroups ? (
-              <p className="px-4 py-4 text-center text-xs text-(--cui-color-text-muted)">
-                {localize('com_scope_no_available_groups')}
-              </p>
-            ) : (
-              availableGroups.map((group) => (
-                <button
-                  key={group.id}
-                  type="button"
-                  onClick={() => handleCreateForGroup(group)}
-                  disabled={creating}
-                  className={cn(
-                    'scope-item w-full text-left',
-                    creating && 'pointer-events-none opacity-50',
-                  )}
-                >
-                  <span
-                    aria-hidden="true"
-                    className="scope-icon"
-                    style={{ color: groupConfig.color }}
-                  >
-                    <Icon name={groupConfig.icon} size="sm" />
-                  </span>
-                  <span className="flex min-w-0 flex-1 flex-col">
-                    <span className="text-sm font-medium text-(--cui-color-text-default)">
-                      {group.name}
-                    </span>
-                    {group.description && (
-                      <span className="text-xs text-(--cui-color-text-muted)">
-                        {group.description}
-                      </span>
-                    )}
-                  </span>
-                </button>
-              ))
+            <div className="px-2 pb-2">
+              <SearchInput
+                value={groupSearch.search}
+                onChange={groupSearch.onSearchChange}
+                placeholder={localize('com_access_search_groups')}
+                ariaLabel={localize('com_access_search_groups')}
+              />
+            </div>
+            {renderGroupsContent()}
+            {!groupSearch.isError && groupSearch.totalPages > 1 && (
+              <div
+                className={cn(
+                  'flex justify-center py-2',
+                  groupsBusy && 'pointer-events-none opacity-60',
+                )}
+              >
+                <Pagination
+                  currentPage={groupSearch.page}
+                  totalPages={groupSearch.totalPages}
+                  onPageChange={handleGroupPageChange}
+                />
+              </div>
             )}
           </div>
         </div>

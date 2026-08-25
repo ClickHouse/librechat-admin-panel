@@ -45,6 +45,11 @@ export const MEMBERS_PAGE_SIZE = 50;
 /** Backend max per request is 200. Consumers needing all groups use this cap. */
 const ALL_GROUPS_LIMIT = 200;
 
+const NAME_LOOKUP_BATCH_SIZE = 25;
+
+/** Backend rejects search strings longer than 200 characters with a 400. */
+export const MAX_SEARCH_LENGTH = 200;
+
 const GROUP_SOURCE_LOCAL = 'local' as const;
 
 // ── Server functions ─────────────────────────────────────────────────
@@ -64,7 +69,7 @@ export const getGroupsFn = createServerFn({ method: 'GET' })
       data: { search?: string; limit?: number; offset?: number };
     }): Promise<{ groups: AdminGroup[]; total: number }> => {
       const params = new URLSearchParams();
-      if (data.search) params.set('search', data.search);
+      if (data.search) params.set('search', data.search.slice(0, MAX_SEARCH_LENGTH));
       if (data.limit != null) params.set('limit', String(data.limit));
       if (data.offset != null) params.set('offset', String(data.offset));
       const qs = params.toString();
@@ -96,6 +101,31 @@ export const allGroupsQueryOptions = queryOptions<AdminGroup[]>({
   queryFn: () => getGroupsFn({ data: { limit: ALL_GROUPS_LIMIT } }).then((r) => r.groups),
   staleTime: 30_000,
 });
+
+async function fetchGroupNameEntry(id: string): Promise<[string, string] | null> {
+  const response = await apiFetch(`/api/admin/groups/${encodeURIComponent(id)}`);
+  if (!response.ok) return null;
+  const { group } = (await response.json()) as { group: RawGroup };
+  return [group._id, group.name];
+}
+
+/**
+ * Resolve group names for specific IDs via GET /api/admin/groups/:id, so
+ * resolution works regardless of how many groups exist. Fetches in small
+ * parallel batches; IDs that fail to resolve are simply omitted.
+ */
+export async function fetchGroupNamesByIds(ids: string[]): Promise<Map<string, string>> {
+  const unique = [...new Set(ids)];
+  const nameMap = new Map<string, string>();
+  for (let i = 0; i < unique.length; i += NAME_LOOKUP_BATCH_SIZE) {
+    const batch = unique.slice(i, i + NAME_LOOKUP_BATCH_SIZE);
+    const entries = await Promise.all(batch.map((id) => fetchGroupNameEntry(id).catch(() => null)));
+    for (const entry of entries) {
+      if (entry) nameMap.set(entry[0], entry[1]);
+    }
+  }
+  return nameMap;
+}
 
 export const getGroupAssignmentsFn = createServerFn({ method: 'GET' }).handler(
   async (): Promise<{ assignments: Record<string, t.AssignmentRef[]> }> => ({ assignments: {} }),

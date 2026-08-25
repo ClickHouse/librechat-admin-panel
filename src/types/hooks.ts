@@ -1,3 +1,4 @@
+import type { AdminGroup } from '@librechat/data-schemas';
 import type { UseMutationResult } from '@tanstack/react-query';
 import type { PrincipalType } from 'librechat-data-provider';
 
@@ -30,6 +31,24 @@ export interface UseProfileMutationsReturn {
     { principalType: PrincipalType; principalId: string }
   >;
   saving: boolean;
+}
+
+export interface GroupSearch {
+  readonly search: string;
+  readonly onSearchChange: (next: string) => void;
+  /** Synchronously clear the search input, debounced value, and page. */
+  readonly reset: () => void;
+  readonly groups: AdminGroup[];
+  readonly total: number;
+  readonly totalPages: number;
+  readonly page: number;
+  readonly setPage: (page: number) => void;
+  readonly isLoading: boolean;
+  readonly isFetching: boolean;
+  readonly isError: boolean;
+  readonly refetch: () => void;
+  /** True while the typed search has not yet been committed by the debounce. */
+  readonly isSearchPending: boolean;
 }
 
 export interface ReorderVoiceover {

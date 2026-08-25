@@ -3,6 +3,7 @@ export * from './useAnnouncement';
 export * from './useCapabilities';
 export * from './useCommandMenu';
 export * from './useDebouncedFilter';
+export * from './useGroupSearch';
 export * from './useHighlightRef';
 export * from './useLocalize';
 export * from './useProfileMutations';
