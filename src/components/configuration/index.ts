@@ -16,6 +16,7 @@ export {
   TextareaField,
   ToggleField,
   SelectField,
+  EnumSetField,
   ListField,
   NumberListField,
   KeyValueField,

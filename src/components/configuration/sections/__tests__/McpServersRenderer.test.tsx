@@ -61,9 +61,24 @@ interface IconButtonProps {
   onClick?: () => void;
   'aria-label'?: string;
 }
+interface CheckboxProps {
+  label?: React.ReactNode;
+  checked?: boolean;
+  disabled?: boolean;
+  onCheckedChange?: (checked: boolean) => void;
+}
 
 vi.mock('@clickhouse/click-ui', () => ({
   Icon: ({ name }: IconProps) => <span data-testid={`icon-${name}`} />,
+  Checkbox: ({ label, checked, disabled, onCheckedChange }: CheckboxProps) => (
+    <input
+      type="checkbox"
+      aria-label={typeof label === 'string' ? label : undefined}
+      checked={checked ?? false}
+      disabled={disabled}
+      onChange={() => onCheckedChange?.(!(checked ?? false))}
+    />
+  ),
   Switch: (props: SwitchProps) => (
     <button
       role="switch"

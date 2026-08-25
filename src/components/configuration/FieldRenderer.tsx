@@ -23,6 +23,7 @@ import { ListRecordField } from './fields/ListRecordField';
 import { renderCollapsible } from './renderCollapsible';
 import { TextareaField } from './fields/TextareaField';
 import { KeyValueField } from './fields/KeyValueField';
+import { EnumSetField } from './fields/EnumSetField';
 import { NumberField } from './fields/NumberField';
 import { SecretField } from './fields/SecretField';
 import { ToggleField } from './fields/ToggleField';
@@ -333,6 +334,29 @@ export function SingleFieldRenderer({
     const arrayValue = Array.isArray(currentValue) ? currentValue : [];
     const itemType = getArrayItemType(field.type);
 
+    if (itemType.startsWith('enum(')) {
+      const schemaDefault = schemaDefaults?.[path];
+      return (
+        <ConfigRow
+          title={fieldLabel}
+          description={description}
+          disabled={disabled}
+          fieldId={fieldId}
+          {...rowProps}
+        >
+          <EnumSetField
+            id={fieldId}
+            value={Array.isArray(currentValue) ? currentValue.map(String) : undefined}
+            options={getEnumOptions(itemType)}
+            onChange={(v) => onChange(path, v)}
+            defaultValue={Array.isArray(schemaDefault) ? schemaDefault.map(String) : undefined}
+            disabled={disabled}
+            aria-label={fieldLabel}
+          />
+        </ConfigRow>
+      );
+    }
+
     if (isStringLikeItemType(itemType)) {
       return (
         <ConfigRow
@@ -348,7 +372,6 @@ export function SingleFieldRenderer({
             onChange={(v) => onChange(path, v)}
             itemLabel={localize(`com_config_field_${field.key}_item`)}
             disabled={disabled}
-            options={itemType.startsWith('enum(') ? getEnumOptions(itemType) : undefined}
             aria-label={fieldLabel}
           />
         </ConfigRow>
@@ -1147,6 +1170,20 @@ export function renderInlineField(
   if (controlType === 'array') {
     const arrayValue = Array.isArray(fieldValue) ? fieldValue : [];
     const itemType = getArrayItemType(field.type);
+    if (itemType.startsWith('enum(')) {
+      return (
+        <InlineRow key={field.key} label={fieldLabel} fieldId={fieldId} required={required}>
+          <EnumSetField
+            id={fieldId}
+            value={Array.isArray(fieldValue) ? fieldValue.map(String) : undefined}
+            options={getEnumOptions(itemType)}
+            onChange={(v) => onChange(field.key, v)}
+            disabled={disabled}
+            aria-label={fieldLabel}
+          />
+        </InlineRow>
+      );
+    }
     if (isStringLikeItemType(itemType)) {
       return (
         <InlineRow key={field.key} label={fieldLabel} fieldId={fieldId} required={required}>
@@ -1155,7 +1192,6 @@ export function renderInlineField(
             values={arrayValue.map(String)}
             onChange={(v) => onChange(field.key, v)}
             disabled={disabled}
-            options={itemType.startsWith('enum(') ? getEnumOptions(itemType) : undefined}
             aria-label={fieldLabel}
           />
         </InlineRow>

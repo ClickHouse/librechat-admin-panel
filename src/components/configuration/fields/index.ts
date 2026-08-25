@@ -4,6 +4,7 @@ export { NumberField } from './NumberField';
 export { TextareaField } from './TextareaField';
 export { ToggleField } from './ToggleField';
 export { SelectField } from './SelectField';
+export { EnumSetField } from './EnumSetField';
 export { ListField } from './ListField';
 export { NumberListField } from './NumberListField';
 export { KeyValueField } from './KeyValueField';

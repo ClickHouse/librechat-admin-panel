@@ -8,6 +8,7 @@ import { configSchema } from 'librechat-data-provider';
 import type { ZodSchemaLike } from '@/types/config';
 import { extractSchemaTree, flattenTree } from '@/server/config';
 import translation from '@/locales/en/translation.json';
+import { getArrayItemType } from './utils';
 
 const localeKeys = new Set(Object.keys(translation));
 
@@ -28,8 +29,10 @@ describe('config field localization coverage', () => {
     expect(missing, `Missing locale keys:\n  ${missing.join('\n  ')}`).toHaveLength(0);
   });
 
-  it('every array field has a com_config_field_*_item locale key', () => {
-    const arrays = allFields.filter((f) => f.isArray);
+  it('every array field rendered as a list has a com_config_field_*_item locale key', () => {
+    const arrays = allFields.filter(
+      (f) => f.isArray && !getArrayItemType(f.type).startsWith('enum('),
+    );
     const missing: string[] = [];
 
     for (const field of arrays) {

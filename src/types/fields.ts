@@ -104,7 +104,18 @@ export interface ListFieldProps {
   placeholder?: string;
   itemLabel?: string;
   variant?: 'inline-edit' | 'display';
-  options?: SelectOption[];
+  'aria-label'?: string;
+}
+
+export interface EnumSetFieldProps {
+  id: string;
+  /** Configured entries only; `undefined` when the field is unset. */
+  value: string[] | undefined;
+  options: SelectOption[];
+  onChange: (values: string[]) => void;
+  /** Schema default shown as the effective checked set while the field is unset. */
+  defaultValue?: string[];
+  disabled?: boolean;
   'aria-label'?: string;
 }
 

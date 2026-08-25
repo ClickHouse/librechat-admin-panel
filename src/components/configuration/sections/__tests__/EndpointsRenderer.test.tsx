@@ -16,9 +16,24 @@ interface MockTextFieldProps {
   disabled?: boolean;
   'aria-label'?: string;
 }
+interface MockCheckboxProps {
+  label?: React.ReactNode;
+  checked?: boolean;
+  disabled?: boolean;
+  onCheckedChange?: (checked: boolean) => void;
+}
 
 vi.mock('@clickhouse/click-ui', () => ({
   Icon: () => <span />,
+  Checkbox: ({ label, checked, disabled, onCheckedChange }: MockCheckboxProps) => (
+    <input
+      type="checkbox"
+      aria-label={typeof label === 'string' ? label : undefined}
+      checked={checked ?? false}
+      disabled={disabled}
+      onChange={() => onCheckedChange?.(!(checked ?? false))}
+    />
+  ),
   MultiAccordion: Object.assign(
     ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
     {
