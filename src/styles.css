@@ -419,6 +419,13 @@ textarea:focus-visible {
   border-radius: var(--cui-radii-sm) !important;
 }
 
+/* Sidebar collapse toggle is flush with the panel edges and viewport bottom,
+   so ancestors clip the default outside ring; draw it inset instead. */
+.sidebar-toggle:focus-visible {
+  outline-offset: -2px !important;
+  border-radius: var(--cui-radii-sm);
+}
+
 .scope-selector-dialog {
   width: min(640px, calc(100vw - 2rem));
 }

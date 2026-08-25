@@ -39,3 +39,8 @@ export interface SettingsDialogProps {
   open: boolean;
   onClose: () => void;
 }
+
+export interface LayoutRenderOptions {
+  user?: SidebarProps['user'];
+  path?: string;
+}
