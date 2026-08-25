@@ -419,6 +419,17 @@ textarea:focus-visible {
   border-radius: var(--cui-radii-sm) !important;
 }
 
+/* click-ui Select popover: the option list matches the trigger width while the
+   popover border-box loses 2px to its 1px borders, so overflow:hidden clips the
+   keyboard-highlight ring's right edge; inset the ring past the overhang.
+   Options are not buttons, so the global focus-visible override never reaches
+   them and click-ui paints the ring with its own accent token; recolor it to
+   the app outline token so it matches every other focus ring. */
+[data-input-modality='keyboard'] [data-highlighted] {
+  outline-color: var(--cui-color-outline) !important;
+  outline-offset: -4px !important;
+}
+
 .scope-selector-dialog {
   width: min(640px, calc(100vw - 2rem));
 }
