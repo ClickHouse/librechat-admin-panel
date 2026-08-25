@@ -476,6 +476,8 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
   const [confirmSaveOpen, setConfirmSaveOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  /** After a successful save the StickyActionBar (the Save trigger) unmounts, so the dialog needs an always-mounted focus target to return to. */
+  const saveFallbackRef = useRef<HTMLDivElement>(null);
 
   const handleDiscard = useCallback(() => {
     setEditedValues({});
@@ -953,7 +955,11 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
   })();
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-hidden pt-2">
+    <div
+      ref={saveFallbackRef}
+      tabIndex={-1}
+      className="flex min-h-0 flex-1 flex-col overflow-hidden pt-2 outline-none"
+    >
       <div className="shrink-0 px-4">
         {banner && <div className="pt-4 pb-2">{banner}</div>}
         <HeaderActions
@@ -1056,6 +1062,7 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
         originalValues={originalValuesForDialog}
         saving={saving}
         error={saveError}
+        fallbackRef={saveFallbackRef}
         onConfirm={handleConfirmSave}
         onCancel={() => setConfirmSaveOpen(false)}
       />
@@ -1071,6 +1078,7 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
 
       <ImportYamlDialog
         open={importOpen}
+        fallbackRef={saveFallbackRef}
         onClose={() => setImportOpen(false)}
         onImport={handleImport}
         onImportAsProfile={handleImportAsProfile}
@@ -1080,6 +1088,7 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
         open={resetBaseOpen}
         resetting={resettingBase}
         error={resetBaseError}
+        fallbackRef={saveFallbackRef}
         onConfirm={handleResetBaseConfig}
         onCancel={() => {
           if (resettingBase) return;

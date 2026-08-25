@@ -8,10 +8,11 @@ import { SelectedMemberList, UserSearchInline } from '@/components/shared';
 import { RolePermissionsPanel } from './RolePermissionsPanel';
 import { cn, notifySuccess, notifyError } from '@/utils';
 import { defaultPermissions } from '@/constants';
-import { useLocalize } from '@/hooks';
+import { useLocalize, useReturnFocus } from '@/hooks';
 
 export function CreateRoleDialog({ open, onClose }: t.CreateRoleDialogProps) {
   const localize = useLocalize();
+  const returnFocus = useReturnFocus(open);
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<t.CreateRoleTab>('details');
   const [name, setName] = useState('');
@@ -87,6 +88,7 @@ export function CreateRoleDialog({ open, onClose }: t.CreateRoleDialogProps) {
         title={localize('com_access_create_role')}
         showClose
         onClose={resetAndClose}
+        onCloseAutoFocus={returnFocus}
         className="modal-frost max-w-2xl!"
       >
         <form onSubmit={handleSubmit} className="flex flex-col gap-5">

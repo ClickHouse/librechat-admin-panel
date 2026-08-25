@@ -5,8 +5,8 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type * as t from '@/types';
 import { FieldProfilePopover } from './FieldProfilePopover';
 import { fieldProfileValuesOptions } from '@/server';
+import { useLocalize, useReturnFocus } from '@/hooks';
 import { getScopeTypeConfig } from '@/constants';
-import { useLocalize } from '@/hooks';
 
 export function ProfileIndicator({
   fieldPath,
@@ -21,6 +21,7 @@ export function ProfileIndicator({
   const localize = useLocalize();
   const queryClient = useQueryClient();
   const [dialogOpen, setDialogOpen] = useState(false);
+  const returnFocus = useReturnFocus(dialogOpen);
 
   const hasProfiles = profileTypes && profileTypes.length > 0;
 
@@ -89,6 +90,7 @@ export function ProfileIndicator({
           title={localize('com_scope_cascade_title')}
           showClose
           onClose={handleClose}
+          onCloseAutoFocus={returnFocus}
           className="modal-frost"
         >
           <FieldProfilePopover

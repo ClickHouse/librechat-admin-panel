@@ -113,6 +113,8 @@ export function AuditLogTab() {
 
   const [currentPage, setCurrentPage] = useState(1);
   const { message: announcement, announce } = useAnnouncement();
+  const rowRefs = useRef<Map<string, HTMLTableRowElement>>(new Map());
+  const tabFallbackRef = useRef<HTMLDivElement>(null);
 
   const resetToFirstPage = useCallback(() => setCurrentPage(1), []);
   const searchFilter = useDebouncedFilter('', resetToFirstPage);
@@ -287,8 +289,10 @@ export function AuditLogTab() {
     !entryOnPage &&
     (!isAuditEntryId(entryId) || (entryFetch.isSuccess && entryFetch.data?.entry === null));
 
+  /** Focus the row before opening so the drawer's useReturnFocus captures it even when pointer activation left focus elsewhere (e.g. a filter input). */
   const openEntry = useCallback(
     (id: string) => {
+      rowRefs.current.get(id)?.focus();
       void navigate({ search: (prev: Record<string, unknown>) => ({ ...prev, entryId: id }) });
     },
     [navigate],
@@ -314,7 +318,11 @@ export function AuditLogTab() {
         announce(localize('com_a11y_copy_failed'));
         return false;
       }
-      const url = buildEntryPermalink(id, window.location.origin, import.meta.env.VITE_BASE_PATH || '');
+      const url = buildEntryPermalink(
+        id,
+        window.location.origin,
+        import.meta.env.VITE_BASE_PATH || '',
+      );
       try {
         await navigator.clipboard.writeText(url);
         return true;
@@ -385,7 +393,11 @@ export function AuditLogTab() {
   const exportLabel = localize('com_audit_export_server');
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pt-4 pr-1 pl-1">
+    <div
+      ref={tabFallbackRef}
+      tabIndex={-1}
+      className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pt-4 pr-1 pl-1"
+    >
       <div className="flex items-center justify-between gap-3">
         <div
           className="flex flex-1 flex-wrap items-center gap-3"
@@ -579,6 +591,10 @@ export function AuditLogTab() {
                   isLast={i === pageEntries.length - 1}
                   onActivate={() => openEntry(entry.id)}
                   onKeyDown={(e) => handleRowKeyDown(e, entry.id)}
+                  rowRef={(el) => {
+                    if (el) rowRefs.current.set(entry.id, el);
+                    else rowRefs.current.delete(entry.id);
+                  }}
                   localize={localize}
                 />
               ))}
@@ -622,6 +638,7 @@ export function AuditLogTab() {
 
       <AuditLogDetailDrawer
         entry={selectedEntry}
+        fallbackRef={tabFallbackRef}
         /**
          * Drawer is open whenever a deep-link `entryId` is in the URL. This
          * keeps the panel mounted (showing a Loading state inside) while the
@@ -655,18 +672,21 @@ function AuditLogTableRow({
   isLast,
   onActivate,
   onKeyDown,
+  rowRef,
   localize,
 }: {
   entry: t.AuditLogEntryWithDiff;
   isLast: boolean;
   onActivate: () => void;
   onKeyDown: (e: React.KeyboardEvent<HTMLTableRowElement>) => void;
+  rowRef: (el: HTMLTableRowElement | null) => void;
   localize: ReturnType<typeof useLocalize>;
 }) {
   const targetConfig = getScopeTypeConfig(entry.target.type as PrincipalType);
   const capability = auditCapability(entry);
   return (
     <tr
+      ref={rowRef}
       role="button"
       tabIndex={0}
       aria-label={localize('com_a11y_audit_row_open')}

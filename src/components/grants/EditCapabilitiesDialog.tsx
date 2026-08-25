@@ -7,9 +7,9 @@ import type * as t from '@/types';
 import { grantCapabilityFn, principalGrantsQueryOptions, revokeCapabilityFn } from '@/server';
 import { getScopeTypeConfig, SystemCapabilities } from '@/constants';
 import { cn, notifySuccess, notifyError } from '@/utils';
+import { useLocalize, useReturnFocus } from '@/hooks';
 import { CapabilityPanel } from './CapabilityPanel';
 import { LoadingState } from '@/components/shared';
-import { useLocalize } from '@/hooks';
 
 function grantsToRecord(grants: AdminSystemGrant[]): Record<string, boolean> {
   const record: Record<string, boolean> = {};
@@ -26,11 +26,13 @@ export function EditCapabilitiesDialog({
   principalType,
   principalId,
   principalName,
+  fallbackRef,
   onClose,
 }: t.EditCapabilitiesDialogProps) {
   const localize = useLocalize();
   const queryClient = useQueryClient();
   const open = principalType != null && principalId != null;
+  const returnFocus = useReturnFocus(open, fallbackRef);
 
   const { data: grants = [], isLoading } = useQuery({
     ...principalGrantsQueryOptions(principalType ?? PrincipalType.ROLE, principalId ?? ''),
@@ -104,6 +106,7 @@ export function EditCapabilitiesDialog({
         title={dialogTitle}
         showClose
         onClose={onClose}
+        onCloseAutoFocus={returnFocus}
         className="modal-frost max-w-2xl!"
       >
         {isLoading ? (

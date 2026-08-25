@@ -28,6 +28,8 @@ export function GroupsTab({ onCreateGroup }: t.GroupsTabProps) {
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [page, setPage] = useState(1);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+  /** Stable focus target for the edit dialog: a rename can drop the group from the searched list and unmount the row button that opened it. */
+  const listFallbackRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     return () => clearTimeout(debounceRef.current);
@@ -80,7 +82,11 @@ export function GroupsTab({ onCreateGroup }: t.GroupsTabProps) {
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto py-2 pr-1">
+    <div
+      ref={listFallbackRef}
+      tabIndex={-1}
+      className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto py-2 pr-1 outline-none"
+    >
       <div className="flex items-center justify-between gap-3">
         <SearchInput
           value={search}
@@ -143,6 +149,7 @@ export function GroupsTab({ onCreateGroup }: t.GroupsTabProps) {
         key={editTarget?.id}
         group={editTarget}
         canManage={canManage}
+        fallbackRef={listFallbackRef}
         onClose={() => setEditTarget(null)}
       />
 

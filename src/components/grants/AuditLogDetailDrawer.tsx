@@ -2,7 +2,7 @@ import * as Dialog from '@radix-ui/react-dialog';
 import { PrincipalType } from 'librechat-data-provider';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Badge, Button, Icon, IconButton } from '@clickhouse/click-ui';
-import type { ReactElement } from 'react';
+import type { ReactElement, RefObject } from 'react';
 import type * as t from '@/types';
 import {
   ACTION_BADGE_STATE,
@@ -13,7 +13,7 @@ import {
 } from './auditLogUtils';
 import { LoadingState } from '@/components/shared';
 import { getScopeTypeConfig } from '@/constants';
-import { useLocalize } from '@/hooks';
+import { useLocalize, useReturnFocus } from '@/hooks';
 import { cn } from '@/utils';
 
 interface AuditLogDetailDrawerProps {
@@ -41,6 +41,8 @@ interface AuditLogDetailDrawerProps {
    * caller is responsible for distinguishing this from `notFound` (which is
    * the 404 case where the request itself succeeded but the entry is gone). */
   loadError?: boolean;
+  /** Restore target for the no-opener path (cold `?entryId=` permalink), where the capture at open time is only `document.body`. */
+  fallbackRef?: RefObject<HTMLElement | null>;
 }
 
 function CopyableMono({
@@ -133,8 +135,10 @@ export function AuditLogDetailDrawer({
   notFound = false,
   loading = false,
   loadError = false,
+  fallbackRef,
 }: AuditLogDetailDrawerProps): ReactElement | null {
   const localize = useLocalize();
+  const returnFocus = useReturnFocus(open, fallbackRef);
 
   // Keep the last non-null entry so the close animation has content to render
   // while Radix Dialog slides the panel out. Without this, unmounting on
@@ -225,6 +229,7 @@ export function AuditLogDetailDrawer({
           <Dialog.Content
             aria-label={localize('com_audit_detail_title')}
             onEscapeKeyDown={() => onClose()}
+            onCloseAutoFocus={returnFocus}
             className={cn(
               'fixed top-0 right-0 z-(--z-overlay) flex h-full w-full flex-col bg-(--cui-color-background-panel) shadow-xl sm:w-120',
               'border-l border-(--cui-color-stroke-default)',
@@ -272,6 +277,7 @@ export function AuditLogDetailDrawer({
           <Dialog.Content
             aria-label={localize('com_audit_detail_title')}
             onEscapeKeyDown={() => onClose()}
+            onCloseAutoFocus={returnFocus}
             className={cn(
               'fixed top-0 right-0 z-(--z-overlay) flex h-full w-full flex-col bg-(--cui-color-background-panel) shadow-xl sm:w-120',
               'border-l border-(--cui-color-stroke-default)',
@@ -324,6 +330,7 @@ export function AuditLogDetailDrawer({
           <Dialog.Content
             aria-label={localize('com_audit_detail_title')}
             onEscapeKeyDown={() => onClose()}
+            onCloseAutoFocus={returnFocus}
             className={cn(
               'fixed top-0 right-0 z-(--z-overlay) flex h-full w-full flex-col bg-(--cui-color-background-panel) shadow-xl sm:w-120',
               'border-l border-(--cui-color-stroke-default)',
@@ -389,6 +396,7 @@ export function AuditLogDetailDrawer({
         <Dialog.Content
           aria-label={localize('com_audit_detail_title')}
           onEscapeKeyDown={() => onClose()}
+          onCloseAutoFocus={returnFocus}
           className={cn(
             'fixed top-0 right-0 z-(--z-overlay) flex h-full w-full flex-col bg-(--cui-color-background-panel) shadow-xl sm:w-120',
             'border-l border-(--cui-color-stroke-default)',

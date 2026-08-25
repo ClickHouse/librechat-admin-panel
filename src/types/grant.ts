@@ -1,6 +1,6 @@
 import type { AdminAuditLogEntry } from '@librechat/data-schemas';
 import type { PrincipalType } from 'librechat-data-provider';
-import type { KeyboardEvent } from 'react';
+import type { KeyboardEvent, RefObject } from 'react';
 
 export interface AuditLogEntryWithDiff extends AdminAuditLogEntry {
   before?: readonly string[];
@@ -25,6 +25,7 @@ export interface EditCapabilitiesDialogProps {
   principalType: PrincipalType | null;
   principalId: string | null;
   principalName: string;
+  fallbackRef?: RefObject<HTMLElement | null>;
   onClose: () => void;
 }
 

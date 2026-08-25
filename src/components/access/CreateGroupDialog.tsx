@@ -6,10 +6,11 @@ import type * as t from '@/types';
 import { SelectedMemberList, UserSearchInline } from '@/components/shared';
 import { addGroupMemberFn, createGroupFn } from '@/server';
 import { cn, notifySuccess, notifyError } from '@/utils';
-import { useLocalize } from '@/hooks';
+import { useLocalize, useReturnFocus } from '@/hooks';
 
 export function CreateGroupDialog({ open, onClose }: t.CreateGroupDialogProps) {
   const localize = useLocalize();
+  const returnFocus = useReturnFocus(open);
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<t.CreateGroupTab>('details');
   const [name, setName] = useState('');
@@ -84,6 +85,7 @@ export function CreateGroupDialog({ open, onClose }: t.CreateGroupDialogProps) {
         title={localize('com_access_create_group')}
         showClose
         onClose={resetAndClose}
+        onCloseAutoFocus={returnFocus}
         className="modal-frost max-w-2xl!"
       >
         <form onSubmit={handleSubmit} className="flex flex-col gap-5">

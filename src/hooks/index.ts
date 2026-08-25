@@ -7,5 +7,6 @@ export * from './useHighlightRef';
 export * from './useLocalize';
 export * from './useProfileMutations';
 export * from './useReorderVoiceover';
+export * from './useReturnFocus';
 export * from './useSearchIndex';
 export * from './useStripAriaExpanded';

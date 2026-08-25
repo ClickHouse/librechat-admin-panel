@@ -1,3 +1,4 @@
+import type { RefObject } from 'react';
 import type { TUser } from 'librechat-data-provider';
 import type { ConfigScope, IconName } from './scope';
 
@@ -27,6 +28,7 @@ export interface UserRowProps {
   onViewDetails: () => void;
   onDelete: () => void;
   canManage: boolean;
+  rowRef: (el: HTMLTableRowElement | null) => void;
 }
 
 export type RemoveTarget =
@@ -36,6 +38,7 @@ export type RemoveTarget =
 
 export interface UserDetailDialogProps {
   user: TUser | null;
+  fallbackRef?: RefObject<HTMLElement | null>;
   onClose: () => void;
   canManageRoles?: boolean;
   canManageGroups?: boolean;

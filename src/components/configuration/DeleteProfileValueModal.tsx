@@ -1,16 +1,18 @@
 import { Icon, Button, Dialog } from '@clickhouse/click-ui';
 import type * as t from '@/types';
+import { useLocalize, useReturnFocus } from '@/hooks';
 import { getScopeTypeConfig } from '@/constants';
-import { useLocalize } from '@/hooks';
 
 export function DeleteProfileValueModal({
   scope,
+  fallbackRef,
   fieldLabel,
   saving,
   onConfirm,
   onCancel,
 }: t.DeleteProfileValueModalProps) {
   const localize = useLocalize();
+  const returnFocus = useReturnFocus(!!scope, fallbackRef);
   const scopeConfig = scope ? getScopeTypeConfig(scope.principalType) : null;
 
   return (
@@ -24,6 +26,7 @@ export function DeleteProfileValueModal({
         title={localize('com_scope_confirm_remove')}
         showClose
         onClose={onCancel}
+        onCloseAutoFocus={returnFocus}
         className="modal-frost"
       >
         {scope && (

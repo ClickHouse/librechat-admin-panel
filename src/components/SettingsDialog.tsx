@@ -1,7 +1,7 @@
 import { Dialog } from '@clickhouse/click-ui';
 import type * as t from '@/types';
+import { useLocalize, useReturnFocus } from '@/hooks';
 import { useTheme } from '@/contexts/ThemeContext';
-import { useLocalize } from '@/hooks';
 import { cn } from '@/utils';
 
 const THEME_OPTIONS: t.ThemeOption[] = ['system', 'light', 'dark'];
@@ -11,8 +11,9 @@ const THEME_LABEL_KEYS: Record<t.ThemeOption, string> = {
   dark: 'com_nav_theme_dark',
 };
 
-export function SettingsDialog({ open, onClose }: t.SettingsDialogProps) {
+export function SettingsDialog({ open, fallbackRef, onClose }: t.SettingsDialogProps) {
   const localize = useLocalize();
+  const returnFocus = useReturnFocus(open, fallbackRef);
   const { theme, setTheme } = useTheme();
 
   return (
@@ -26,6 +27,7 @@ export function SettingsDialog({ open, onClose }: t.SettingsDialogProps) {
         title={localize('com_ui_settings')}
         showClose
         onClose={onClose}
+        onCloseAutoFocus={returnFocus}
         className="modal-frost"
       >
         <div className="flex flex-col gap-6 py-2">

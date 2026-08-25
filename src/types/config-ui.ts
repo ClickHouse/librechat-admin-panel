@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import type { ReactNode, RefObject } from 'react';
 import type {
   ConfigScope,
   IconName,
@@ -141,6 +141,7 @@ export interface ConfirmSaveDialogProps {
   originalValues: FlatConfigMap;
   saving: boolean;
   error?: string | null;
+  fallbackRef?: RefObject<HTMLElement | null>;
   onConfirm: () => void;
   onCancel: () => void;
 }
@@ -156,6 +157,7 @@ export interface DeleteProfileValueModalProps {
   scope: ConfigScope | null;
   fieldLabel: string;
   saving: boolean;
+  fallbackRef?: RefObject<HTMLElement | null>;
   onConfirm: (scope: ConfigScope) => void;
   onCancel: () => void;
 }
@@ -164,6 +166,7 @@ export interface ResetBaseConfigDialogProps {
   open: boolean;
   resetting: boolean;
   error?: string | null;
+  fallbackRef?: RefObject<HTMLElement | null>;
   onConfirm: () => void;
   onCancel: () => void;
 }
@@ -272,6 +275,7 @@ export interface FieldRendererProps {
 
 export interface ImportYamlDialogProps {
   open: boolean;
+  fallbackRef?: RefObject<HTMLElement | null>;
   onClose: () => void;
   onImport: (appConfig: Record<string, ConfigValue>) => void;
   onImportAsProfile: (appConfig: Record<string, ConfigValue>, scope: ConfigScope) => Promise<void>;
@@ -326,6 +330,7 @@ export interface ProfileValueModalProps {
   scopeName: string;
   scopeType: string;
   mode: 'edit' | 'add';
+  fallbackRef?: RefObject<HTMLElement | null>;
 }
 
 export interface ModalValueControlProps {

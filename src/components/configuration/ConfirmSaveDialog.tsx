@@ -2,7 +2,7 @@ import yaml from 'js-yaml';
 import { Badge, Button, Dialog } from '@clickhouse/click-ui';
 import type { ReactNode } from 'react';
 import type * as t from '@/types';
-import { useLocalize } from '@/hooks';
+import { useLocalize, useReturnFocus } from '@/hooks';
 
 export function ConfirmSaveDialog({
   open,
@@ -10,10 +10,12 @@ export function ConfirmSaveDialog({
   originalValues,
   saving,
   error,
+  fallbackRef,
   onConfirm,
   onCancel,
 }: t.ConfirmSaveDialogProps) {
   const localize = useLocalize();
+  const returnFocus = useReturnFocus(open, fallbackRef);
   const entries = Object.entries(editedValues).sort(([a], [b]) => a.localeCompare(b));
   const count = entries.length;
   const countLabel =
@@ -32,6 +34,7 @@ export function ConfirmSaveDialog({
         title={localize('com_config_confirm_save_title')}
         showClose
         onClose={onCancel}
+        onCloseAutoFocus={returnFocus}
         className="modal-frost"
       >
         <div className="flex flex-col gap-4">
@@ -70,9 +73,10 @@ function resolvePathLabel(path: string, newValue: t.ConfigValue, oldValue: t.Con
   const match = /^(.+)\.(\d+)$/.exec(path);
   if (!match) return path;
   const val = (newValue ?? oldValue) as Record<string, t.ConfigValue> | undefined;
-  const name = val && typeof val === 'object' && !Array.isArray(val)
-    ? (val as Record<string, string>).name
-    : undefined;
+  const name =
+    val && typeof val === 'object' && !Array.isArray(val)
+      ? (val as Record<string, string>).name
+      : undefined;
   return name ? `${match[1]}[${match[2]}] (${name})` : `${match[1]}[${match[2]}]`;
 }
 

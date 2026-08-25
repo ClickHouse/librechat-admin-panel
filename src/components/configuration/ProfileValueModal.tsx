@@ -4,10 +4,10 @@ import { Icon, Button, Dialog } from '@clickhouse/click-ui';
 import type * as t from '@/types';
 import { getEnumOptions, getArrayItemType, toKVPair } from './utils';
 import { KeyValueField } from './fields/KeyValueField';
+import { useLocalize, useReturnFocus } from '@/hooks';
 import { TrashButton } from '@/components/shared';
 import { getScopeTypeConfig } from '@/constants';
 import { formatJson, cn } from '@/utils';
-import { useLocalize } from '@/hooks';
 
 export function ProfileValueModal({
   open,
@@ -21,8 +21,10 @@ export function ProfileValueModal({
   scopeName,
   scopeType,
   mode,
+  fallbackRef,
 }: t.ProfileValueModalProps) {
   const localize = useLocalize();
+  const returnFocus = useReturnFocus(open, fallbackRef);
   const scopeConfig = getScopeTypeConfig(scopeType as PrincipalType | 'BASE');
 
   const title =
@@ -37,7 +39,13 @@ export function ProfileValueModal({
         if (!isOpen) onCancel();
       }}
     >
-      <Dialog.Content title={title} showClose onClose={onCancel} className="modal-frost">
+      <Dialog.Content
+        title={title}
+        showClose
+        onClose={onCancel}
+        onCloseAutoFocus={returnFocus}
+        className="modal-frost"
+      >
         <div className="flex flex-col gap-4">
           <div className="flex items-center gap-2">
             {scopeConfig && (

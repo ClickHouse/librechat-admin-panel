@@ -1,6 +1,6 @@
 import { Button, Dialog } from '@clickhouse/click-ui';
 import type * as t from '@/types';
-import { useLocalize } from '@/hooks';
+import { useLocalize, useReturnFocus } from '@/hooks';
 import { cn } from '@/utils';
 
 const sizeClasses: Record<string, string> = {
@@ -21,6 +21,7 @@ export function FormDialog({
   children,
 }: t.FormDialogProps) {
   const localize = useLocalize();
+  const returnFocus = useReturnFocus(open);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -38,6 +39,7 @@ export function FormDialog({
         title={title}
         showClose
         onClose={onClose}
+        onCloseAutoFocus={returnFocus}
         className={cn('modal-frost', size && sizeClasses[size])}
       >
         <form onSubmit={handleSubmit} className="flex flex-col gap-5">
@@ -54,11 +56,7 @@ export function FormDialog({
               onClick={onClose}
               disabled={saving}
             />
-            <Button
-              type="primary"
-              label={submitLabel}
-              disabled={submitDisabled || saving}
-            />
+            <Button type="primary" label={submitLabel} disabled={submitDisabled || saving} />
           </div>
         </form>
       </Dialog.Content>

@@ -1,15 +1,17 @@
 import { Button, Dialog } from '@clickhouse/click-ui';
 import type * as t from '@/types';
-import { useLocalize } from '@/hooks';
+import { useLocalize, useReturnFocus } from '@/hooks';
 
 export function ResetBaseConfigDialog({
   open,
   resetting,
   error,
+  fallbackRef,
   onConfirm,
   onCancel,
 }: t.ResetBaseConfigDialogProps) {
   const localize = useLocalize();
+  const returnFocus = useReturnFocus(open, fallbackRef);
 
   return (
     <Dialog
@@ -22,6 +24,7 @@ export function ResetBaseConfigDialog({
         title={localize('com_config_reset_base_title')}
         showClose
         onClose={onCancel}
+        onCloseAutoFocus={returnFocus}
         className="modal-frost"
       >
         <div className="flex flex-col gap-4">

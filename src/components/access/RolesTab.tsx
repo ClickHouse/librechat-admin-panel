@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { Button } from '@clickhouse/click-ui';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import type * as t from '@/types';
@@ -25,6 +25,8 @@ export function RolesTab({ onCreateRole }: t.RolesTabProps) {
   const [deleteTarget, setDeleteTarget] = useState<t.Role | null>(null);
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
+  /** Stable focus target for the edit dialog: a rename can drop the role from the filtered list and unmount the row button that opened it. */
+  const listFallbackRef = useRef<HTMLDivElement>(null);
 
   const { data: allRoles = [], isLoading, isError } = useQuery(allRolesQueryOptions);
 
@@ -72,7 +74,11 @@ export function RolesTab({ onCreateRole }: t.RolesTabProps) {
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto py-2 pr-1">
+    <div
+      ref={listFallbackRef}
+      tabIndex={-1}
+      className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto py-2 pr-1 outline-none"
+    >
       <div className="flex items-center justify-between gap-3">
         <SearchInput
           value={search}
@@ -144,6 +150,7 @@ export function RolesTab({ onCreateRole }: t.RolesTabProps) {
         key={editTarget?.id}
         role={editTarget}
         canManage={canManage}
+        fallbackRef={listFallbackRef}
         onClose={() => setEditTarget(null)}
       />
 

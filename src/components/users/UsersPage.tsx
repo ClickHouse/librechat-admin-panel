@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef } from 'react';
 import { Icon } from '@clickhouse/click-ui';
 import { PrincipalType, SystemRoles } from 'librechat-data-provider';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -46,6 +46,8 @@ export function UsersPage() {
   const [deleteTarget, setDeleteTarget] = useState<TUser | null>(null);
   const [detailUser, setDetailUser] = useState<TUser | null>(null);
   const { message: announcement, announce } = useAnnouncement();
+  const rowRefs = useRef<Map<string, HTMLTableRowElement>>(new Map());
+  const activeRowRef = useRef<HTMLElement | null>(null);
 
   const { data: users = [], isLoading } = useQuery(usersQueryOptions);
   const { data: roleAssignments = {} } = useQuery(roleAssignmentsQueryOptions);
@@ -92,6 +94,14 @@ export function UsersPage() {
     setSearch(value);
     const count = applyFilters(users, value, roleFilter).length;
     announce(localize('com_a11y_results_found', { count }));
+  };
+
+  /** Focus the row before opening so useReturnFocus captures it: clicking the row does not move focus (the tr is only programmatically focusable) and the kebab menu item unmounts on select. */
+  const openDetails = (user: TUser) => {
+    const rowEl = rowRefs.current.get(user.id) ?? null;
+    rowEl?.focus();
+    activeRowRef.current = rowEl;
+    setDetailUser(user);
   };
 
   const handleRoleFilter = (role: t.RoleFilter) => {
@@ -184,9 +194,13 @@ export function UsersPage() {
                   groups={groupAssignments[user.id] ?? []}
                   hasUserProfile={userProfileSet.has(user.id)}
                   isLast={i === filtered.length - 1}
-                  onViewDetails={() => setDetailUser(user)}
+                  onViewDetails={() => openDetails(user)}
                   onDelete={() => setDeleteTarget(user)}
                   canManage={canManage}
+                  rowRef={(el) => {
+                    if (el) rowRefs.current.set(user.id, el);
+                    else rowRefs.current.delete(user.id);
+                  }}
                 />
               ))}
               {filtered.length === 0 && (
@@ -210,6 +224,7 @@ export function UsersPage() {
 
       <UserDetailDialog
         user={detailUser}
+        fallbackRef={activeRowRef}
         onClose={() => setDetailUser(null)}
         canManageRoles={canManageRoles}
         canManageGroups={canManageGroups}
@@ -242,6 +257,7 @@ function UserRow({
   onViewDetails,
   onDelete,
   canManage,
+  rowRef,
 }: t.UserRowProps) {
   const localize = useLocalize();
 
@@ -261,8 +277,10 @@ function UserRow({
 
   return (
     <tr
+      ref={rowRef}
+      tabIndex={-1}
       className={cn(
-        'cursor-pointer bg-(--cui-color-background-panel) transition-colors hover:bg-(--cui-color-background-hover)',
+        'cursor-pointer bg-(--cui-color-background-panel) transition-colors outline-none hover:bg-(--cui-color-background-hover) focus-visible:bg-(--cui-color-background-hover) focus-visible:outline-1 focus-visible:-outline-offset-1 focus-visible:outline-(--cui-color-outline)',
         !isLast && 'border-b border-(--cui-color-stroke-default)',
       )}
       onClick={onViewDetails}

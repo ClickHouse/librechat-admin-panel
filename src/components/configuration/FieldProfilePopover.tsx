@@ -1,6 +1,6 @@
 import { Icon } from '@clickhouse/click-ui';
 import { useQuery } from '@tanstack/react-query';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import type * as t from '@/types';
 import { ProfileValueModal, getDefaultValue } from './ProfileValueModal';
 import { DeleteProfileValueModal } from './DeleteProfileValueModal';
@@ -25,6 +25,8 @@ export function FieldProfilePopover({
   const [adding, setAdding] = useState(false);
   const [selectedAddScope, setSelectedAddScope] = useState<t.ConfigScope | null>(null);
   const [deleteScope, setDeleteScope] = useState<t.ConfigScope | null>(null);
+  /** Stable focus target for the modals: their openers (scope-selection buttons, per-row edit/delete buttons) unmount when a save or removal succeeds. */
+  const listRef = useRef<HTMLDivElement>(null);
 
   const { data: allScopes = [] } = useQuery(availableScopesOptions);
 
@@ -118,7 +120,11 @@ export function FieldProfilePopover({
 
   return (
     <>
-      <div className="flex max-h-80 flex-col gap-0.5 overflow-y-auto pr-1">
+      <div
+        ref={listRef}
+        tabIndex={-1}
+        className="flex max-h-80 flex-col gap-0.5 overflow-y-auto pr-1 outline-none"
+      >
         <div className="flex items-center gap-1 pr-2">
           <div className="min-w-0 flex-1">
             <CascadeItem
@@ -254,12 +260,14 @@ export function FieldProfilePopover({
         scopeName={modalIsBase ? localize('com_scope_base_config') : (modalScope?.name ?? '')}
         scopeType={modalIsBase ? 'BASE' : (modalScope?.principalType ?? '')}
         mode={modalMode}
+        fallbackRef={listRef}
       />
 
       <DeleteProfileValueModal
         scope={deleteScope}
         fieldLabel={fieldLabel}
         saving={saving}
+        fallbackRef={listRef}
         onConfirm={(scope) => {
           handleRemove(scope);
           setDeleteScope(null);

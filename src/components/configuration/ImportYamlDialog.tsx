@@ -5,16 +5,18 @@ import { Icon, Button, Dialog, Tabs } from '@clickhouse/click-ui';
 import type * as t from '@/types';
 import { availableScopesOptions, createGroupFn, createRoleFn, parseImportedYaml } from '@/server';
 import { getScopeTypeConfig } from '@/constants';
-import { useLocalize } from '@/hooks';
+import { useLocalize, useReturnFocus } from '@/hooks';
 import { cn } from '@/utils';
 
 export function ImportYamlDialog({
   open,
+  fallbackRef,
   onClose,
   onImport,
   onImportAsProfile,
 }: t.ImportYamlDialogProps) {
   const localize = useLocalize();
+  const returnFocus = useReturnFocus(open, fallbackRef);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const targetRef = useRef<HTMLDivElement>(null);
 
@@ -202,6 +204,7 @@ export function ImportYamlDialog({
         title={localize('com_config_import_yaml_title')}
         showClose
         onClose={handleClose}
+        onCloseAutoFocus={returnFocus}
         className="modal-frost"
       >
         <div className="flex flex-col gap-4">

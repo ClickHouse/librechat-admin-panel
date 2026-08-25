@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import type { ReactNode, RefObject } from 'react';
 import type { IconName } from './scope';
 
 export interface SidebarProps {
@@ -37,5 +37,6 @@ export interface CommandItemProps {
 
 export interface SettingsDialogProps {
   open: boolean;
+  fallbackRef?: RefObject<HTMLElement | null>;
   onClose: () => void;
 }
