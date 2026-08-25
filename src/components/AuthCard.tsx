@@ -60,6 +60,7 @@ export function AuthCard({
         if (result.error || !result.authUrl) {
           setAutoRedirectFailed(true);
           setGeneralError(result.message || localize('com_auth_sso_redirect_failed'));
+          setSsoLoading(false);
           return;
         }
         const authUrl = new URL(result.authUrl);
@@ -71,9 +72,19 @@ export function AuthCard({
       .catch(() => {
         setAutoRedirectFailed(true);
         setGeneralError(localize('com_auth_sso_redirect_failed'));
-      })
-      .finally(() => setSsoLoading(false));
+        setSsoLoading(false);
+      });
   }, [autoRedirectSso, localize, redirectTo]);
+
+  useEffect(() => {
+    // A bfcache restore (browser Back from the IdP) revives the pre-navigation
+    // React state, so reset the loading flag left true by the outbound redirect.
+    const handlePageShow = (event: PageTransitionEvent) => {
+      if (event.persisted) setSsoLoading(false);
+    };
+    window.addEventListener('pageshow', handlePageShow);
+    return () => window.removeEventListener('pageshow', handlePageShow);
+  }, []);
 
   const emailSchema = useMemo(
     () => z.string().email(localize('com_auth_email_invalid')),
@@ -196,16 +207,14 @@ export function AuthCard({
     setSsoLoading(true);
     try {
       const result = await openidLoginFn();
-      if (result.error) {
+      if (result.error || !result.authUrl) {
         setGeneralError(result.message || localize('com_auth_login_failed'));
+        setSsoLoading(false);
         return;
       }
-      if (result.authUrl) {
-        window.location.href = result.authUrl;
-      }
+      window.location.href = result.authUrl;
     } catch {
       setGeneralError(localize('com_auth_unable_connect'));
-    } finally {
       setSsoLoading(false);
     }
   };
@@ -213,7 +222,8 @@ export function AuthCard({
   if (showAutoRedirect) {
     return (
       <Panel
-        className="auth-card w-full max-w-md"
+        className="auth-card max-w-md min-w-70"
+        fillWidth
         padding="xl"
         radii="lg"
         hasBorder
@@ -233,7 +243,8 @@ export function AuthCard({
 
   return (
     <Panel
-      className="auth-card w-full max-w-md"
+      className="auth-card max-w-md min-w-70"
+      fillWidth
       padding="xl"
       radii="lg"
       hasBorder
@@ -334,7 +345,7 @@ export function AuthCard({
                   }
                   type="secondary"
                   onClick={handleSsoLogin}
-                  disabled={ssoLoading}
+                  loading={ssoLoading}
                 />
               </>
             )}
