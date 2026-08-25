@@ -9,6 +9,7 @@
   "com_ui_remove_item": "Remove {{name}}",
   "com_ui_save": "Save",
   "com_ui_add": "Add",
+  "com_ui_back": "Back",
   "com_ui_cancel": "Cancel",
   "com_ui_create": "Create",
   "com_ui_retry": "Retry",

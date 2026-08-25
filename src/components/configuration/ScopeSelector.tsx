@@ -1,11 +1,12 @@
 import { Command } from 'cmdk';
-import { Button, Icon } from '@clickhouse/click-ui';
 import { PrincipalType } from 'librechat-data-provider';
+import { Button, Dialog, Icon } from '@clickhouse/click-ui';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { VisuallyHidden } from '@radix-ui/react-visually-hidden';
 import { Title as DialogTitle, Description as DialogDescription } from '@radix-ui/react-dialog';
 import type { AdminGroup } from '@librechat/data-schemas';
+import type { KeyboardEvent, PointerEvent } from 'react';
 import type * as t from '@/types';
 import {
   availableScopesOptions,
@@ -17,6 +18,14 @@ import {
 import { getScopeTypeConfig } from '@/constants';
 import { useLocalize } from '@/hooks';
 import { cn } from '@/utils';
+
+const NAVIGATION_KEYS = new Set(['ArrowDown', 'ArrowUp', 'Home', 'End']);
+const VIM_NAVIGATION_KEYS = new Set(['n', 'j', 'p', 'k']);
+
+/** cmdk's root keydown preventDefaults Enter to redispatch it to the highlighted item, which cancels native button activation; keep the key from reaching the root. */
+function stopActivationKeys(e: KeyboardEvent<HTMLButtonElement>) {
+  if (e.key === 'Enter' || e.key === ' ') e.stopPropagation();
+}
 
 // ── Main selector ───────────────────────────────────────────────────
 
@@ -36,6 +45,8 @@ export function ScopeSelector({
   const [deleteTarget, setDeleteTarget] = useState<t.ConfigScope | null>(null);
   const [deleting, setDeleting] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
+  const highlightedRef = useRef(false);
+  const deleteButtonRef = useRef<HTMLButtonElement>(null);
 
   const { data: scopes = [], isLoading: loading } = useQuery({
     ...availableScopesOptions,
@@ -57,11 +68,43 @@ export function ScopeSelector({
     if (listRef.current) listRef.current.scrollTop = 0;
   }, []);
 
+  /** Without an explicit highlight, Enter in the empty input would silently activate the auto-highlighted first item (Base configuration) and close the dialog. */
+  const handleSearchKeyDown = useCallback(
+    (e: KeyboardEvent<HTMLInputElement>) => {
+      if (NAVIGATION_KEYS.has(e.key) || (e.ctrlKey && VIM_NAVIGATION_KEYS.has(e.key))) {
+        highlightedRef.current = true;
+        return;
+      }
+      if (e.key === 'Enter' && search === '' && !highlightedRef.current) e.stopPropagation();
+    },
+    [search],
+  );
+
+  /** cmdk also moves the highlight when the pointer travels over an item, so hover counts as an explicit highlight too. */
+  const handleListPointerMove = useCallback((e: PointerEvent<HTMLDivElement>) => {
+    if (e.target instanceof Element && e.target.closest('[cmdk-item]')) {
+      highlightedRef.current = true;
+    }
+  }, []);
+
+  const handleDeleteAutoFocus = useCallback((e: Event) => {
+    e.preventDefault();
+    deleteButtonRef.current?.focus();
+  }, []);
+
   const resetState = useCallback(() => {
     setShowCreate(false);
     setCreating(false);
     setDeleteTarget(null);
     setDeleting(false);
+    highlightedRef.current = false;
+  }, []);
+
+  /** Returning to the list remounts the cmdk view with the first item auto-highlighted, so a highlight carried over from the previous view must not let Enter select it. */
+  const returnToList = useCallback(() => {
+    setShowCreate(false);
+    setDeleteTarget(null);
+    highlightedRef.current = false;
   }, []);
 
   const close = useCallback(() => {
@@ -172,13 +215,22 @@ export function ScopeSelector({
       ) {
         onSelect({ type: 'BASE' });
       }
-      setDeleteTarget(null);
+      returnToList();
       setDeleting(false);
     } catch (err) {
       setDeleting(false);
       onError?.(err instanceof Error ? err.message : localize('com_scope_delete_error'));
     }
-  }, [deleteTarget, deleting, queryClient, currentSelection, onSelect, onError, localize]);
+  }, [
+    deleteTarget,
+    deleting,
+    queryClient,
+    currentSelection,
+    onSelect,
+    onError,
+    localize,
+    returnToList,
+  ]);
 
   const roleScopes = useMemo(
     () => scopes.filter((s) => s.principalType === PrincipalType.ROLE),
@@ -205,53 +257,35 @@ export function ScopeSelector({
 
   if (deleteTarget) {
     return (
-      <Command.Dialog
-        open={open}
-        onOpenChange={handleOpenChange}
-        label={localize('com_scope_delete')}
-        overlayClassName="cmdk-overlay"
-        contentClassName="cmdk-content scope-selector-dialog"
-      >
-        <VisuallyHidden>
-          <DialogTitle>{localize('com_scope_delete')}</DialogTitle>
-          <DialogDescription>{localize('com_scope_delete')}</DialogDescription>
-        </VisuallyHidden>
-        <div className="flex flex-col gap-4 p-4">
-          <p className="text-sm text-(--cui-color-text-default)">
-            {localize('com_scope_delete_confirm', { name: deleteTarget.name })}
-          </p>
-          <div className="flex justify-end gap-2">
-            <button
-              type="button"
-              onClick={() => setDeleteTarget(null)}
-              disabled={deleting}
-              className="cursor-pointer rounded-md px-3 py-1.5 text-sm text-(--cui-color-text-muted) transition-colors hover:text-(--cui-color-text-default)"
-            >
-              {localize('com_ui_cancel')}
-            </button>
-            <button
-              type="button"
-              onClick={handleDelete}
-              disabled={deleting}
-              className={cn(
-                'flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
-                deleting
-                  ? 'cursor-not-allowed text-(--cui-color-text-muted)'
-                  : 'cursor-pointer bg-(--cui-color-accent-danger) text-white hover:opacity-90',
-              )}
-            >
-              {deleting ? (
-                <>
-                  <Icon name="loading-animated" size="xs" />
-                  {localize('com_scope_deleting')}
-                </>
-              ) : (
-                localize('com_scope_delete')
-              )}
-            </button>
+      <Dialog open={open} onOpenChange={handleOpenChange}>
+        <Dialog.Content
+          title={localize('com_scope_delete')}
+          onOpenAutoFocus={handleDeleteAutoFocus}
+          className="modal-frost scope-selector-dialog"
+        >
+          <div className="flex flex-col gap-4">
+            <p className="text-sm text-(--cui-color-text-default)">
+              {localize('com_scope_delete_confirm', { name: deleteTarget.name })}
+            </p>
+            <div className="flex items-center justify-end gap-2">
+              <Button
+                type="secondary"
+                label={localize('com_ui_cancel')}
+                onClick={returnToList}
+                disabled={deleting}
+              />
+              <Button
+                ref={deleteButtonRef}
+                type="danger"
+                label={deleting ? localize('com_scope_deleting') : localize('com_scope_delete')}
+                onClick={handleDelete}
+                loading={deleting}
+                disabled={deleting}
+              />
+            </div>
           </div>
-        </div>
-      </Command.Dialog>
+        </Dialog.Content>
+      </Dialog>
     );
   }
 
@@ -262,118 +296,111 @@ export function ScopeSelector({
     const noGroups = availableGroups.length === 0;
 
     return (
-      <Command.Dialog
-        open={open}
-        onOpenChange={handleOpenChange}
-        label={localize('com_scope_create_new')}
-        overlayClassName="cmdk-overlay"
-        contentClassName="cmdk-content scope-selector-dialog"
-      >
-        <VisuallyHidden>
-          <DialogTitle>{localize('com_scope_create_new')}</DialogTitle>
-          <DialogDescription>{localize('com_scope_create_new')}</DialogDescription>
-        </VisuallyHidden>
-        <div className="flex items-center gap-2 border-b border-(--cui-color-stroke-default) px-4 py-3">
-          <button
-            type="button"
-            onClick={() => setShowCreate(false)}
-            className="flex cursor-pointer items-center text-(--cui-color-text-muted) hover:text-(--cui-color-text-default)"
-          >
-            <Icon name="chevron-left" size="sm" />
-          </button>
-          <span className="text-sm font-medium text-(--cui-color-text-default)">
-            {localize('com_scope_create_new')}
-          </span>
-          {creating && (
-            <span aria-hidden="true" className="ml-auto">
-              <Icon name="loading-animated" size="sm" />
-            </span>
-          )}
-        </div>
-        <div ref={listRef} className="max-h-95 overflow-y-auto p-2 pb-3">
-          {/* Roles section */}
-          <div className="cmdk-group">
-            <div className="cmdk-group-heading">{localize('com_scope_roles')}</div>
-            {noRoles ? (
-              <p className="px-4 py-4 text-center text-xs text-(--cui-color-text-muted)">
-                {localize('com_scope_no_available_roles')}
-              </p>
-            ) : (
-              availableRoles.map((role) => (
-                <button
-                  key={role.id}
-                  type="button"
-                  onClick={() => handleCreateForRole(role)}
-                  disabled={creating}
-                  className={cn(
-                    'scope-item w-full text-left',
-                    creating && 'pointer-events-none opacity-50',
-                  )}
-                >
-                  <span
-                    aria-hidden="true"
-                    className="scope-icon"
-                    style={{ color: roleConfig.color }}
-                  >
-                    <Icon name={roleConfig.icon} size="sm" />
-                  </span>
-                  <span className="flex min-w-0 flex-1 flex-col">
-                    <span className="text-sm font-medium text-(--cui-color-text-default)">
-                      {role.name}
-                    </span>
-                    {role.description && (
-                      <span className="text-xs text-(--cui-color-text-muted)">
-                        {role.description}
-                      </span>
-                    )}
-                  </span>
-                </button>
-              ))
+      <Dialog open={open} onOpenChange={handleOpenChange}>
+        <Dialog.Content
+          title={localize('com_scope_create_new')}
+          className="modal-frost scope-selector-dialog"
+        >
+          <div className="flex items-center gap-2 border-b border-(--cui-color-stroke-default) pb-2">
+            <button
+              type="button"
+              onClick={returnToList}
+              aria-label={localize('com_ui_back')}
+              className="flex cursor-pointer items-center text-(--cui-color-text-muted) hover:text-(--cui-color-text-default)"
+            >
+              <Icon name="chevron-left" size="sm" />
+            </button>
+            {creating && (
+              <span aria-hidden="true" className="ml-auto">
+                <Icon name="loading-animated" size="sm" />
+              </span>
             )}
           </div>
+          <div ref={listRef} className="max-h-95 overflow-y-auto py-2">
+            {/* Roles section */}
+            <div className="cmdk-group">
+              <div className="cmdk-group-heading">{localize('com_scope_roles')}</div>
+              {noRoles ? (
+                <p className="px-4 py-4 text-center text-xs text-(--cui-color-text-muted)">
+                  {localize('com_scope_no_available_roles')}
+                </p>
+              ) : (
+                availableRoles.map((role) => (
+                  <button
+                    key={role.id}
+                    type="button"
+                    onClick={() => handleCreateForRole(role)}
+                    disabled={creating}
+                    className={cn(
+                      'scope-item w-full text-left',
+                      creating && 'pointer-events-none opacity-50',
+                    )}
+                  >
+                    <span
+                      aria-hidden="true"
+                      className="scope-icon"
+                      style={{ color: roleConfig.color }}
+                    >
+                      <Icon name={roleConfig.icon} size="sm" />
+                    </span>
+                    <span className="flex min-w-0 flex-1 flex-col">
+                      <span className="text-sm font-medium text-(--cui-color-text-default)">
+                        {role.name}
+                      </span>
+                      {role.description && (
+                        <span className="text-xs text-(--cui-color-text-muted)">
+                          {role.description}
+                        </span>
+                      )}
+                    </span>
+                  </button>
+                ))
+              )}
+            </div>
 
-          {/* Groups section */}
-          <div className="cmdk-group">
-            <div className="cmdk-group-heading">{localize('com_scope_groups')}</div>
-            {noGroups ? (
-              <p className="px-4 py-4 text-center text-xs text-(--cui-color-text-muted)">
-                {localize('com_scope_no_available_groups')}
-              </p>
-            ) : (
-              availableGroups.map((group) => (
-                <button
-                  key={group.id}
-                  type="button"
-                  onClick={() => handleCreateForGroup(group)}
-                  disabled={creating}
-                  className={cn(
-                    'scope-item w-full text-left',
-                    creating && 'pointer-events-none opacity-50',
-                  )}
-                >
-                  <span
-                    aria-hidden="true"
-                    className="scope-icon"
-                    style={{ color: groupConfig.color }}
-                  >
-                    <Icon name={groupConfig.icon} size="sm" />
-                  </span>
-                  <span className="flex min-w-0 flex-1 flex-col">
-                    <span className="text-sm font-medium text-(--cui-color-text-default)">
-                      {group.name}
-                    </span>
-                    {group.description && (
-                      <span className="text-xs text-(--cui-color-text-muted)">
-                        {group.description}
-                      </span>
+            {/* Groups section */}
+            <div className="cmdk-group">
+              <div className="cmdk-group-heading">{localize('com_scope_groups')}</div>
+              {noGroups ? (
+                <p className="px-4 py-4 text-center text-xs text-(--cui-color-text-muted)">
+                  {localize('com_scope_no_available_groups')}
+                </p>
+              ) : (
+                availableGroups.map((group) => (
+                  <button
+                    key={group.id}
+                    type="button"
+                    onClick={() => handleCreateForGroup(group)}
+                    disabled={creating}
+                    className={cn(
+                      'scope-item w-full text-left',
+                      creating && 'pointer-events-none opacity-50',
                     )}
-                  </span>
-                </button>
-              ))
-            )}
+                  >
+                    <span
+                      aria-hidden="true"
+                      className="scope-icon"
+                      style={{ color: groupConfig.color }}
+                    >
+                      <Icon name={groupConfig.icon} size="sm" />
+                    </span>
+                    <span className="flex min-w-0 flex-1 flex-col">
+                      <span className="text-sm font-medium text-(--cui-color-text-default)">
+                        {group.name}
+                      </span>
+                      {group.description && (
+                        <span className="text-xs text-(--cui-color-text-muted)">
+                          {group.description}
+                        </span>
+                      )}
+                    </span>
+                  </button>
+                ))
+              )}
+            </div>
           </div>
-        </div>
-      </Command.Dialog>
+        </Dialog.Content>
+      </Dialog>
     );
   }
 
@@ -395,6 +422,7 @@ export function ScopeSelector({
         <Command.Input
           value={search}
           onValueChange={handleSearchChange}
+          onKeyDown={handleSearchKeyDown}
           placeholder={localize('com_scope_search')}
           className="flex min-w-0 flex-1 bg-transparent py-3 text-sm text-(--cui-color-text-default) outline-none placeholder:text-(--cui-color-text-muted)"
         />
@@ -404,11 +432,16 @@ export function ScopeSelector({
             iconLeft="plus"
             label={localize('com_scope_create')}
             onClick={() => setShowCreate(true)}
+            onKeyDown={stopActivationKeys}
           />
         )}
       </div>
 
-      <Command.List ref={listRef} className="max-h-95 overflow-y-auto p-2 pb-3">
+      <Command.List
+        ref={listRef}
+        onPointerMove={handleListPointerMove}
+        className="max-h-95 overflow-y-auto p-2 pb-3"
+      >
         {loading ? (
           <div className="flex items-center justify-center gap-2 px-4 py-8">
             <span aria-hidden="true">
@@ -553,6 +586,7 @@ function ScopeItem({ scope, isSelected, onSelect, onDelete, localize }: ScopeIte
             e.stopPropagation();
             onDelete(scope);
           }}
+          onKeyDown={stopActivationKeys}
           className="shrink-0 cursor-pointer rounded-sm p-0.5 text-(--cui-color-text-muted) opacity-0 transition-opacity group-hover:opacity-100 group-data-[active=true]:opacity-100 group-data-[selected=true]:opacity-100 hover:text-(--cui-color-accent-danger)"
           aria-label={localize('com_scope_delete')}
           title={localize('com_scope_delete')}
