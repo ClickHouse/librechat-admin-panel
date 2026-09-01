@@ -92,6 +92,216 @@ export function stripSecretPreviewValues(
   return result;
 }
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return value != null && typeof value === 'object' && !Array.isArray(value);
+}
+
+const SECRET_LEAF_KEY_RE = /^(apiKey|secretKey|client_secret|.*ApiKey)$/;
+/** Primitive string records that commonly carry literal credentials. */
+const SECRET_RECORD_KEYS = new Set([
+  'headers',
+  'oauth_headers',
+  'additionalHeaders',
+  'env',
+]);
+
+/**
+ * Whether `path` is a registered secret leaf or matches a wildcard pattern
+ * such as `endpoints.custom.headers.*`.
+ *
+ * Array indexes are recognized only between schema container segments so
+ * numeric and dotted credential-record keys (header `"123"`, `"X.Foo"`)
+ * remain part of the secret key rather than being treated as path structure.
+ */
+export function isSecretFieldPath(
+  path: string,
+  secretFieldPaths: ReadonlySet<string>,
+): boolean {
+  if (secretFieldPaths.has(path) || secretFieldPaths.has(stripArrayIndices(path))) {
+    return true;
+  }
+
+  for (const registered of secretFieldPaths) {
+    if (!registered.endsWith('.*')) continue;
+    if (isUnderSecretContainer(path, registered.slice(0, -2))) {
+      return true;
+    }
+  }
+  return false;
+}
+
+const ARRAY_INDEX_KEY_RE = /^\d+$/;
+
+/** True when `path` is a value under `container`, allowing `.N` indexes between schema segments. */
+function isUnderSecretContainer(path: string, container: string): boolean {
+  const containerParts = container.split('.');
+  const pathParts = path.split('.');
+  let i = 0;
+  for (let c = 0; c < containerParts.length; c++) {
+    if (i >= pathParts.length || pathParts[i] !== containerParts[c]) {
+      return false;
+    }
+    i += 1;
+    if (
+      c < containerParts.length - 1 &&
+      i < pathParts.length &&
+      ARRAY_INDEX_KEY_RE.test(pathParts[i])
+    ) {
+      i += 1;
+    }
+  }
+  return i < pathParts.length;
+}
+
+/** Collects index-free secret leaf paths and `record.*` wildcards from a schema tree. */
+export function collectSecretFieldPaths(fields: t.SchemaField[]): Set<string> {
+  const secretPaths = new Set<string>();
+  collectSecretFieldPathsRecursive(fields, secretPaths);
+  return secretPaths;
+}
+
+function collectSecretFieldPathsRecursive(
+  fields: t.SchemaField[],
+  secretPaths: Set<string>,
+): void {
+  for (const field of fields) {
+    const path = field.path.replace(/\.(\[\]|\{\})/g, '');
+    if (field.type === 'string' && SECRET_LEAF_KEY_RE.test(field.key)) {
+      secretPaths.add(path);
+    }
+    if (
+      field.type === 'record' &&
+      field.recordValueType === 'primitive' &&
+      SECRET_RECORD_KEYS.has(field.key)
+    ) {
+      secretPaths.add(`${path}.*`);
+    }
+    if (field.children?.length) {
+      collectSecretFieldPathsRecursive(field.children, secretPaths);
+    }
+  }
+}
+
+/**
+ * Whether `path` is a registered credential-record container
+ * (`endpoints.custom.headers` when `endpoints.custom.headers.*` is registered).
+ */
+export function isSecretRecordContainerPath(
+  path: string,
+  secretFieldPaths: ReadonlySet<string>,
+): boolean {
+  return (
+    secretFieldPaths.has(`${path}.*`) ||
+    secretFieldPaths.has(`${stripArrayIndices(path)}.*`)
+  );
+}
+
+/**
+ * Restores schema secret fields omitted by the UI (which sends `apiKeyPreview`
+ * instead of `apiKey`). An explicitly supplied real secret, including `''`,
+ * replaces the snapshot value.
+ *
+ * Credential-record containers (`headers`, `env`, …) that are present on the
+ * edited object are authoritative — including `{}` or a partial map — so
+ * omitted keys are treated as intentional deletes. The entire snapshot record
+ * is restored only when that container key itself is absent.
+ */
+export function mergeUntouchedSecrets(
+  edited: unknown,
+  snapshot: unknown,
+  parentPath: string,
+  secretFieldPaths: ReadonlySet<string>,
+): unknown {
+  if (!isPlainObject(edited) || !isPlainObject(snapshot)) {
+    return edited;
+  }
+  const parentIsSecretContainer = isSecretRecordContainerPath(parentPath, secretFieldPaths);
+  const result: Record<string, unknown> = { ...edited };
+  for (const [key, snapshotVal] of Object.entries(snapshot)) {
+    if (parentIsSecretContainer) {
+      if (!Object.hasOwn(result, key)) {
+        result[key] = snapshotVal;
+      }
+      continue;
+    }
+    const fieldPath = parentPath ? `${parentPath}.${key}` : key;
+    if (isSecretFieldPath(fieldPath, secretFieldPaths)) {
+      if (!Object.hasOwn(result, key)) {
+        result[key] = snapshotVal;
+      }
+      continue;
+    }
+    if (isPlainObject(snapshotVal)) {
+      if (Object.hasOwn(result, key) && isPlainObject(result[key])) {
+        if (isSecretRecordContainerPath(fieldPath, secretFieldPaths)) {
+          continue;
+        }
+        result[key] = mergeUntouchedSecrets(result[key], snapshotVal, fieldPath, secretFieldPaths);
+        continue;
+      }
+      if (!Object.hasOwn(result, key)) {
+        const merged = mergeUntouchedSecrets({}, snapshotVal, fieldPath, secretFieldPaths);
+        if (isPlainObject(merged) && Object.keys(merged).length > 0) {
+          result[key] = merged;
+        }
+      }
+    }
+  }
+  return result;
+}
+
+/**
+ * For untouched array entries, keep only secret values present in the Mongo
+ * snapshot. YAML/environment credentials must not materialize into Mongo.
+ * Recurses into nested objects and wildcard credential records.
+ */
+export function retainSnapshotSecretsOnly(
+  entry: unknown,
+  snapshotEntry: unknown,
+  parentPath: string,
+  secretFieldPaths: ReadonlySet<string>,
+): unknown {
+  if (!isPlainObject(entry)) {
+    return entry;
+  }
+  const parentIsSecretContainer = isSecretRecordContainerPath(parentPath, secretFieldPaths);
+  const result: Record<string, unknown> = { ...entry };
+  for (const key of Object.keys(result)) {
+    if (parentIsSecretContainer) {
+      if (!isPlainObject(snapshotEntry) || !Object.hasOwn(snapshotEntry, key)) {
+        delete result[key];
+      } else {
+        result[key] = snapshotEntry[key];
+      }
+      continue;
+    }
+    const fieldPath = parentPath ? `${parentPath}.${key}` : key;
+    if (isSecretFieldPath(fieldPath, secretFieldPaths)) {
+      if (!isPlainObject(snapshotEntry) || !Object.hasOwn(snapshotEntry, key)) {
+        delete result[key];
+      } else {
+        result[key] = snapshotEntry[key];
+      }
+      continue;
+    }
+    if (isPlainObject(result[key])) {
+      const nestedSnapshot = isPlainObject(snapshotEntry) ? snapshotEntry[key] : undefined;
+      const nested = retainSnapshotSecretsOnly(
+        result[key],
+        nestedSnapshot,
+        fieldPath,
+        secretFieldPaths,
+      );
+      if (isPlainObject(nested) && Object.keys(nested).length === 0) {
+        delete result[key];
+      } else {
+        result[key] = nested;
+      }
+    }
+  }
+  return result;
+}
+
 /**
  * Drops schema fields that are preview companions of a sibling secret field
  * (`apiKeyPreview` next to `apiKey`) so they never render as editable inputs.

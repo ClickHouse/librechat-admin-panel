@@ -16,18 +16,17 @@ import type {
   AdminConfig,
 } from '@librechat/data-schemas';
 import type * as t from '@/types';
+import {
+  assertNoIndexedArrayResets,
+  normalizeAppServiceKeys,
+  parseIndexedArrayPath,
+  mergeIndexedArrayEntriesIntoScopeOverlay,
+} from './config';
 import { isInterfacePermissionPath } from '@/utils/interfacePermissions';
-import { stripSecretPreviewValues } from '@/utils';
 import { BASE_CONFIG_PRINCIPAL_ID } from './constants';
 import { requireAnyCapability } from './capabilities';
 import { safeFieldPath } from './utils/validation';
 import { apiFetch } from './utils/api';
-import {
-  normalizeAppServiceKeys,
-  parseIndexedArrayPath,
-  mergeConfigArraySources,
-  getSchemaPathSet,
-} from './config';
 
 // ── Dot-path helpers ─────────────────────────────────────────────────
 
@@ -39,6 +38,24 @@ function deepGet(obj: object, path: string): unknown {
     current = (current as Record<string, never>)[key];
   }
   return current;
+}
+
+function deepSet(obj: Record<string, unknown>, path: string, value: unknown): Record<string, unknown> {
+  const keys = path.split('.');
+  const root: Record<string, unknown> = { ...obj };
+  let cursor: Record<string, unknown> = root;
+  for (let i = 0; i < keys.length - 1; i += 1) {
+    const key = keys[i]!;
+    const existing = cursor[key];
+    const next =
+      existing != null && typeof existing === 'object' && !Array.isArray(existing)
+        ? { ...(existing as Record<string, unknown>) }
+        : {};
+    cursor[key] = next;
+    cursor = next;
+  }
+  cursor[keys[keys.length - 1]!] = value;
+  return root;
 }
 
 async function getScopeOverrides(
@@ -72,7 +89,10 @@ export async function mergeIndexedArrayEntriesForScope(
 
   for (const entry of entries) {
     const parsed = parseIndexedArrayPath(entry.fieldPath);
-    if (!parsed) {
+    if (parsed.kind === 'invalid') {
+      throw new Error(parsed.error);
+    }
+    if (parsed.kind === 'none') {
       restByPath.set(entry.fieldPath, rest.length);
       rest.push(entry);
       continue;
@@ -89,30 +109,29 @@ export async function mergeIndexedArrayEntriesForScope(
     getBaseConfig(),
   ]);
 
-  for (const [arrayPath, updates] of indexed) {
+  let overlay = scopeOverrides as Record<string, t.ConfigValue>;
+  const pendingPaths = new Set<string>();
+  for (const arrayPath of indexed.keys()) {
     const restIndex = restByPath.get(arrayPath);
-    const pending = restIndex === undefined ? undefined : rest[restIndex]?.value;
-    const scopeValue = deepGet(scopeOverrides, arrayPath);
-    const baseValue = deepGet(baseConfig, arrayPath);
-    const arr = mergeConfigArraySources(baseValue, scopeValue, pending);
+    if (restIndex === undefined) continue;
+    const pending = rest[restIndex]?.value;
+    overlay = deepSet(overlay, arrayPath, pending) as Record<string, t.ConfigValue>;
+    pendingPaths.add(arrayPath);
+  }
+
+  const indexedEntries: Array<{ fieldPath: string; value: unknown }> = [];
+  for (const [arrayPath, updates] of indexed) {
     for (const [idx, value] of updates) {
-      arr[idx] = value;
-    }
-    const strippedArr = stripSecretPreviewValues(
-      arr as t.ConfigValue[],
-      arrayPath,
-      getSchemaPathSet(),
-    );
-    const merged = { fieldPath: arrayPath, value: strippedArr };
-    if (restIndex === undefined) {
-      restByPath.set(arrayPath, rest.length);
-      rest.push(merged);
-    } else {
-      rest[restIndex] = merged;
+      indexedEntries.push({ fieldPath: `${arrayPath}.${idx}`, value });
     }
   }
 
-  return rest;
+  const nonIndexedRest = rest.filter((entry) => !pendingPaths.has(entry.fieldPath));
+  return mergeIndexedArrayEntriesIntoScopeOverlay(
+    [...nonIndexedRest, ...indexedEntries],
+    baseConfig as Record<string, t.ConfigValue>,
+    overlay,
+  );
 }
 
 // ── API helpers ──────────────────────────────────────────────────────
@@ -464,6 +483,7 @@ export const removeFieldProfileValueFn = createServerFn({ method: 'POST' })
       };
     }) => {
       if (isInterfacePermissionPath(data.fieldPath)) return { success: true };
+      assertNoIndexedArrayResets([data.fieldPath]);
       await requireAnyCapability([
         SystemCapabilities.ASSIGN_CONFIGS,
         SystemCapabilities.MANAGE_CONFIGS,
@@ -506,6 +526,7 @@ export const tombstoneFieldProfileValueFn = createServerFn({ method: 'POST' })
       };
     }) => {
       if (isInterfacePermissionPath(data.fieldPath)) return { success: true };
+      assertNoIndexedArrayResets([data.fieldPath]);
       await requireAnyCapability([
         SystemCapabilities.ASSIGN_CONFIGS,
         SystemCapabilities.MANAGE_CONFIGS,

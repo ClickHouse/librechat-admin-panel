@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Icon, Dropdown } from '@clickhouse/click-ui';
+import { useQueryClient } from '@tanstack/react-query';
 import { Link, useRouter } from '@tanstack/react-router';
 import type * as t from '@/types';
 import { useStripAriaExpanded, useCapabilities, useLocalize } from '@/hooks';
@@ -43,6 +44,7 @@ function getUserInitials(user?: { name?: string; email?: string } | null): strin
 export function Sidebar({ user, collapsed, onToggle }: t.SidebarProps) {
   const localize = useLocalize();
   const router = useRouter();
+  const queryClient = useQueryClient();
   const { hasCapability } = useCapabilities();
   const currentPath = router.state.location.pathname;
   const [isLoggingOut, setIsLoggingOut] = useState(false);
@@ -62,6 +64,7 @@ export function Sidebar({ user, collapsed, onToggle }: t.SidebarProps) {
     setIsLoggingOut(true);
     try {
       const result = await adminLogoutFn();
+      queryClient.clear();
       if (!result.error && result.redirect) {
         window.location.href = result.redirect;
         return;
@@ -88,7 +91,11 @@ export function Sidebar({ user, collapsed, onToggle }: t.SidebarProps) {
       >
         <div className="flex h-14 shrink-0 items-center px-2">
           <div className="flex items-center gap-2.5 overflow-hidden px-1.5">
-            <img src={libreChatLogo} alt={localize('com_a11y_logo_alt')} className="h-6 w-6 shrink-0" />
+            <img
+              src={libreChatLogo}
+              alt={localize('com_a11y_logo_alt')}
+              className="h-6 w-6 shrink-0"
+            />
             <span className="truncate text-sm font-semibold text-(--cui-color-text-default)">
               {localize('com_auth_title')}
             </span>

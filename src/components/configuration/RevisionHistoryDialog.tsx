@@ -1,5 +1,5 @@
+import { useEffect, useState } from 'react';
 import { Badge, Button, Dialog } from '@clickhouse/click-ui';
-import { useState } from 'react';
 import type * as t from '@/types';
 import { useLocalize } from '@/hooks';
 
@@ -36,6 +36,10 @@ export function RevisionHistoryDialog({
   const localize = useLocalize();
   const [pendingId, setPendingId] = useState<string | null>(null);
   const pending = revisions.find((revision) => revision.id === pendingId);
+
+  useEffect(() => {
+    if (!open) setPendingId(null);
+  }, [open]);
 
   return (
     <Dialog
@@ -83,11 +87,7 @@ export function RevisionHistoryDialog({
                       <span className="text-sm font-medium text-(--cui-color-text-default)">
                         {formatTimestamp(revision.createdAt)}
                       </span>
-                      <Badge
-                        text={localize(CAUSE_KEY[revision.cause])}
-                        state="neutral"
-                        size="sm"
-                      />
+                      <Badge text={localize(CAUSE_KEY[revision.cause])} state="neutral" size="sm" />
                     </div>
                     <p className="truncate text-xs text-(--cui-color-text-muted)">
                       {revision.actorEmail ?? revision.actorId}

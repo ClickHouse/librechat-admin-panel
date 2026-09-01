@@ -9,3 +9,4 @@ services:
     env_file: .env
     environment:
       - PORT=${PORT:-3000}
+      - MONGO_URI=${MONGO_URI}

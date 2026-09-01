@@ -11,7 +11,6 @@ import {
   bulkSaveProfileValuesFn,
   getBatchFieldProfilesFn,
   availableScopesOptions,
-  resetBaseConfigFieldFn,
   getResolvedConfigFn,
   importBaseConfigFn,
   resetBaseConfigFn,
@@ -35,8 +34,6 @@ import {
   notifySuccess,
   notifyError,
 } from '@/utils';
-import { useLocalize, useHighlightRef, useActiveSection, useCapabilities } from '@/hooks';
-import { CONFIG_TABS, OTHER_TAB, SECTION_META, HIDDEN_SECTIONS } from './configMeta';
 import {
   applyConfigEdit,
   buildSavePayload,
@@ -44,13 +41,15 @@ import {
   partitionScopeResetPaths,
   withLangfuseConfiguredPath,
 } from './utils';
+import { useLocalize, useHighlightRef, useActiveSection, useCapabilities } from '@/hooks';
+import { CONFIG_TABS, OTHER_TAB, SECTION_META, HIDDEN_SECTIONS } from './configMeta';
 import { validateMcpCrossField } from './sections/McpServersRenderer';
 import { ScopeSelector, ScopeTriggerButton } from './ScopeSelector';
-import { StickyActionBar } from '@/components/shared';
 import { ConfigTableOfContents } from './ConfigTableOfContents';
 import { ResetBaseConfigDialog } from './ResetBaseConfigDialog';
 import { RevisionHistoryDialog } from './RevisionHistoryDialog';
 import { ConfirmSaveDialog } from './ConfirmSaveDialog';
+import { StickyActionBar } from '@/components/shared';
 import { ConfigTabContent } from './ConfigTabContent';
 import { ImportYamlDialog } from './ImportYamlDialog';
 import { ContentToolbar } from './ContentToolbar';
@@ -59,6 +58,7 @@ import { ConfigTabBar } from './ConfigTabBar';
 import { InfoBanner } from './InfoBanner';
 
 const routeApi = getRouteApi('/_app/configuration/');
+const appRouteApi = getRouteApi('/_app');
 const LAST_SCOPE_KEY = 'config:lastScope';
 
 function collectFieldPaths(fields: t.SchemaField[], prefix = ''): string[] {
@@ -105,6 +105,7 @@ function resolvedConfigOptions(scope: t.ScopeSelection) {
 export function ConfigPage({ initialTab, highlightField, initialScope }: t.ConfigPageProps) {
   const localize = useLocalize();
   const queryClient = useQueryClient();
+  const { user } = appRouteApi.useRouteContext();
   const { hasCapability } = useCapabilities();
   const canManageConfig = hasCapability(SystemCapabilities.MANAGE_CONFIGS);
   const canAssignConfigs = hasCapability(SystemCapabilities.ASSIGN_CONFIGS) || canManageConfig;
@@ -498,6 +499,7 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
 
   const invalidateAndResetBase = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: ['baseConfig'] });
+    queryClient.invalidateQueries({ queryKey: ['configRevisions'] });
     clearEdits();
   }, [queryClient, clearEdits]);
 
@@ -522,7 +524,7 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
   const [restoreError, setRestoreError] = useState<string | null>(null);
 
   const revisionsQuery = useQuery({
-    ...configRevisionsOptions,
+    ...configRevisionsOptions(user?.id ?? '', user?.tenantId),
     enabled: historyOpen && canManageConfig && !isEditingScope,
   });
 
@@ -539,6 +541,7 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['baseConfig'] }),
         queryClient.invalidateQueries({ queryKey: ['resolvedConfig'] }),
+        queryClient.invalidateQueries({ queryKey: ['configRevisions'] }),
       ]);
       setEditedValues({});
       setTouchedPaths(new Set());
@@ -644,43 +647,35 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
     setSaveError(null);
 
     try {
-      /** Resets must land before saves so a delete-then-recreate at the same path (e.g. MCP entry replaced with different fields) wipes stale fields first and the new leaf PATCHes don't race against the DELETE. */
-      if (resets.length > 0) {
-        const resetPromises = isEditingScope
-          ? (() => {
-              const { resetPaths, tombstonePaths } = partitionScopeResetPaths(
-                resets,
-                inheritedMcpKeys,
-              );
-              return [
-                ...resetPaths.map((fieldPath) =>
-                  removeFieldProfileValueFn({
-                    data: {
-                      fieldPath,
-                      principalType: editingScope!.principalType,
-                      principalId: editingScope!.principalId,
-                    },
-                  }),
-                ),
-                ...tombstonePaths.map((fieldPath) =>
-                  tombstoneFieldProfileValueFn({
-                    data: {
-                      fieldPath,
-                      principalType: editingScope!.principalType,
-                      principalId: editingScope!.principalId,
-                    },
-                  }),
-                ),
-              ];
-            })()
-          : resets.map((fieldPath) => resetBaseConfigFieldFn({ data: { fieldPath } }));
-        if (resetPromises.length > 0) {
-          await Promise.all(resetPromises);
+      /** Resets must land before saves so a delete-then-recreate at the same path (e.g. MCP entry replaced with different fields) wipes stale fields first and the new leaf PATCHes don't race against the DELETE. Base mode sends both in one server call so a single snapshot is taken before either DELETE or PATCH. */
+      if (isEditingScope) {
+        if (resets.length > 0) {
+          const { resetPaths, tombstonePaths } = partitionScopeResetPaths(resets, inheritedMcpKeys);
+          const resetPromises = [
+            ...resetPaths.map((fieldPath) =>
+              removeFieldProfileValueFn({
+                data: {
+                  fieldPath,
+                  principalType: editingScope!.principalType,
+                  principalId: editingScope!.principalId,
+                },
+              }),
+            ),
+            ...tombstonePaths.map((fieldPath) =>
+              tombstoneFieldProfileValueFn({
+                data: {
+                  fieldPath,
+                  principalType: editingScope!.principalType,
+                  principalId: editingScope!.principalId,
+                },
+              }),
+            ),
+          ];
+          if (resetPromises.length > 0) {
+            await Promise.all(resetPromises);
+          }
         }
-      }
-
-      if (saves.length > 0) {
-        if (isEditingScope) {
+        if (saves.length > 0) {
           await bulkSaveProfileValuesFn({
             data: {
               principalType: editingScope!.principalType,
@@ -688,9 +683,9 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
               entries: saves,
             },
           });
-        } else {
-          await saveBaseConfigFn({ data: { entries: saves } });
         }
+      } else {
+        await saveBaseConfigFn({ data: { entries: saves, resetPaths: resets } });
       }
 
       if (isEditingScope) {
@@ -1146,7 +1141,10 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
         open={historyOpen}
         loading={revisionsQuery.isLoading}
         restoring={restoringRevision}
-        error={restoreError ?? (revisionsQuery.error instanceof Error ? revisionsQuery.error.message : null)}
+        error={
+          restoreError ??
+          (revisionsQuery.error instanceof Error ? revisionsQuery.error.message : null)
+        }
         revisions={revisionsQuery.data?.revisions ?? []}
         onRestore={handleRestoreRevision}
         onCancel={() => {
