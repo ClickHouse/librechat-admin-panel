@@ -11,6 +11,9 @@ export function fieldPathPolicyError(path: string): string | null {
   if (path.length === 0) {
     return 'field path must not be empty';
   }
+  if (path.includes('\0')) {
+    return 'field path contains NUL byte';
+  }
   if (path.length > MAX_FIELD_PATH_LENGTH) {
     return `field path exceeds maximum length of ${MAX_FIELD_PATH_LENGTH}`;
   }

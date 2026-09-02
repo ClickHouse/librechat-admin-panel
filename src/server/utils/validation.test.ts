@@ -15,6 +15,11 @@ describe('fieldPathPolicyError', () => {
     expect(fieldPathPolicyError('')).toBe('field path must not be empty');
   });
 
+  it('rejects NUL bytes before submitting a MongoDB field path', () => {
+    expect(fieldPathPolicyError('cache.\0value')).toBe('field path contains NUL byte');
+    expect(() => safeFieldPath.parse('cache.\0value')).toThrow(/NUL byte/);
+  });
+
   it('rejects oversized paths', () => {
     expect(fieldPathPolicyError('a'.repeat(MAX_FIELD_PATH_LENGTH + 1))).toBe(
       `field path exceeds maximum length of ${MAX_FIELD_PATH_LENGTH}`,
