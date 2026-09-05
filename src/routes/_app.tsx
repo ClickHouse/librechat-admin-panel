@@ -1,10 +1,19 @@
 import { useState, useEffect } from 'react';
 import { Icon } from '@clickhouse/click-ui';
-import { createFileRoute, Outlet, useRouter, Link, redirect } from '@tanstack/react-router';
+import {
+  createFileRoute,
+  Outlet,
+  useRouter,
+  useRouterState,
+  Link,
+  redirect,
+} from '@tanstack/react-router';
 import type { ErrorComponentProps } from '@tanstack/react-router';
+import type * as t from '@/types';
 import { useCapabilities, useCommandMenu, useLocalize } from '@/hooks';
 import { CommandMenu } from '@/components/CommandMenu';
 import { AccessDenied } from '@/components/shared';
+import { CapabilitiesProvider } from '@/contexts';
 import { SystemCapabilities } from '@/constants';
 import { Sidebar } from '@/components/Sidebar';
 import { verifyAdminTokenFn } from '@/server';
@@ -18,7 +27,6 @@ const ROUTE_TITLE_KEYS: Record<string, string> = {
   '/grants': 'com_grants_title',
   '/help': 'com_help_title',
 };
-
 
 export const Route = createFileRoute('/_app')({
   beforeLoad: async ({ location }) => {
@@ -40,7 +48,16 @@ export const Route = createFileRoute('/_app')({
 
 function AppLayout() {
   const { user } = Route.useRouteContext();
-  const { hasCapability, isLoading, isError } = useCapabilities();
+  const navigationKey = useRouterState({ select: (state) => state.location.href });
+  return (
+    <CapabilitiesProvider user={user} navigationKey={navigationKey}>
+      <AppContent user={user} />
+    </CapabilitiesProvider>
+  );
+}
+
+function AppContent({ user }: { user: t.SerializableUser }) {
+  const { hasCapability, effectiveTenantId, isLoading, isError } = useCapabilities();
   const router = useRouter();
   const localize = useLocalize();
   const { open, setOpen } = useCommandMenu();
@@ -78,7 +95,7 @@ function AppLayout() {
   const title = matchedKey ? localize(ROUTE_TITLE_KEYS[matchedKey]) : undefined;
 
   return (
-    <div className="flex h-screen overflow-hidden">
+    <div key={effectiveTenantId} className="flex h-screen overflow-hidden">
       <Sidebar user={user} collapsed={sidebarCollapsed} onToggle={toggleSidebar} />
       <div className="flex min-w-0 flex-1 flex-col">
         <Header title={title} onSearchClick={() => setOpen(true)} />

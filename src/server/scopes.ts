@@ -26,6 +26,7 @@ import { isInterfacePermissionPath } from '@/utils/interfacePermissions';
 import { BASE_CONFIG_PRINCIPAL_ID } from './constants';
 import { requireAnyCapability } from './capabilities';
 import { safeFieldPath } from './utils/validation';
+import { tenantQueryKeys } from './keys';
 import { apiFetch } from './utils/api';
 
 // ── Dot-path helpers ─────────────────────────────────────────────────
@@ -40,7 +41,11 @@ function deepGet(obj: object, path: string): unknown {
   return current;
 }
 
-function deepSet(obj: Record<string, unknown>, path: string, value: unknown): Record<string, unknown> {
+function deepSet(
+  obj: Record<string, unknown>,
+  path: string,
+  value: unknown,
+): Record<string, unknown> {
   const keys = path.split('.');
   const root: Record<string, unknown> = { ...obj };
   let cursor: Record<string, unknown> = root;
@@ -61,9 +66,12 @@ function deepSet(obj: Record<string, unknown>, path: string, value: unknown): Re
 async function getScopeOverrides(
   apiType: PrincipalType,
   principalId: string,
+  expectedTenantId: string,
 ): Promise<Record<string, unknown>> {
   const response = await apiFetch(
     `/api/admin/config/${apiType}/${encodeURIComponent(principalId)}`,
+    undefined,
+    expectedTenantId,
   );
   if (response.status === 404) return {};
   if (!response.ok) throw new Error(`Failed to fetch config: ${response.status}`);
@@ -71,8 +79,8 @@ async function getScopeOverrides(
   return normalizeAppServiceKeys((config.overrides ?? {}) as Record<string, t.ConfigValue>);
 }
 
-async function getBaseConfig(): Promise<Record<string, unknown>> {
-  const response = await apiFetch('/api/admin/config/base');
+async function getBaseConfig(expectedTenantId: string): Promise<Record<string, unknown>> {
+  const response = await apiFetch('/api/admin/config/base', undefined, expectedTenantId);
   if (!response.ok) throw new Error(`Failed to fetch base config: ${response.status}`);
   const { config } = (await response.json()) as { config: Record<string, t.ConfigValue> };
   return normalizeAppServiceKeys(config);
@@ -82,6 +90,7 @@ export async function mergeIndexedArrayEntriesForScope(
   apiType: PrincipalType,
   principalId: string,
   entries: Array<{ fieldPath: string; value: unknown }>,
+  expectedTenantId: string,
 ): Promise<Array<{ fieldPath: string; value: unknown }>> {
   const indexed = new Map<string, Map<number, unknown>>();
   const rest: Array<{ fieldPath: string; value: unknown }> = [];
@@ -105,8 +114,8 @@ export async function mergeIndexedArrayEntriesForScope(
   if (indexed.size === 0) return entries;
 
   const [scopeOverrides, baseConfig] = await Promise.all([
-    getScopeOverrides(apiType, principalId),
-    getBaseConfig(),
+    getScopeOverrides(apiType, principalId, expectedTenantId),
+    getBaseConfig(expectedTenantId),
   ]);
 
   let overlay = scopeOverrides as Record<string, t.ConfigValue>;
@@ -152,43 +161,46 @@ function apiConfigToScope(config: AdminConfig, nameMap?: Map<string, string>): t
 /**
  * Fetch all available scopes (all config overrides in the DB).
  */
-export const getAvailableScopesFn = createServerFn({ method: 'GET' }).handler(async () => {
-  const [configRes, groupsRes] = await Promise.all([
-    apiFetch('/api/admin/config'),
-    apiFetch('/api/admin/groups?limit=200').catch(() => null),
-  ]);
-  if (!configRes.ok) {
-    throw new Error(`Failed to fetch scopes: ${configRes.status}`);
-  }
-  const { configs } = (await configRes.json()) as AdminConfigListResponse;
+export const getAvailableScopesFn = createServerFn({ method: 'GET' })
+  .inputValidator(z.object({ expectedTenantId: z.string() }))
+  .handler(async ({ data }: { data: { expectedTenantId: string } }) => {
+    const [configRes, groupsRes] = await Promise.all([
+      apiFetch('/api/admin/config', undefined, data.expectedTenantId),
+      apiFetch('/api/admin/groups?limit=200', undefined, data.expectedTenantId).catch(() => null),
+    ]);
+    if (!configRes.ok) {
+      throw new Error(`Failed to fetch scopes: ${configRes.status}`);
+    }
+    const { configs } = (await configRes.json()) as AdminConfigListResponse;
 
-  const nameMap = new Map<string, string>();
-  if (groupsRes?.ok) {
-    const { groups } = (await groupsRes.json()) as { groups: { _id: string; name: string }[] };
-    for (const g of groups) nameMap.set(g._id, g.name);
-  }
+    const nameMap = new Map<string, string>();
+    if (groupsRes?.ok) {
+      const { groups } = (await groupsRes.json()) as { groups: { _id: string; name: string }[] };
+      for (const g of groups) nameMap.set(g._id, g.name);
+    }
 
-  const scopes: t.ConfigScope[] = configs
-    .filter((c) => c.principalId !== BASE_CONFIG_PRINCIPAL_ID)
-    .map((c) => apiConfigToScope(c, nameMap));
-  return { scopes };
-});
+    const scopes: t.ConfigScope[] = configs
+      .filter((c) => c.principalId !== BASE_CONFIG_PRINCIPAL_ID)
+      .map((c) => apiConfigToScope(c, nameMap));
+    return { scopes };
+  });
 
 /** Shared queryOptions so every consumer deduplicates and caches the scopes list. */
-export const availableScopesOptions = queryOptions({
-  queryKey: ['availableScopes'],
-  queryFn: () => getAvailableScopesFn().then((r) => r.scopes),
-  staleTime: 30_000,
-});
+export const availableScopesOptions = (expectedTenantId: string) =>
+  queryOptions({
+    queryKey: tenantQueryKeys.availableScopes(expectedTenantId),
+    queryFn: () => getAvailableScopesFn({ data: { expectedTenantId } }).then((r) => r.scopes),
+    staleTime: 30_000,
+  });
 
 /**
  * Fetch all profile values for a specific field across all scopes.
  * Fetches all configs and extracts the field value from each config's overrides.
  */
 export const getFieldProfileValuesFn = createServerFn({ method: 'GET' })
-  .inputValidator(z.object({ fieldPath: z.string() }))
-  .handler(async ({ data }: { data: { fieldPath: string } }) => {
-    const response = await apiFetch('/api/admin/config');
+  .inputValidator(z.object({ fieldPath: z.string(), expectedTenantId: z.string() }))
+  .handler(async ({ data }: { data: { fieldPath: string; expectedTenantId: string } }) => {
+    const response = await apiFetch('/api/admin/config', undefined, data.expectedTenantId);
     if (!response.ok) {
       throw new Error(`Failed to fetch configs: ${response.status}`);
     }
@@ -209,10 +221,11 @@ export const getFieldProfileValuesFn = createServerFn({ method: 'GET' })
   });
 
 /** Shared queryOptions for fetching a single field's profile values. */
-export const fieldProfileValuesOptions = (fieldPath: string) =>
+export const fieldProfileValuesOptions = (fieldPath: string, expectedTenantId: string) =>
   queryOptions<t.FieldProfileValue[]>({
-    queryKey: ['fieldProfileValues', fieldPath],
-    queryFn: () => getFieldProfileValuesFn({ data: { fieldPath } }).then((r) => r.values),
+    queryKey: tenantQueryKeys.fieldProfileValues(expectedTenantId, fieldPath),
+    queryFn: () =>
+      getFieldProfileValuesFn({ data: { fieldPath, expectedTenantId } }).then((r) => r.values),
   });
 
 /**
@@ -220,9 +233,9 @@ export const fieldProfileValuesOptions = (fieldPath: string) =>
  * Fetches all configs once and checks each field path across all configs.
  */
 export const getBatchFieldProfilesFn = createServerFn({ method: 'POST' })
-  .inputValidator(z.object({ paths: z.array(z.string()) }))
-  .handler(async ({ data }: { data: { paths: string[] } }) => {
-    const response = await apiFetch('/api/admin/config');
+  .inputValidator(z.object({ paths: z.array(z.string()), expectedTenantId: z.string() }))
+  .handler(async ({ data }: { data: { paths: string[]; expectedTenantId: string } }) => {
+    const response = await apiFetch('/api/admin/config', undefined, data.expectedTenantId);
     if (!response.ok) {
       throw new Error(`Failed to fetch configs: ${response.status}`);
     }
@@ -253,42 +266,51 @@ export const getResolvedConfigFn = createServerFn({ method: 'GET' })
     z.object({
       principalType: z.nativeEnum(PrincipalType),
       principalId: z.string(),
+      expectedTenantId: z.string(),
     }),
   )
-  .handler(async ({ data }: { data: { principalType: PrincipalType; principalId: string } }) => {
-    const apiType = data.principalType;
-    const response = await apiFetch(
-      `/api/admin/config/${apiType}/${encodeURIComponent(data.principalId)}`,
-    );
+  .handler(
+    async ({
+      data,
+    }: {
+      data: { principalType: PrincipalType; principalId: string; expectedTenantId: string };
+    }) => {
+      const apiType = data.principalType;
+      const response = await apiFetch(
+        `/api/admin/config/${apiType}/${encodeURIComponent(data.principalId)}`,
+        undefined,
+        data.expectedTenantId,
+      );
 
-    if (response.status === 404) {
-      return { resolvedConfig: {}, changedPaths: [] };
-    }
-    if (!response.ok) {
-      throw new Error(`Failed to fetch config: ${response.status}`);
-    }
+      if (response.status === 404) {
+        return { resolvedConfig: {}, changedPaths: [] };
+      }
+      if (!response.ok) {
+        throw new Error(`Failed to fetch config: ${response.status}`);
+      }
 
-    const { config } = (await response.json()) as AdminConfigResponse;
-    const overrides = config.overrides ?? {};
+      const { config } = (await response.json()) as AdminConfigResponse;
+      const overrides = config.overrides ?? {};
 
-    const changedPaths: string[] = [];
-    const resolvedConfig: t.FlatConfigMap = {};
+      const changedPaths: string[] = [];
+      const resolvedConfig: t.FlatConfigMap = {};
 
-    function flatten(obj: object, prefix: string) {
-      for (const [key, value] of Object.entries(obj)) {
-        const path = prefix ? `${prefix}.${key}` : key;
-        if (value != null && typeof value === 'object' && !Array.isArray(value)) {
-          flatten(value as object, path);
-        } else {
-          changedPaths.push(path);
-          resolvedConfig[path] = value as t.FlatConfigMap[string];
+      function flatten(obj: object, prefix: string) {
+        for (const [key, value] of Object.entries(obj)) {
+          const path = prefix ? `${prefix}.${key}` : key;
+          if (value != null && typeof value === 'object' && !Array.isArray(value)) {
+            flatten(value as object, path);
+          } else {
+            changedPaths.push(path);
+            resolvedConfig[path] = value as t.FlatConfigMap[string];
+          }
         }
       }
-    }
-    flatten(overrides, '');
+      flatten(overrides, '');
 
-    return { resolvedConfig, changedPaths };
-  });
+      return { resolvedConfig, changedPaths };
+    },
+  );
 
 /**
  * Save a field profile value for a specific scope.
@@ -299,6 +321,7 @@ export const saveFieldProfileValueFn = createServerFn({ method: 'POST' })
       fieldPath: safeFieldPath,
       principalType: z.nativeEnum(PrincipalType),
       principalId: z.string(),
+      expectedTenantId: z.string(),
       value: z.unknown().refine((v) => v != null, 'Profile value must not be null or undefined'),
     }),
   )
@@ -309,15 +332,19 @@ export const saveFieldProfileValueFn = createServerFn({ method: 'POST' })
     ]);
     if (isInterfacePermissionPath(data.fieldPath)) return { success: true };
     const apiType = data.principalType;
-    const entries = await mergeIndexedArrayEntriesForScope(apiType, data.principalId, [
-      { fieldPath: data.fieldPath, value: data.value },
-    ]);
+    const entries = await mergeIndexedArrayEntriesForScope(
+      apiType,
+      data.principalId,
+      [{ fieldPath: data.fieldPath, value: data.value }],
+      data.expectedTenantId,
+    );
     const response = await apiFetch(
       `/api/admin/config/${apiType}/${encodeURIComponent(data.principalId)}/fields`,
       {
         method: 'PATCH',
         body: JSON.stringify({ entries }),
       },
+      data.expectedTenantId,
     );
 
     if (!response.ok) {
@@ -337,6 +364,7 @@ export const bulkSaveProfileValuesFn = createServerFn({ method: 'POST' })
     z.object({
       principalType: z.nativeEnum(PrincipalType),
       principalId: z.string(),
+      expectedTenantId: z.string(),
       entries: z.array(
         z.object({
           fieldPath: safeFieldPath,
@@ -354,6 +382,7 @@ export const bulkSaveProfileValuesFn = createServerFn({ method: 'POST' })
       data: {
         principalType: PrincipalType;
         principalId: string;
+        expectedTenantId: string;
         entries: Array<{ fieldPath: string; value: unknown }>;
       };
     }) => {
@@ -364,13 +393,19 @@ export const bulkSaveProfileValuesFn = createServerFn({ method: 'POST' })
       const filtered = data.entries.filter((e) => !isInterfacePermissionPath(e.fieldPath));
       if (filtered.length === 0) return { success: true, count: 0 };
       const apiType = data.principalType;
-      const entries = await mergeIndexedArrayEntriesForScope(apiType, data.principalId, filtered);
+      const entries = await mergeIndexedArrayEntriesForScope(
+        apiType,
+        data.principalId,
+        filtered,
+        data.expectedTenantId,
+      );
       const response = await apiFetch(
         `/api/admin/config/${apiType}/${encodeURIComponent(data.principalId)}/fields`,
         {
           method: 'PATCH',
           body: JSON.stringify({ entries }),
         },
+        data.expectedTenantId,
       );
 
       if (!response.ok) {
@@ -394,6 +429,7 @@ export const createScopeFn = createServerFn({ method: 'POST' })
         name: z.string().min(1),
         priority: z.number().int().min(0),
         principalId: z.string().optional(),
+        expectedTenantId: z.string(),
       })
       .refine((d) => d.principalType !== PrincipalType.USER || !!d.principalId, {
         message: 'principalId is required for USER scopes',
@@ -413,6 +449,7 @@ export const createScopeFn = createServerFn({ method: 'POST' })
         name: string;
         priority: number;
         principalId?: string;
+        expectedTenantId: string;
       };
     }) => {
       await requireAnyCapability([
@@ -432,6 +469,7 @@ export const createScopeFn = createServerFn({ method: 'POST' })
           method: 'PUT',
           body: JSON.stringify({ overrides: {}, priority: data.priority }),
         },
+        data.expectedTenantId,
       );
 
       if (!response.ok) {
@@ -470,6 +508,7 @@ export const removeFieldProfileValueFn = createServerFn({ method: 'POST' })
       fieldPath: safeFieldPath,
       principalType: z.nativeEnum(PrincipalType),
       principalId: z.string(),
+      expectedTenantId: z.string(),
     }),
   )
   .handler(
@@ -480,6 +519,7 @@ export const removeFieldProfileValueFn = createServerFn({ method: 'POST' })
         fieldPath: string;
         principalType: PrincipalType;
         principalId: string;
+        expectedTenantId: string;
       };
     }) => {
       if (isInterfacePermissionPath(data.fieldPath)) return { success: true };
@@ -492,6 +532,7 @@ export const removeFieldProfileValueFn = createServerFn({ method: 'POST' })
       const response = await apiFetch(
         `/api/admin/config/${apiType}/${encodeURIComponent(data.principalId)}/fields?fieldPath=${encodeURIComponent(data.fieldPath)}`,
         { method: 'DELETE' },
+        data.expectedTenantId,
       );
 
       if (!response.ok && response.status !== 404) {
@@ -513,6 +554,7 @@ export const tombstoneFieldProfileValueFn = createServerFn({ method: 'POST' })
       fieldPath: safeFieldPath,
       principalType: z.nativeEnum(PrincipalType),
       principalId: z.string(),
+      expectedTenantId: z.string(),
     }),
   )
   .handler(
@@ -523,6 +565,7 @@ export const tombstoneFieldProfileValueFn = createServerFn({ method: 'POST' })
         fieldPath: string;
         principalType: PrincipalType;
         principalId: string;
+        expectedTenantId: string;
       };
     }) => {
       if (isInterfacePermissionPath(data.fieldPath)) return { success: true };
@@ -538,6 +581,7 @@ export const tombstoneFieldProfileValueFn = createServerFn({ method: 'POST' })
           method: 'POST',
           body: JSON.stringify({ fieldPath: data.fieldPath }),
         },
+        data.expectedTenantId,
       );
 
       if (!response.ok) {
@@ -559,6 +603,7 @@ export const toggleScopeActiveFn = createServerFn({ method: 'POST' })
       principalType: z.nativeEnum(PrincipalType),
       principalId: z.string(),
       isActive: z.boolean(),
+      expectedTenantId: z.string(),
     }),
   )
   .handler(
@@ -569,6 +614,7 @@ export const toggleScopeActiveFn = createServerFn({ method: 'POST' })
         principalType: PrincipalType;
         principalId: string;
         isActive: boolean;
+        expectedTenantId: string;
       };
     }) => {
       await requireAnyCapability([
@@ -582,6 +628,7 @@ export const toggleScopeActiveFn = createServerFn({ method: 'POST' })
           method: 'PATCH',
           body: JSON.stringify({ isActive: data.isActive }),
         },
+        data.expectedTenantId,
       );
 
       if (!response.ok) {
@@ -602,6 +649,7 @@ export const deleteScopeFn = createServerFn({ method: 'POST' })
     z.object({
       principalType: z.nativeEnum(PrincipalType),
       principalId: z.string(),
+      expectedTenantId: z.string(),
     }),
   )
   .handler(
@@ -611,6 +659,7 @@ export const deleteScopeFn = createServerFn({ method: 'POST' })
       data: {
         principalType: PrincipalType;
         principalId: string;
+        expectedTenantId: string;
       };
     }) => {
       await requireAnyCapability([
@@ -621,6 +670,7 @@ export const deleteScopeFn = createServerFn({ method: 'POST' })
       const response = await apiFetch(
         `/api/admin/config/${apiType}/${encodeURIComponent(data.principalId)}`,
         { method: 'DELETE' },
+        data.expectedTenantId,
       );
 
       if (!response.ok && response.status !== 404) {

@@ -26,29 +26,26 @@ if (env.NODE_ENV !== 'development') {
     );
     process.exit(1);
   }
-  const mongoUri = env.MONGO_URI || env.MONGODB_URI;
-  if (!mongoUri) {
-    console.error(
-      '[admin-panel] MONGO_URI (or MONGODB_URI) must be set. Config rollback snapshots are required ' +
-        'before every base-config write. Refusing to start.',
-    );
-    process.exit(1);
-  }
 }
 
 const ONE_DAY = 86400;
-const rawMaxAge = Number(env.ADMIN_PANEL_STATIC_CACHE_MAX_AGE ?? env.STATIC_CACHE_MAX_AGE);
-const rawSMaxAge = Number(env.ADMIN_PANEL_STATIC_CACHE_S_MAX_AGE ?? env.STATIC_CACHE_S_MAX_AGE);
+const firstNonEmpty = (...values: Array<string | undefined>): string | undefined =>
+  values.find((value) => typeof value === 'string' && value.trim().length > 0);
+const rawMaxAge = Number(
+  firstNonEmpty(env.ADMIN_PANEL_STATIC_CACHE_MAX_AGE, env.STATIC_CACHE_MAX_AGE),
+);
+const rawSMaxAge = Number(
+  firstNonEmpty(env.ADMIN_PANEL_STATIC_CACHE_S_MAX_AGE, env.STATIC_CACHE_S_MAX_AGE),
+);
 const maxAge = Number.isNaN(rawMaxAge) ? ONE_DAY * 2 : rawMaxAge;
 const sMaxAge = Number.isNaN(rawSMaxAge) ? ONE_DAY : rawSMaxAge;
 
 const NO_CACHE: Record<string, string> = {
   'Cache-Control':
-    env.ADMIN_PANEL_INDEX_CACHE_CONTROL ??
-    env.INDEX_CACHE_CONTROL ??
+    firstNonEmpty(env.ADMIN_PANEL_INDEX_CACHE_CONTROL, env.INDEX_CACHE_CONTROL) ??
     'no-cache, no-store, must-revalidate',
-  Pragma: env.ADMIN_PANEL_INDEX_PRAGMA ?? env.INDEX_PRAGMA ?? 'no-cache',
-  Expires: env.ADMIN_PANEL_INDEX_EXPIRES ?? env.INDEX_EXPIRES ?? '0',
+  Pragma: firstNonEmpty(env.ADMIN_PANEL_INDEX_PRAGMA, env.INDEX_PRAGMA) ?? 'no-cache',
+  Expires: firstNonEmpty(env.ADMIN_PANEL_INDEX_EXPIRES, env.INDEX_EXPIRES) ?? '0',
 };
 
 const LONG_CACHE: Record<string, string> = {

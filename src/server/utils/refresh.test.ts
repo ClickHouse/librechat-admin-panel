@@ -81,15 +81,39 @@ describe('refreshAdminToken — tenant header forwarding', () => {
 
   it('omits X-Tenant-Id when the header is whitespace only', async () => {
     tenantHeader.value = '   ';
-    fetchMock.mockResolvedValueOnce(
-      jsonResponse(200, { token: 'new-jwt' }),
-    );
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { token: 'new-jwt' }));
 
     await refreshAdminToken('rt1', 'openid', 'user-1');
 
     const [, init] = fetchMock.mock.calls[0];
     const headers = (init as RequestInit).headers as Record<string, string>;
     expect(headers['X-Tenant-Id']).toBeUndefined();
+  });
+
+  it('forwards X-Tenant-Id and returns the authoritative user for local refresh', async () => {
+    tenantHeader.value = 'tenant-b';
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(200, {
+        token: 'new-jwt',
+        expiresAt: 999,
+        user: { id: 'user-1', tenantId: 'tenant-b' },
+      }),
+    );
+
+    const result = await refreshAdminToken('rt1', 'librechat', 'user-1');
+
+    expect(fetchMock).toHaveBeenCalledWith('http://lc.test/api/auth/refresh', {
+      method: 'POST',
+      headers: {
+        Cookie: 'refreshToken=rt1',
+        'X-Tenant-Id': 'tenant-b',
+      },
+    });
+    expect(result).toMatchObject({
+      token: 'new-jwt',
+      expiresAt: 999,
+      user: { id: 'user-1', tenantId: 'tenant-b' },
+    });
   });
 });
 
@@ -201,6 +225,30 @@ describe('ensureFreshBearer', () => {
       token: 'cur-fresh',
       refreshToken: 'rt-rotated',
       expiresAt: 12345,
+    });
+  });
+
+  it('updates the cached session tenant from the refreshed backend user', async () => {
+    sessionState.data = {
+      token: 'cur',
+      refreshToken: 'rt-old',
+      tokenProvider: 'openid',
+      user: { id: 'u', tenantId: 'tenant-a' },
+      expiresAt: Date.now() + 1_000,
+    };
+    tenantHeader.value = 'tenant-b';
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(200, {
+        token: 'cur-fresh',
+        refreshToken: 'rt-rotated',
+        user: { tenantId: 'tenant-b' },
+      }),
+    );
+
+    await ensureFreshBearer(30_000);
+
+    expect(updateSpy.mock.calls[0][0]).toMatchObject({
+      user: { id: 'u', tenantId: 'tenant-b' },
     });
   });
 

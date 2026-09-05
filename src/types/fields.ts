@@ -21,6 +21,8 @@ export interface KeyValueFieldProps {
   keyPlaceholder?: string;
   valuePlaceholder?: string;
   'aria-label'?: string;
+  /** The field's schema path, so a row keyed `__previousIdentity` can be flagged as reserved only where that name actually collides with the mcpServers rename hint protocol. */
+  fieldPath?: string;
 }
 
 export interface TextFieldProps {
@@ -134,6 +136,11 @@ export interface ArrayObjectFieldProps {
   entryIdPrefix?: string;
   /** See `SingleFieldRendererProps.editSessionId`. Forwarded to `renderFields`. */
   editSessionId?: number;
+  /** When set, entries carry a hidden hint of their pre-edit value at this key
+   *  (`name`, `group`, …) so the backend can restore encrypted credentials by
+   *  that stable identity even when the visible identity field is renamed in
+   *  the same edit. See `endpoints.custom`/`endpoints.azureOpenAI.groups`. */
+  identityKey?: string;
 }
 
 export interface RecordObjectFieldProps {

@@ -1,6 +1,6 @@
 # LibreChat Admin Panel
 
-A browser-based management interface for [LibreChat](https://github.com/danny-avila/LibreChat). It connects to the same database as the main application and provides a GUI for tasks that would otherwise require editing `librechat.yaml` directly.
+A browser-based management interface for [LibreChat](https://github.com/danny-avila/LibreChat). It communicates with LibreChat exclusively through authenticated backend APIs and provides a GUI for tasks that would otherwise require editing `librechat.yaml` directly.
 
 ## Features
 
@@ -27,8 +27,6 @@ bun dev                 # http://localhost:3000
 cp .env.example .env
 # Set SESSION_SECRET (min 32 chars)
 # Set VITE_API_BASE_URL=http://host.docker.internal:3080
-# If LibreChat Compose publishes Mongo on 127.0.0.1:27018:
-# Set MONGO_URI=mongodb://host.docker.internal:27018/LibreChat?replicaSet=rs0&directConnection=true
 
 docker compose up -d    # builds and starts on http://localhost:3000
 docker compose down     # stop
@@ -37,13 +35,11 @@ docker compose down     # stop
 > **Note:** Inside Docker, `localhost` refers to the container, not your machine.
 > Use `http://host.docker.internal:3080` for `VITE_API_BASE_URL` to reach
 > LibreChat running on the host.
->
-> For `MONGO_URI`, either:
-> - Run the admin panel on the same Docker network as LibreChat and use `mongodb://mongodb:27017/LibreChat?replicaSet=rs0`, or
-> - Publish Mongo locally (for example `127.0.0.1:27018:27017`) and use `mongodb://host.docker.internal:27018/LibreChat?replicaSet=rs0&directConnection=true`.
->
-> Compose interpolates `MONGO_URI` from `.env`; it does not override a remote URI
-> or the `MONGODB_URI` fallback.
+
+The admin panel is a standalone API client and must not receive MongoDB credentials.
+Atomic configuration writes, revision snapshots, history, and rollback are owned by
+the LibreChat backend. Deploy the matching backend before, or in the same release
+train as, this panel version.
 
 #### Environment variables
 
@@ -51,9 +47,6 @@ docker compose down     # stop
 | ------------------------------- | ----------------------------------- | -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
 | `PORT`                          | No                                  | `3000`                                                                           | Port the admin panel listens on                                                                   |
 | `SESSION_SECRET`                | **Yes** (always required in Docker) | Dev fallback only when running `bun dev` locally; no default in the Docker image | Encryption key for sessions (min 32 chars)                                                        |
-| `MONGO_URI`                     | **Yes** (production / Docker)       | —                                                                                | LibreChat MongoDB URI used for config rollback snapshots; required before every base-config write |
-| `MONGODB_URI`                   | No                                  | —                                                                                | Fallback Mongo URI if `MONGO_URI` is unset                                                        |
-| `MONGO_DB_NAME`                 | No                                  | URI path component, or driver default `test` when URI has no path                | Override the database from the URI; set to `LibreChat` when the URI has no path                   |
 | `VITE_API_BASE_URL`             | **Yes** (Docker)                    | `http://localhost:3080` (local dev only)                                         | LibreChat API server URL; use `http://host.docker.internal:<port>` in Docker                      |
 | `VITE_BASE_PATH`                | No                                  | `/`                                                                              | URL subpath to serve the panel under (e.g., `/adminpanel`). Must match at build time and runtime  |
 | `API_SERVER_URL`                | No                                  | Falls back to `VITE_API_BASE_URL`                                                | Server-side LibreChat API URL when the container reaches LibreChat differently than the browser   |
@@ -77,7 +70,6 @@ docker build -t librechat-admin-panel .
 docker run -p 3000:3000 \
   --add-host=host.docker.internal:host-gateway \
   -e SESSION_SECRET=your-secret-here-at-least-32-characters \
-  -e MONGO_URI='mongodb://host.docker.internal:27018/LibreChat?replicaSet=rs0&directConnection=true' \
   -e VITE_API_BASE_URL=http://host.docker.internal:3080 \
   -e SESSION_COOKIE_SECURE=false \
   librechat-admin-panel
@@ -87,7 +79,6 @@ docker build -t librechat-admin-panel --build-arg VITE_BASE_PATH=/adminpanel .
 docker run -p 3000:3000 \
   --add-host=host.docker.internal:host-gateway \
   -e SESSION_SECRET=your-secret-here-at-least-32-characters \
-  -e MONGO_URI='mongodb://host.docker.internal:27018/LibreChat?replicaSet=rs0&directConnection=true' \
   -e VITE_API_BASE_URL=http://host.docker.internal:3080 \
   -e VITE_BASE_PATH=/adminpanel \
   librechat-admin-panel

@@ -4,7 +4,6 @@ import { queryOptions } from '@tanstack/react-query';
 import { createServerFn } from '@tanstack/react-start';
 import { configSchema } from 'librechat-data-provider';
 import { SystemCapabilities } from '@librechat/data-schemas/capabilities';
-import type { AdminConfigResponse } from '@librechat/data-schemas';
 import type * as t from '@/types';
 import {
   filterSecretPreviewFields,
@@ -12,6 +11,7 @@ import {
   retainSnapshotSecretsOnly,
   stripSecretPreviewValues,
   collectSecretFieldPaths,
+  PREVIOUS_IDENTITY_HINT_KEY,
 } from '@/utils';
 import {
   filterInterfacePermissionChildren,
@@ -21,6 +21,7 @@ import {
 import { requireCapability, requireAllSectionCapabilities } from './capabilities';
 import { canonicalizeResetPaths, getValueAtPath } from './utils/configPaths';
 import { readAuthenticatedBaseConfigSnapshot } from './revisions';
+import { ConfigVersionConflictError } from './utils/errors';
 import { BASE_CONFIG_PRINCIPAL_ID } from './constants';
 import { safeFieldPath } from './utils/validation';
 import { flattenObject } from '@/utils/format';
@@ -608,6 +609,37 @@ export function resolveSubSchema(
   return current;
 }
 
+/** Origin hints are mutation metadata, not nullable HTTP header values.
+ * Strip them from a validation-only copy, leaving the outgoing payload intact. */
+function stripMcpHeaderIdentityHintsForValidation(fieldPath: string, value: unknown): unknown {
+  const segments = fieldPath.split('.');
+  if (
+    segments[0] !== 'mcpServers' ||
+    segments.length > 3 ||
+    value == null ||
+    typeof value !== 'object' ||
+    Array.isArray(value)
+  ) {
+    return value;
+  }
+  const entries = Object.entries(value);
+  if (segments.length === 3) {
+    if (segments[2] !== 'headers' && segments[2] !== 'oauth_headers') return value;
+    return Object.fromEntries(
+      entries.filter(
+        ([key, hint]) =>
+          key !== PREVIOUS_IDENTITY_HINT_KEY || (hint !== null && typeof hint !== 'string'),
+      ),
+    );
+  }
+  return Object.fromEntries(
+    entries.map(([key, child]) => [
+      key,
+      stripMcpHeaderIdentityHintsForValidation(`${fieldPath}.${key}`, child),
+    ]),
+  );
+}
+
 export function validateFieldValue(
   fieldPath: string,
   value: unknown,
@@ -629,7 +661,7 @@ export function validateFieldValue(
           error?: { issues: Array<{ message: string; path: (string | number)[] }> };
         };
       }
-    ).safeParse(value);
+    ).safeParse(stripMcpHeaderIdentityHintsForValidation(fieldPath, value));
     if (!result.success && result.error) {
       const messages = result.error.issues.map((issue) => {
         const issuePath = issue.path.reduce(
@@ -652,10 +684,7 @@ export type IndexedArrayPathParseResult =
   | { kind: 'none' };
 
 /** Descend one object/record/union/intersection segment. Does not enter arrays. */
-function descendNonArraySegment(
-  schema: t.ZodSchemaLike,
-  segment: string,
-): t.ZodSchemaLike | null {
+function descendNonArraySegment(schema: t.ZodSchemaLike, segment: string): t.ZodSchemaLike | null {
   const unwrapped = unwrapSchema(schema);
   if (!unwrapped?._def) return null;
   const typeName = unwrapped._def.typeName;
@@ -1169,20 +1198,42 @@ export function normalizeAppServiceKeys(
 }
 
 export const getBaseConfigFn = createServerFn({ method: 'GET' }).handler(async () => {
-  const [baseResponse, baseOnlyResponse, dbBaseResponse] = await Promise.all([
+  const [baseResponse, baseOnlyResponse] = await Promise.all([
     apiFetch('/api/admin/config/base'),
     apiFetch('/api/admin/config/base?baseOnly=true'),
-    apiFetch(`/api/admin/config/role/${BASE_CONFIG_PRINCIPAL_ID}`),
   ]);
 
   if (!baseResponse.ok) {
     throw new Error(`Failed to fetch base config: ${baseResponse.status}`);
   }
 
-  const { config: rawConfig } = (await baseResponse.json()) as {
+  // `config`, `dbOverrides`, and `dbConfigVersion` all come from this one
+  // response so the CAS version is always paired with the exact content it
+  // describes — fetching the raw override doc as a second, independent
+  // request let a concurrent mutation land in between, pairing stale content
+  // with a fresh version (or vice versa) and letting the next save silently
+  // pass CAS while overwriting that intervening change.
+  const {
+    config: rawConfig,
+    dbOverrides: rawDbOverrides,
+    dbConfigVersion: rawDbConfigVersion,
+    dbIsActive: rawDbIsActive,
+    effectiveTenantId,
+  } = (await baseResponse.json()) as {
     config: Record<string, t.ConfigValue>;
+    dbOverrides?: Record<string, t.ConfigValue>;
+    dbConfigVersion: number | null;
+    dbIsActive?: boolean | null;
+    effectiveTenantId?: string;
   };
+  if (typeof effectiveTenantId !== 'string') {
+    throw new Error('Base config response is missing its effective tenant');
+  }
   const config = normalizeAppServiceKeys(rawConfig);
+  const dbOverrides = rawDbOverrides;
+  // `null` means the base document doesn't exist yet (absent) — matches the
+  // `expectedVersion: null` the atomic endpoint expects for a first-ever save.
+  const dbConfigVersion = rawDbConfigVersion ?? null;
 
   let configuredFromBase: string[] = [];
   let flatDefaults: Record<string, t.ConfigValue> = {};
@@ -1194,31 +1245,28 @@ export const getBaseConfigFn = createServerFn({ method: 'GET' }).handler(async (
     console.warn('[getBaseConfigFn] Failed to compute schema defaults:', e);
   }
 
-  let dbOverrides: Record<string, t.ConfigValue> | undefined;
-
-  if (dbBaseResponse.ok) {
-    const { config: dbConfig } = (await dbBaseResponse.json()) as AdminConfigResponse;
-    dbOverrides = dbConfig.overrides as Record<string, t.ConfigValue>;
+  if (!baseOnlyResponse.ok) {
+    throw new Error(`Failed to fetch YAML baseline config: ${baseOnlyResponse.status}`);
   }
-
   let yamlMcpKeys: string[] | undefined;
   let yamlMcpServers: Record<string, t.ConfigValue> | undefined;
-  if (baseOnlyResponse.ok) {
-    const { config: baseOnlyRaw } = (await baseOnlyResponse.json()) as {
-      config: Record<string, t.ConfigValue>;
-    };
-    const baseOnly = normalizeAppServiceKeys(baseOnlyRaw);
-    const mcp = baseOnly.mcpServers;
-    if (mcp && typeof mcp === 'object' && !Array.isArray(mcp)) {
-      /** Trust the baseOnly response when it has a valid mcpServers shape. The previous byte-equality fallback against `config.mcpServers` was a defensive heuristic for hypothetical legacy backends that ignore `?baseOnly`, but it false-negatived whenever an admin override happened to be a no-op (e.g. an admin set `title` to a value that already matched YAML), causing the YAML lock affordances to disappear for entries that should stay locked. The deployed LibreChat supports `?baseOnly` directly, so the heuristic is no longer earning its keep. */
-      yamlMcpServers = mcp as Record<string, t.ConfigValue>;
-      yamlMcpKeys = Object.keys(yamlMcpServers);
-    }
+  const { config: baseOnlyRaw } = (await baseOnlyResponse.json()) as {
+    config: Record<string, t.ConfigValue>;
+  };
+  const baseOnly = normalizeAppServiceKeys(baseOnlyRaw);
+  const mcp = baseOnly.mcpServers;
+  if (mcp && typeof mcp === 'object' && !Array.isArray(mcp)) {
+    /** Trust the baseOnly response when it has a valid mcpServers shape. The previous byte-equality fallback against `config.mcpServers` was a defensive heuristic for hypothetical legacy backends that ignore `?baseOnly`, but it false-negatived whenever an admin override happened to be a no-op (e.g. an admin set `title` to a value that already matched YAML), causing the YAML lock affordances to disappear for entries that should stay locked. The deployed LibreChat supports `?baseOnly` directly, so the heuristic is no longer earning its keep. */
+    yamlMcpServers = mcp as Record<string, t.ConfigValue>;
+    yamlMcpKeys = Object.keys(yamlMcpServers);
   }
 
   return {
     config,
     dbOverrides,
+    dbConfigVersion,
+    dbIsActive: rawDbIsActive ?? null,
+    effectiveTenantId,
     configuredFromBase,
     schemaDefaults: flatDefaults,
     yamlMcpKeys,
@@ -1445,8 +1493,14 @@ function getConfigNode(config: Record<string, t.ConfigValue>, fieldPath: string)
   return result.found ? result.value : undefined;
 }
 
-async function fetchYamlBaseConfig(): Promise<Record<string, t.ConfigValue>> {
-  const response = await apiFetch('/api/admin/config/base?baseOnly=true');
+async function fetchYamlBaseConfig(
+  expectedTenantId: string,
+): Promise<Record<string, t.ConfigValue>> {
+  const response = await apiFetch(
+    '/api/admin/config/base?baseOnly=true',
+    undefined,
+    expectedTenantId,
+  );
   if (!response.ok) {
     throw new Error(`Failed to fetch YAML base config: ${response.status}`);
   }
@@ -1472,21 +1526,27 @@ export { canonicalizeResetPaths } from './utils/configPaths';
 
 async function postAtomicBaseConfigMutation(body: {
   expectedVersion: number | null;
+  expectedTenantId: string;
   cause: t.ConfigRevisionCause;
   resetPaths?: string[];
   entries?: Array<{ fieldPath: string; value: unknown }>;
   overrides?: Record<string, unknown>;
   deleteDocument?: boolean;
   restoreRevisionId?: string;
+  isActive?: boolean;
   priority?: number;
 }): Promise<void> {
-  const response = await apiFetch(`/api/admin/config/role/${BASE_CONFIG_PRINCIPAL_ID}/atomic`, {
-    method: 'POST',
-    body: JSON.stringify(body),
-  });
+  const response = await apiFetch(
+    `/api/admin/config/role/${BASE_CONFIG_PRINCIPAL_ID}/atomic`,
+    {
+      method: 'POST',
+      body: JSON.stringify(body),
+    },
+    body.expectedTenantId,
+  );
   const payload = await response.json().catch(() => ({}));
   if (response.status === 409) {
-    throw new Error('The configuration was changed by another admin. Reload and try again.');
+    throw new ConfigVersionConflictError();
   }
   if (!response.ok) {
     throw new Error(
@@ -1498,6 +1558,8 @@ async function postAtomicBaseConfigMutation(body: {
 async function applyBaseConfigMutation(data: {
   entries?: Array<{ fieldPath: string; value: unknown }>;
   resetPaths?: string[];
+  expectedVersion: number | null;
+  expectedTenantId: string;
 }): Promise<{ success: true }> {
   const submittedEntries = data.entries ?? [];
   const submittedResets = canonicalizeResetPaths(data.resetPaths ?? []);
@@ -1514,9 +1576,9 @@ async function applyBaseConfigMutation(data: {
         'Provide resetPaths, entries, overrides, deleteDocument, or restoreRevisionId',
       );
     }
-    const snapshot = await readAuthenticatedBaseConfigSnapshot();
     await postAtomicBaseConfigMutation({
-      expectedVersion: snapshot.absent ? null : (snapshot.configVersion ?? 0),
+      expectedVersion: data.expectedVersion,
+      expectedTenantId: data.expectedTenantId,
       cause: 'save',
       resetPaths: submittedResets.length > 0 ? submittedResets : undefined,
       entries: submittedEntries.length > 0 ? submittedEntries : undefined,
@@ -1547,11 +1609,19 @@ async function applyBaseConfigMutation(data: {
     throw new Error(`Validation failed — ${details}`);
   }
 
-  const snapshot = await readAuthenticatedBaseConfigSnapshot();
-  const expectedVersion = snapshot.absent ? null : (snapshot.configVersion ?? 0);
-
   if (hasIndexedArrayEntry(filtered)) {
-    const yamlConfig = await fetchYamlBaseConfig();
+    // The array-merge baseline must reflect the current DB state (not the
+    // frozen `expectedVersion` the admin loaded) so identity-key merging and
+    // secret retention operate on real array contents; the atomic endpoint's
+    // own expectedVersion check — not this read — is what rejects the whole
+    // mutation if anything actually changed underneath the admin.
+    const [yamlConfig, snapshot] = await Promise.all([
+      fetchYamlBaseConfig(data.expectedTenantId),
+      readAuthenticatedBaseConfigSnapshot(data.expectedTenantId),
+    ]);
+    if (snapshot.effectiveTenantId !== data.expectedTenantId) {
+      throw new ConfigVersionConflictError();
+    }
     filtered = mergeIndexedArrayEntriesIntoBase(
       filtered,
       yamlConfig,
@@ -1561,7 +1631,8 @@ async function applyBaseConfigMutation(data: {
   }
 
   await postAtomicBaseConfigMutation({
-    expectedVersion,
+    expectedVersion: data.expectedVersion,
+    expectedTenantId: data.expectedTenantId,
     cause: 'save',
     resetPaths: resetPaths.length > 0 ? resetPaths : undefined,
     entries: filtered.length > 0 ? filtered : undefined,
@@ -1577,6 +1648,14 @@ const baseConfigMutationInput = z
       .max(MAX_PATCH_MUTATIONS)
       .optional(),
     resetPaths: z.array(safeFieldPath).max(MAX_PATCH_MUTATIONS).optional(),
+    /**
+     * The configVersion the admin's edit session was frozen against when
+     * editing began — never re-derived server-side, since a fresh read here
+     * would defeat the whole point of the check (see ConfigPage's session
+     * freeze). `null` means the session started from an absent document.
+     */
+    expectedVersion: z.number().int().min(0).nullable(),
+    expectedTenantId: z.string(),
   })
   .refine((data) => mutationCount(data.entries, data.resetPaths) <= MAX_PATCH_MUTATIONS, {
     message: `combined entries and resetPaths exceed maximum of ${MAX_PATCH_MUTATIONS}`,
@@ -1588,7 +1667,18 @@ export const saveBaseConfigFn = createServerFn({ method: 'POST' })
 
 /** Full-replace save used by YAML import (intentionally sends the entire config). */
 export const importBaseConfigFn = createServerFn({ method: 'POST' })
-  .inputValidator(z.object({ config: z.record(z.string(), z.unknown()) }))
+  .inputValidator(
+    z.object({
+      config: z.record(z.string(), z.unknown()),
+      /** The configVersion the admin's session was frozen against when the
+       *  import action began — never re-derived server-side, since a fresh
+       *  read here would defeat stale-administrator detection entirely (see
+       *  ConfigPage's session freeze). `null` means the session started from
+       *  an absent document. */
+      expectedVersion: z.number().int().min(0).nullable(),
+      expectedTenantId: z.string(),
+    }),
+  )
   .handler(async ({ data }) => {
     await requireCapability(SystemCapabilities.MANAGE_CONFIGS);
     const overrides = { ...data.config };
@@ -1602,9 +1692,9 @@ export const importBaseConfigFn = createServerFn({ method: 'POST' })
       );
     }
 
-    const snapshot = await readAuthenticatedBaseConfigSnapshot();
     await postAtomicBaseConfigMutation({
-      expectedVersion: snapshot.absent ? null : (snapshot.configVersion ?? 0),
+      expectedVersion: data.expectedVersion,
+      expectedTenantId: data.expectedTenantId,
       cause: 'import',
       overrides,
       priority: 0,
@@ -1613,20 +1703,57 @@ export const importBaseConfigFn = createServerFn({ method: 'POST' })
   });
 
 export const resetBaseConfigFieldFn = createServerFn({ method: 'POST' })
-  .inputValidator(z.object({ fieldPath: safeFieldPath }))
-  .handler(async ({ data }) => applyBaseConfigMutation({ resetPaths: [data.fieldPath] }));
+  .inputValidator(
+    z.object({
+      fieldPath: safeFieldPath,
+      expectedVersion: z.number().int().min(0).nullable(),
+      expectedTenantId: z.string(),
+    }),
+  )
+  .handler(async ({ data }) =>
+    applyBaseConfigMutation({
+      resetPaths: [data.fieldPath],
+      expectedVersion: data.expectedVersion,
+      expectedTenantId: data.expectedTenantId,
+    }),
+  );
 
-/** Deletes the entire base config DB override, reverting every value back to
- *  what librechat.yaml defines. Removes the `__base__` config document outright;
- *  scope (role/group/user) profiles are untouched. A 404 means there was no
- *  override to begin with, which is treated as success. */
-export const resetBaseConfigFn = createServerFn({ method: 'POST' }).handler(async () => {
-  await requireCapability(SystemCapabilities.MANAGE_CONFIGS);
-  const snapshot = await readAuthenticatedBaseConfigSnapshot();
-  await postAtomicBaseConfigMutation({
-    expectedVersion: snapshot.absent ? null : (snapshot.configVersion ?? 0),
-    cause: 'reset',
-    deleteDocument: true,
+/** Resets the entire base config DB override, reverting every value back to
+ *  what librechat.yaml defines. The backend retains a versioned empty sentinel
+ *  for compare-and-set safety; scope (role/group/user) profiles are untouched. */
+export const resetBaseConfigFn = createServerFn({ method: 'POST' })
+  .inputValidator(
+    z.object({
+      expectedVersion: z.number().int().min(0).nullable(),
+      expectedTenantId: z.string(),
+    }),
+  )
+  .handler(async ({ data }) => {
+    await requireCapability(SystemCapabilities.MANAGE_CONFIGS);
+    await postAtomicBaseConfigMutation({
+      expectedVersion: data.expectedVersion,
+      expectedTenantId: data.expectedTenantId,
+      cause: 'reset',
+      deleteDocument: true,
+    });
+    return { success: true };
   });
-  return { success: true };
-});
+
+export const setBaseConfigActiveFn = createServerFn({ method: 'POST' })
+  .inputValidator(
+    z.object({
+      isActive: z.boolean(),
+      expectedVersion: z.number().int().min(0).nullable(),
+      expectedTenantId: z.string(),
+    }),
+  )
+  .handler(async ({ data }) => {
+    await requireCapability(SystemCapabilities.MANAGE_CONFIGS);
+    await postAtomicBaseConfigMutation({
+      expectedVersion: data.expectedVersion,
+      expectedTenantId: data.expectedTenantId,
+      cause: 'save',
+      isActive: data.isActive,
+    });
+    return { success: true };
+  });

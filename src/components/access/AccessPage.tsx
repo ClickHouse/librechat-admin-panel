@@ -12,6 +12,7 @@ export function AccessPage({
   onTabChange,
   canReadRoles,
   canReadGroups,
+  expectedTenantId,
 }: t.AccessPageProps) {
   const localize = useLocalize();
   const [createGroupOpen, setCreateGroupOpen] = useState(false);
@@ -36,16 +37,30 @@ export function AccessPage({
 
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden pt-3">
         {activeTab === 'groups' && canReadGroups && (
-          <GroupsTab onCreateGroup={() => setCreateGroupOpen(true)} />
+          <GroupsTab
+            expectedTenantId={expectedTenantId}
+            onCreateGroup={() => setCreateGroupOpen(true)}
+          />
         )}
 
         {activeTab === 'roles' && canReadRoles && (
-          <RolesTab onCreateRole={() => setCreateRoleOpen(true)} />
+          <RolesTab
+            expectedTenantId={expectedTenantId}
+            onCreateRole={() => setCreateRoleOpen(true)}
+          />
         )}
       </div>
 
-      <CreateGroupDialog open={createGroupOpen} onClose={() => setCreateGroupOpen(false)} />
-      <CreateRoleDialog open={createRoleOpen} onClose={() => setCreateRoleOpen(false)} />
+      <CreateGroupDialog
+        open={createGroupOpen}
+        expectedTenantId={expectedTenantId}
+        onClose={() => setCreateGroupOpen(false)}
+      />
+      <CreateRoleDialog
+        open={createRoleOpen}
+        expectedTenantId={expectedTenantId}
+        onClose={() => setCreateRoleOpen(false)}
+      />
     </div>
   );
 }

@@ -16,7 +16,7 @@ import { GrantTableRow } from './GrantTableRow';
 
 const PAGE_SIZE = 50;
 
-export function GrantManagementTab() {
+export function GrantManagementTab({ expectedTenantId }: t.TenantScopedProps) {
   const localize = useLocalize();
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
@@ -24,8 +24,10 @@ export function GrantManagementTab() {
   const { message: announcement, announce } = useAnnouncement();
   const rowRefs = useRef<Map<string, HTMLTableRowElement>>(new Map());
 
-  const { data: grants = [], isLoading: grantsLoading } = useQuery(allGrantsQueryOptions);
-  const { data: roles = [] } = useQuery(allRolesQueryOptions);
+  const { data: grants = [], isLoading: grantsLoading } = useQuery(
+    allGrantsQueryOptions(expectedTenantId),
+  );
+  const { data: roles = [] } = useQuery(allRolesQueryOptions(expectedTenantId));
 
   const roleNames = useMemo(() => buildRoleNames(roles), [roles]);
 
@@ -126,6 +128,7 @@ export function GrantManagementTab() {
         principalType={editTarget?.principalType ?? null}
         principalId={editTarget?.principalId ?? null}
         principalName={editTarget?.name ?? ''}
+        expectedTenantId={expectedTenantId}
         onClose={handleDialogClose}
       />
 

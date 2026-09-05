@@ -2,10 +2,15 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 const ensureFreshBearer = vi.fn();
 const refreshOn401 = vi.fn();
+const readTenantHeader = vi.fn();
 
 vi.mock('./refresh', () => ({
   ensureFreshBearer: (...args: unknown[]) => ensureFreshBearer(...args),
   refreshOn401: (...args: unknown[]) => refreshOn401(...args),
+  withTenantHeader: (headers: Record<string, string>) => {
+    const tenantId = readTenantHeader();
+    return tenantId ? { ...headers, 'X-Tenant-Id': tenantId } : headers;
+  },
 }));
 
 import { apiFetch } from './api';
@@ -16,6 +21,7 @@ beforeEach(() => {
   fetchMock.mockReset();
   ensureFreshBearer.mockReset();
   refreshOn401.mockReset();
+  readTenantHeader.mockReset();
   vi.stubGlobal('fetch', fetchMock);
 });
 
@@ -43,6 +49,45 @@ describe('apiFetch', () => {
     const headers = (init as RequestInit).headers as Record<string, string>;
     expect(headers.Authorization).toBe('Bearer jwt-fresh');
     expect(refreshOn401).not.toHaveBeenCalled();
+  });
+
+  it('forwards the effective request tenant on the initial request and a refresh retry', async () => {
+    readTenantHeader.mockReturnValue('tenant-b');
+    ensureFreshBearer.mockResolvedValueOnce('jwt-stale');
+    refreshOn401.mockResolvedValueOnce('jwt-fresh');
+    fetchMock.mockResolvedValueOnce(jsonResponse(401)).mockResolvedValueOnce(jsonResponse(200));
+
+    await apiFetch('/api/admin/config/base', undefined, 'tenant-b');
+
+    expect((fetchMock.mock.calls[0][1] as RequestInit).headers).toMatchObject({
+      'X-Tenant-Id': 'tenant-b',
+      'X-Expected-Tenant-Id': 'tenant-b',
+      Authorization: 'Bearer jwt-stale',
+    });
+    expect((fetchMock.mock.calls[1][1] as RequestInit).headers).toMatchObject({
+      'X-Tenant-Id': 'tenant-b',
+      'X-Expected-Tenant-Id': 'tenant-b',
+      Authorization: 'Bearer jwt-fresh',
+    });
+  });
+
+  it('does not let a caller override the request tenant header', async () => {
+    readTenantHeader.mockReturnValue('tenant-b');
+    ensureFreshBearer.mockResolvedValueOnce('jwt-fresh');
+    fetchMock.mockResolvedValueOnce(jsonResponse(200));
+
+    await apiFetch(
+      '/api/admin/config/base',
+      {
+        headers: { 'X-Tenant-Id': 'tenant-a', 'X-Expected-Tenant-Id': 'tenant-a' },
+      },
+      'tenant-b',
+    );
+
+    expect((fetchMock.mock.calls[0][1] as RequestInit).headers).toMatchObject({
+      'X-Tenant-Id': 'tenant-b',
+      'X-Expected-Tenant-Id': 'tenant-b',
+    });
   });
 
   it('passes through the proactive-refresh skew window of 30s', async () => {
@@ -117,8 +162,8 @@ describe('apiFetch', () => {
     });
 
     const [, init] = fetchMock.mock.calls[0];
-    const headers = (init as RequestInit).headers as Record<string, string>;
-    expect(headers.Authorization).toBe('Bearer jwt-fresh');
-    expect(headers['X-Custom']).toBe('keep-me');
+    const headers = new Headers((init as RequestInit).headers);
+    expect(headers.get('Authorization')).toBe('Bearer jwt-fresh');
+    expect(headers.get('X-Custom')).toBe('keep-me');
   });
 });

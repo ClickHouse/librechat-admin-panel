@@ -9,6 +9,7 @@ import { getControlType } from './utils';
 export function PreviewProfileActions({
   fieldPath,
   fieldLabel,
+  expectedTenantId,
   fieldSchema,
   scope,
   currentValue,
@@ -27,6 +28,7 @@ export function PreviewProfileActions({
     saving: busy,
   } = useProfileMutations({
     fieldPath,
+    expectedTenantId,
     onProfileChange,
   });
 

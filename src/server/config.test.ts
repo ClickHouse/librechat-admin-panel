@@ -22,6 +22,7 @@ import {
   getEnumOptions,
   getArrayItemType,
   splitUnionTypes,
+  buildSavePayload,
 } from '@/components/configuration/utils';
 
 interface ZodV3Schema extends t.ZodSchemaLike {
@@ -68,6 +69,50 @@ interface ZodV3Module {
 const require3 = createRequire(import.meta.url);
 const ldpPath = require3.resolve('librechat-data-provider');
 const z3 = require3(require3.resolve('zod', { paths: [ldpPath] })) as ZodV3Module;
+
+it('accepts the normalized MCP remove/recreate payload at the panel save boundary', () => {
+  const edits: t.FlatConfigMap = {
+    'mcpServers.remote': undefined,
+    'mcpServers.remote.type': 'sse',
+    'mcpServers.remote.url': 'https://new.example.com',
+  };
+  const { saves, resets } = buildSavePayload(
+    new Set(Object.keys(edits)),
+    edits,
+    new Set(),
+    new Set(),
+  );
+  expect(resets).toEqual([]);
+  expect(saves).toHaveLength(1);
+  expect(validateFieldValue(saves[0].fieldPath, saves[0].value)).toEqual({ success: true });
+  expect(saves[0].value).toMatchObject({
+    headers: { __previousIdentity: null },
+    oauth_headers: { __previousIdentity: null },
+  });
+});
+
+it.each(['headers', 'oauth_headers'])(
+  'validates MCP %s values without treating identity metadata as a header',
+  (container) => {
+    expect(
+      validateFieldValue(`mcpServers.remote.${container}`, {
+        __previousIdentity: null,
+        Authorization: 'new-token',
+      }),
+    ).toEqual({ success: true });
+    expect(
+      validateFieldValue(`mcpServers.remote.${container}`, {
+        __previousIdentity: null,
+        Authorization: null,
+      }).success,
+    ).toBe(false);
+    expect(
+      validateFieldValue(`mcpServers.remote.${container}`, {
+        __previousIdentity: 123,
+      }).success,
+    ).toBe(false);
+  },
+);
 
 function findField(fields: t.SchemaField[], key: string): t.SchemaField | undefined {
   for (const f of fields) {

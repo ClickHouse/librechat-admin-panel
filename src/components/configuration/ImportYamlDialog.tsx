@@ -10,6 +10,7 @@ import { cn } from '@/utils';
 
 export function ImportYamlDialog({
   open,
+  expectedTenantId,
   onClose,
   onImport,
   onImportAsProfile,
@@ -34,7 +35,7 @@ export function ImportYamlDialog({
   const [newScopeName, setNewScopeName] = useState('');
 
   const { data: allScopes = [] } = useQuery({
-    ...availableScopesOptions,
+    ...availableScopesOptions(expectedTenantId),
     enabled: open && step === 'target',
   });
 
@@ -146,7 +147,7 @@ export function ImportYamlDialog({
         const name = newScopeName.trim();
 
         if (newScopeType === PrincipalType.ROLE) {
-          const { role } = await createRoleFn({ data: { name } });
+          const { role } = await createRoleFn({ data: { name, expectedTenantId } });
           scope = {
             principalType: PrincipalType.ROLE,
             principalId: role.id,
@@ -155,7 +156,9 @@ export function ImportYamlDialog({
             isActive: true,
           };
         } else {
-          const { group } = await createGroupFn({ data: { name, description: '' } });
+          const { group } = await createGroupFn({
+            data: { name, description: '', expectedTenantId },
+          });
           scope = {
             principalType: PrincipalType.GROUP,
             principalId: group.id,

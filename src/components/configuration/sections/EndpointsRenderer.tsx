@@ -20,12 +20,12 @@ import type { ReactNode } from 'react';
 import type * as t from '@/types';
 import { FieldRenderer, NestedGroup, renderInlineField } from '../FieldRenderer';
 import { CreateCustomEndpointDialog } from './CreateCustomEndpointDialog';
+import { cn, stripUntouchedSecretRecordContainers } from '@/utils';
 import { useCollapsibleSection } from '../useCollapsibleSection';
 import { ArrayObjectField } from '../fields/ArrayObjectField';
 import { countConfigured, hasDescendant } from '../utils';
 import { renderCollapsible } from '../renderCollapsible';
 import { useLocalize } from '@/hooks';
-import { cn } from '@/utils';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -629,9 +629,24 @@ export function CustomEndpointsRenderer(props: t.FieldRendererProps) {
       : {};
   const value = getValue(path, parentObj[customField.key] ?? []);
   const items = Array.isArray(value) ? value : [];
+  const existingNames = new Set(
+    items
+      .map((item) =>
+        item && typeof item === 'object' && !Array.isArray(item)
+          ? (item as Record<string, t.ConfigValue>).name
+          : undefined,
+      )
+      .filter((name): name is string => typeof name === 'string' && name !== ''),
+  );
 
   const handleCreate = (entry: Record<string, t.ConfigValue>) => {
-    onChange(path, [...items, entry]);
+    // Surviving entries are copied forward verbatim by this structural add —
+    // strip any redacted credential-record placeholder left on them by a
+    // read, or resubmitting it here would erase that entry's real secret.
+    const strippedItems = items.map((item) =>
+      stripUntouchedSecretRecordContainers(item, customField.children ?? []),
+    );
+    onChange(path, [...strippedItems, entry]);
   };
 
   const isEmpty = items.length === 0;
@@ -652,6 +667,10 @@ export function CustomEndpointsRenderer(props: t.FieldRendererProps) {
         </div>
       ) : (
         <ArrayObjectField
+          // Forces a full remount at a session boundary (save/reset/restore/
+          // discard/rebase) so the rename-origin cache never survives across
+          // it — see the doc comment on ArrayObjectField's originalIdentityRef.
+          key={editSessionId}
           id={`${path.replace(/\./g, '-')}`}
           value={value}
           fields={customField.children ?? []}
@@ -662,6 +681,7 @@ export function CustomEndpointsRenderer(props: t.FieldRendererProps) {
           renderFields={renderGroupedEndpointFields}
           entryIdPrefix={`section-${path.split('.')[0]}-custom`}
           editSessionId={editSessionId}
+          identityKey="name"
         />
       )}
       <CreateCustomEndpointDialog
@@ -670,6 +690,7 @@ export function CustomEndpointsRenderer(props: t.FieldRendererProps) {
         onSave={handleCreate}
         fields={customField.children ?? []}
         renderFields={renderGroupedEndpointFields}
+        existingNames={existingNames}
       />
     </div>
   );

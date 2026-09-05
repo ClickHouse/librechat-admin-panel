@@ -9,14 +9,14 @@ import {
   EmptyState,
   TrashButton,
 } from '@/components/shared';
-import { deleteRoleFn, allRolesQueryOptions, ROLES_PAGE_SIZE } from '@/server';
+import { deleteRoleFn, allRolesQueryOptions, tenantQueryKeys, ROLES_PAGE_SIZE } from '@/server';
 import { useCapabilities, useLocalize } from '@/hooks';
 import { notifySuccess, notifyError } from '@/utils';
 import { EditRoleDialog } from './EditRoleDialog';
 import { SystemCapabilities } from '@/constants';
 import { ConfirmDialog } from './ConfirmDialog';
 
-export function RolesTab({ onCreateRole }: t.RolesTabProps) {
+export function RolesTab({ onCreateRole, expectedTenantId }: t.RolesTabProps) {
   const localize = useLocalize();
   const queryClient = useQueryClient();
   const { hasCapability } = useCapabilities();
@@ -26,7 +26,11 @@ export function RolesTab({ onCreateRole }: t.RolesTabProps) {
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
 
-  const { data: allRoles = [], isLoading, isError } = useQuery(allRolesQueryOptions);
+  const {
+    data: allRoles = [],
+    isLoading,
+    isError,
+  } = useQuery(allRolesQueryOptions(expectedTenantId));
 
   const filtered = useMemo(() => {
     if (!search) return allRoles;
@@ -48,12 +52,16 @@ export function RolesTab({ onCreateRole }: t.RolesTabProps) {
   };
 
   const deleteMutation = useMutation({
-    mutationFn: (role: t.Role) => deleteRoleFn({ data: { id: role.id } }),
+    mutationFn: (role: t.Role) => deleteRoleFn({ data: { id: role.id, expectedTenantId } }),
     onSuccess: (_data, role) => {
-      queryClient.invalidateQueries({ queryKey: ['roles'] });
-      queryClient.invalidateQueries({ queryKey: ['availableScopes'] });
-      queryClient.invalidateQueries({ queryKey: ['roleAssignments'] });
-      queryClient.invalidateQueries({ queryKey: ['roleMembers'] });
+      queryClient.invalidateQueries({ queryKey: tenantQueryKeys.roles(expectedTenantId) });
+      queryClient.invalidateQueries({
+        queryKey: tenantQueryKeys.availableScopes(expectedTenantId),
+      });
+      queryClient.invalidateQueries({
+        queryKey: tenantQueryKeys.roleAssignments(expectedTenantId),
+      });
+      queryClient.invalidateQueries({ queryKey: tenantQueryKeys.roleMembers(expectedTenantId) });
       notifySuccess(localize('com_toast_role_deleted', { name: role.name }));
       setDeleteTarget(null);
       if (paged.length === 1) {
@@ -144,6 +152,7 @@ export function RolesTab({ onCreateRole }: t.RolesTabProps) {
         key={editTarget?.id}
         role={editTarget}
         canManage={canManage}
+        expectedTenantId={expectedTenantId}
         onClose={() => setEditTarget(null)}
       />
 

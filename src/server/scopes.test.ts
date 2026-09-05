@@ -1,7 +1,7 @@
 import { PrincipalType } from 'librechat-data-provider';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const apiFetchMock = vi.fn(async (url: string) => {
+const apiFetchMock = vi.fn(async (url: string, _init?: RequestInit, _expectedTenantId?: string) => {
   if (url === '/api/admin/config/base') {
     return {
       ok: true,
@@ -55,10 +55,11 @@ const apiFetchMock = vi.fn(async (url: string) => {
     json: async () => ({ config: { overrides: {} } }),
   };
 });
-const requireAnyCapabilityMock = vi.fn(async () => undefined);
+const requireAnyCapabilityMock = vi.fn(async (..._args: unknown[]) => undefined);
 
 vi.mock('./utils/api', () => ({
-  apiFetch: (url: string) => apiFetchMock(url),
+  apiFetch: (url: string, init?: RequestInit, expectedTenantId?: string) =>
+    apiFetchMock(url, init, expectedTenantId),
 }));
 
 vi.mock('./capabilities', () => ({
@@ -80,6 +81,8 @@ vi.mock('@tanstack/react-query', () => ({
 }));
 
 import {
+  availableScopesOptions,
+  bulkSaveProfileValuesFn,
   mergeIndexedArrayEntriesForScope,
   removeFieldProfileValueFn,
   tombstoneFieldProfileValueFn,
@@ -91,12 +94,17 @@ beforeEach(() => {
 
 describe('mergeIndexedArrayEntriesForScope', () => {
   it('writes only the scope-owned keyed entry without pinning inherited base endpoints', async () => {
-    const result = await mergeIndexedArrayEntriesForScope(PrincipalType.ROLE, 'ADMIN', [
-      {
-        fieldPath: 'endpoints.custom.1',
-        value: { name: 'second', baseURL: 'https://edited.example.com', apiKey: '' },
-      },
-    ]);
+    const result = await mergeIndexedArrayEntriesForScope(
+      PrincipalType.ROLE,
+      'ADMIN',
+      [
+        {
+          fieldPath: 'endpoints.custom.1',
+          value: { name: 'second', baseURL: 'https://edited.example.com', apiKey: '' },
+        },
+      ],
+      'tenant-a',
+    );
 
     // Explicit empty-string credentials on an edited entry are preserved (not
     // reverted by retention). Base-only endpoints must not be pinned into scope.
@@ -112,15 +120,21 @@ describe('mergeIndexedArrayEntriesForScope', () => {
         ],
       },
     ]);
+    expect(apiFetchMock).toHaveBeenCalledWith(expect.any(String), undefined, 'tenant-a');
   });
 
   it('preserves omitted scope secrets when editing by effective index', async () => {
-    const result = await mergeIndexedArrayEntriesForScope(PrincipalType.ROLE, 'ADMIN', [
-      {
-        fieldPath: 'endpoints.custom.1',
-        value: { name: 'second', baseURL: 'https://edited.example.com' },
-      },
-    ]);
+    const result = await mergeIndexedArrayEntriesForScope(
+      PrincipalType.ROLE,
+      'ADMIN',
+      [
+        {
+          fieldPath: 'endpoints.custom.1',
+          value: { name: 'second', baseURL: 'https://edited.example.com' },
+        },
+      ],
+      'tenant-a',
+    );
 
     expect(result).toEqual([
       {
@@ -138,13 +152,49 @@ describe('mergeIndexedArrayEntriesForScope', () => {
 
   it('rejects out-of-range indexes against the keyed effective array, not the raw scope overlay', async () => {
     await expect(
-      mergeIndexedArrayEntriesForScope(PrincipalType.ROLE, 'ADMIN', [
-        {
-          fieldPath: 'endpoints.custom.3',
-          value: { name: 'too-far', baseURL: 'https://x.example.com' },
-        },
-      ]),
+      mergeIndexedArrayEntriesForScope(
+        PrincipalType.ROLE,
+        'ADMIN',
+        [
+          {
+            fieldPath: 'endpoints.custom.3',
+            value: { name: 'too-far', baseURL: 'https://x.example.com' },
+          },
+        ],
+        'tenant-a',
+      ),
     ).rejects.toThrow(/out of range for array of length 3/);
+  });
+});
+
+describe('tenant fencing', () => {
+  it('partitions scope caches and forwards the frozen tenant on mutations', async () => {
+    expect(availableScopesOptions('tenant-a').queryKey).toEqual(['availableScopes', 'tenant-a']);
+    expect(availableScopesOptions('tenant-b').queryKey).toEqual(['availableScopes', 'tenant-b']);
+
+    const save = bulkSaveProfileValuesFn as unknown as (args: {
+      data: {
+        principalType: PrincipalType;
+        principalId: string;
+        expectedTenantId: string;
+        entries: Array<{ fieldPath: string; value: unknown }>;
+      };
+    }) => Promise<{ success: true; count: number }>;
+
+    await save({
+      data: {
+        principalType: PrincipalType.ROLE,
+        principalId: 'ADMIN',
+        expectedTenantId: 'tenant-a',
+        entries: [{ fieldPath: 'cache', value: false }],
+      },
+    });
+
+    expect(apiFetchMock).toHaveBeenCalledWith(
+      '/api/admin/config/role/ADMIN/fields',
+      expect.objectContaining({ method: 'PATCH' }),
+      'tenant-a',
+    );
   });
 });
 
@@ -152,6 +202,7 @@ describe('scope reset path validation', () => {
   const resetData = {
     principalType: PrincipalType.ROLE,
     principalId: 'ADMIN',
+    expectedTenantId: 'tenant-a',
   };
 
   it('rejects terminal indexed removals before authorization and API access', async () => {

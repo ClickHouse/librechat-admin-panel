@@ -4,7 +4,8 @@ const apiFetchMock = vi.fn();
 const requireAllSectionCapabilitiesMock = vi.fn();
 
 vi.mock('./utils/api', () => ({
-  apiFetch: (path: string, init?: RequestInit) => apiFetchMock(path, init),
+  apiFetch: (path: string, init?: RequestInit, expectedTenantId?: string) =>
+    apiFetchMock(path, init, expectedTenantId),
   extractApiError: vi.fn(async (_response: Response, message: string) => {
     throw new Error(message);
   }),
@@ -34,10 +35,13 @@ import {
 const status = {
   configured: true,
   enabled: true,
+  configActive: true,
   destinations: [{ key: 'eu', baseUrl: 'https://cloud.langfuse.com' }],
   destination: 'eu',
   publicKey: 'pk-lf-public',
-  displaySecretKey: 'sk-lf-...515f',
+  secretKeyPreview: 'sk-lf-...515f',
+  configVersion: 5,
+  effectiveTenantId: 'tenant-a',
 };
 
 beforeEach(() => {
@@ -49,20 +53,51 @@ describe('Langfuse connection server functions', () => {
   it('reads connection status through LibreChat', async () => {
     apiFetchMock.mockResolvedValue(new Response(JSON.stringify(status), { status: 200 }));
 
-    await expect(getLangfuseConnectionFn()).resolves.toEqual(status);
+    await expect(
+      getLangfuseConnectionFn({ data: { expectedTenantId: 'tenant-a' } }),
+    ).resolves.toEqual(status);
     expect(requireAllSectionCapabilitiesMock).toHaveBeenCalledWith(['langfuse']);
-    expect(apiFetchMock).toHaveBeenCalledWith('/api/admin/langfuse/connection', undefined);
+    expect(apiFetchMock).toHaveBeenCalledWith(
+      '/api/admin/langfuse/connection',
+      undefined,
+      'tenant-a',
+    );
   });
 
   it('updates the connection without exposing or reconstructing a stored secret', async () => {
     apiFetchMock.mockResolvedValue(new Response(JSON.stringify(status), { status: 200 }));
-    const data = { enabled: false, destination: 'eu', publicKey: 'pk-lf-public' };
+    const data = {
+      enabled: false,
+      destination: 'eu',
+      publicKey: 'pk-lf-public',
+      expectedVersion: 5,
+      expectedTenantId: 'tenant-a',
+    };
 
     await expect(updateLangfuseConnectionFn({ data })).resolves.toEqual(status);
     expect(requireAllSectionCapabilitiesMock).toHaveBeenCalledWith(['langfuse']);
-    expect(apiFetchMock).toHaveBeenCalledWith('/api/admin/langfuse/connection', {
-      method: 'PUT',
-      body: JSON.stringify(data),
+    expect(apiFetchMock).toHaveBeenCalledWith(
+      '/api/admin/langfuse/connection',
+      {
+        method: 'PUT',
+        body: JSON.stringify(data),
+      },
+      'tenant-a',
+    );
+  });
+
+  it('throws a version conflict error when another admin changed the connection first', async () => {
+    apiFetchMock.mockResolvedValue(new Response(JSON.stringify({}), { status: 409 }));
+    const data = {
+      enabled: false,
+      destination: 'eu',
+      publicKey: 'pk-lf-public',
+      expectedVersion: 5,
+      expectedTenantId: 'tenant-a',
+    };
+
+    await expect(updateLangfuseConnectionFn({ data })).rejects.toMatchObject({
+      name: 'ConfigVersionConflictError',
     });
   });
 
@@ -72,16 +107,25 @@ describe('Langfuse connection server functions', () => {
         status: 200,
       }),
     );
-    const data = { destination: 'eu', publicKey: 'pk-lf-public', secretKey: 'sk-lf-secret' };
+    const data = {
+      destination: 'eu',
+      publicKey: 'pk-lf-public',
+      secretKey: 'sk-lf-secret',
+      expectedTenantId: 'tenant-a',
+    };
 
     await expect(testLangfuseConnectionFn({ data })).resolves.toEqual({
       success: false,
       message: 'Langfuse rejected these keys',
     });
     expect(requireAllSectionCapabilitiesMock).toHaveBeenCalledWith(['langfuse']);
-    expect(apiFetchMock).toHaveBeenCalledWith('/api/admin/langfuse/connection/test', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
+    expect(apiFetchMock).toHaveBeenCalledWith(
+      '/api/admin/langfuse/connection/test',
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      },
+      'tenant-a',
+    );
   });
 });

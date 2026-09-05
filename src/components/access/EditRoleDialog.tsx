@@ -8,6 +8,7 @@ import {
   removeRoleMemberFn,
   roleQueryOptions,
   roleMembersQueryOptions,
+  tenantQueryKeys,
   updateRoleFn,
   updateRolePermissionsFn,
   MEMBERS_PAGE_SIZE,
@@ -26,7 +27,12 @@ import { useLocalize } from '@/hooks';
 
 type EditRoleTab = 'details' | 'permissions' | 'members';
 
-export function EditRoleDialog({ role, canManage, onClose }: t.EditRoleDialogProps) {
+export function EditRoleDialog({
+  role,
+  canManage,
+  expectedTenantId,
+  onClose,
+}: t.EditRoleDialogProps) {
   const localize = useLocalize();
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<EditRoleTab>('details');
@@ -40,7 +46,7 @@ export function EditRoleDialog({ role, canManage, onClose }: t.EditRoleDialogPro
   const [pendingRemovals, setPendingRemovals] = useState<AdminMember[]>([]);
 
   const roleDetail = useQuery({
-    ...roleQueryOptions(role?.id ?? ''),
+    ...roleQueryOptions(role?.id ?? '', expectedTenantId),
     enabled: !!role,
   });
 
@@ -51,7 +57,7 @@ export function EditRoleDialog({ role, canManage, onClose }: t.EditRoleDialogPro
   }, [roleDetail.data, permissions]);
 
   const membersQuery = useQuery({
-    ...roleMembersQueryOptions(role?.id ?? '', page),
+    ...roleMembersQueryOptions(role?.id ?? '', expectedTenantId, page),
     placeholderData: keepPreviousData,
     enabled: !!role,
   });
@@ -100,13 +106,13 @@ export function EditRoleDialog({ role, canManage, onClose }: t.EditRoleDialogPro
       let roleId = role.id;
       if (detailsDirty) {
         const result = await updateRoleFn({
-          data: { id: role.id, name: submittedName, description },
+          data: { id: role.id, name: submittedName, description, expectedTenantId },
         });
         roleId = result.role.id;
       }
       if (permissionsDirty && permissions) {
         try {
-          await updateRolePermissionsFn({ data: { id: roleId, permissions } });
+          await updateRolePermissionsFn({ data: { id: roleId, permissions, expectedTenantId } });
         } catch (err) {
           if (detailsDirty) {
             throw new Error(
@@ -119,9 +125,13 @@ export function EditRoleDialog({ role, canManage, onClose }: t.EditRoleDialogPro
         }
       }
       const memberResults = await Promise.allSettled([
-        ...pendingAdditions.map((user) => addRoleMemberFn({ data: { roleId, userId: user.id } })),
+        ...pendingAdditions.map((user) =>
+          addRoleMemberFn({ data: { roleId, userId: user.id, expectedTenantId } }),
+        ),
         ...pendingRemovals.map((member) =>
-          removeRoleMemberFn({ data: { roleId, userId: member.userId } }),
+          removeRoleMemberFn({
+            data: { roleId, userId: member.userId, expectedTenantId },
+          }),
         ),
       ]);
       const failures = memberResults.filter(
@@ -137,15 +147,29 @@ export function EditRoleDialog({ role, canManage, onClose }: t.EditRoleDialogPro
       return { roleId, name: submittedName };
     },
     onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ['roles'] });
-      queryClient.invalidateQueries({ queryKey: ['role', role?.id] });
-      if (data.roleId !== role?.id) {
-        queryClient.invalidateQueries({ queryKey: ['role', data.roleId] });
+      queryClient.invalidateQueries({ queryKey: tenantQueryKeys.roles(expectedTenantId) });
+      if (role) {
+        queryClient.invalidateQueries({
+          queryKey: tenantQueryKeys.roleDetail(expectedTenantId, role.id),
+        });
       }
-      queryClient.invalidateQueries({ queryKey: ['roleAssignments'] });
-      queryClient.invalidateQueries({ queryKey: ['roleMembers', role?.id] });
       if (data.roleId !== role?.id) {
-        queryClient.invalidateQueries({ queryKey: ['roleMembers', data.roleId] });
+        queryClient.invalidateQueries({
+          queryKey: tenantQueryKeys.roleDetail(expectedTenantId, data.roleId),
+        });
+      }
+      queryClient.invalidateQueries({
+        queryKey: tenantQueryKeys.roleAssignments(expectedTenantId),
+      });
+      if (role) {
+        queryClient.invalidateQueries({
+          queryKey: tenantQueryKeys.roleMemberList(expectedTenantId, role.id),
+        });
+      }
+      if (data.roleId !== role?.id) {
+        queryClient.invalidateQueries({
+          queryKey: tenantQueryKeys.roleMemberList(expectedTenantId, data.roleId),
+        });
       }
       notifySuccess(localize('com_toast_role_updated', { name: data.name }));
       onClose();
@@ -292,6 +316,7 @@ export function EditRoleDialog({ role, canManage, onClose }: t.EditRoleDialogPro
                   <UserSearchInline
                     existingIds={existingIds}
                     onAdd={addUser}
+                    expectedTenantId={expectedTenantId}
                     listboxId="edit-role-member-search"
                     disabled={updateMutation.isPending}
                   />

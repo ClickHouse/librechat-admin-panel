@@ -9,8 +9,8 @@ import type { AdminGroup } from '@librechat/data-schemas';
 import type * as t from '@/types';
 import {
   availableScopesOptions,
-  allRolesQueryOptions,
-  allGroupsQueryOptions,
+  allRolesForTenantQueryOptions,
+  allGroupsForTenantQueryOptions,
   createScopeFn,
   deleteScopeFn,
 } from '@/server';
@@ -22,6 +22,7 @@ import { cn } from '@/utils';
 
 export function ScopeSelector({
   open,
+  expectedTenantId,
   onOpenChange,
   currentSelection,
   onSelect,
@@ -38,17 +39,17 @@ export function ScopeSelector({
   const listRef = useRef<HTMLDivElement>(null);
 
   const { data: scopes = [], isLoading: loading } = useQuery({
-    ...availableScopesOptions,
+    ...availableScopesOptions(expectedTenantId),
     enabled: open,
   });
 
   const { data: allRoles = [] } = useQuery({
-    ...allRolesQueryOptions,
+    ...allRolesForTenantQueryOptions(expectedTenantId),
     enabled: open && showCreate,
   });
 
   const { data: allGroups = [] } = useQuery({
-    ...allGroupsQueryOptions,
+    ...allGroupsForTenantQueryOptions(expectedTenantId),
     enabled: open && showCreate,
   });
 
@@ -119,6 +120,7 @@ export function ScopeSelector({
             name: role.name,
             priority: 10,
             principalId: role.id,
+            expectedTenantId,
           },
         });
         await queryClient.invalidateQueries({ queryKey: ['availableScopes'] });
@@ -128,7 +130,7 @@ export function ScopeSelector({
         onError?.(err instanceof Error ? err.message : localize('com_scope_create_error'));
       }
     },
-    [creating, queryClient, resetState, onError, localize],
+    [creating, expectedTenantId, queryClient, resetState, onError, localize],
   );
 
   const handleCreateForGroup = useCallback(
@@ -142,6 +144,7 @@ export function ScopeSelector({
             name: group.name,
             priority: 20,
             principalId: group.id,
+            expectedTenantId,
           },
         });
         await queryClient.invalidateQueries({ queryKey: ['availableScopes'] });
@@ -151,7 +154,7 @@ export function ScopeSelector({
         onError?.(err instanceof Error ? err.message : localize('com_scope_create_error'));
       }
     },
-    [creating, queryClient, resetState, onError, localize],
+    [creating, expectedTenantId, queryClient, resetState, onError, localize],
   );
 
   const handleDelete = useCallback(async () => {
@@ -162,6 +165,7 @@ export function ScopeSelector({
         data: {
           principalType: deleteTarget.principalType,
           principalId: deleteTarget.principalId,
+          expectedTenantId,
         },
       });
       await queryClient.invalidateQueries({ queryKey: ['availableScopes'] });
@@ -178,7 +182,16 @@ export function ScopeSelector({
       setDeleting(false);
       onError?.(err instanceof Error ? err.message : localize('com_scope_delete_error'));
     }
-  }, [deleteTarget, deleting, queryClient, currentSelection, onSelect, onError, localize]);
+  }, [
+    deleteTarget,
+    deleting,
+    expectedTenantId,
+    queryClient,
+    currentSelection,
+    onSelect,
+    onError,
+    localize,
+  ]);
 
   const roleScopes = useMemo(
     () => scopes.filter((s) => s.principalType === PrincipalType.ROLE),

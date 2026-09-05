@@ -14,6 +14,7 @@ import { getControlType } from './utils';
 export function FieldProfilePopover({
   fieldPath,
   fieldLabel,
+  expectedTenantId,
   fieldSchema,
   profileValues,
   permissions,
@@ -26,7 +27,7 @@ export function FieldProfilePopover({
   const [selectedAddScope, setSelectedAddScope] = useState<t.ConfigScope | null>(null);
   const [deleteScope, setDeleteScope] = useState<t.ConfigScope | null>(null);
 
-  const { data: allScopes = [] } = useQuery(availableScopesOptions);
+  const { data: allScopes = [] } = useQuery(availableScopesOptions(expectedTenantId));
 
   const availableScopes = useMemo(() => {
     const existingKeys = new Set(
@@ -47,6 +48,7 @@ export function FieldProfilePopover({
 
   const { saveMutation, removeMutation, saving } = useProfileMutations({
     fieldPath,
+    expectedTenantId,
     onProfileChange,
   });
 
@@ -71,7 +73,7 @@ export function FieldProfilePopover({
 
   const handleModalSave = useCallback(() => {
     if (modalIsBase && onBaseValueChange) {
-      onBaseValueChange(serializeKVPairs(modalValue));
+      onBaseValueChange(serializeKVPairs(modalValue, fieldPath));
       setModalOpen(false);
       setModalIsBase(false);
       return;
@@ -81,7 +83,7 @@ export function FieldProfilePopover({
       {
         principalType: modalScope.principalType,
         principalId: modalScope.principalId,
-        value: serializeKVPairs(modalValue),
+        value: serializeKVPairs(modalValue, fieldPath),
       },
       {
         onSuccess: () => {
@@ -94,7 +96,7 @@ export function FieldProfilePopover({
         },
       },
     );
-  }, [modalIsBase, modalScope, modalValue, modalMode, saveMutation, onBaseValueChange]);
+  }, [modalIsBase, modalScope, modalValue, modalMode, saveMutation, onBaseValueChange, fieldPath]);
 
   const handleModalCancel = useCallback(() => {
     setModalOpen(false);

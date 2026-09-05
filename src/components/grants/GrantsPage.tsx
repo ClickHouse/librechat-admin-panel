@@ -7,7 +7,7 @@ import { AuditLogTab } from './AuditLogTab';
 
 export function GrantsPage({ activeTab, onTabChange }: t.GrantsPageProps) {
   const localize = useLocalize();
-  const { hasCapability } = useCapabilities();
+  const { hasCapability, effectiveTenantId } = useCapabilities();
   const canReadAuditLog = hasCapability(READ_AUDIT_LOG_CAPABILITY);
   /** A stale `?tab=audit-log` URL from a previous session shouldn't strand a user
    * with revoked audit access on an empty page — silently render management
@@ -21,7 +21,11 @@ export function GrantsPage({ activeTab, onTabChange }: t.GrantsPageProps) {
       aria-label={localize('com_grants_title')}
       className="flex min-h-0 flex-1 flex-col overflow-hidden px-4 pt-2"
     >
-      <Tabs value={resolvedTab} onValueChange={onTabChange} ariaLabel={localize('com_grants_title')}>
+      <Tabs
+        value={resolvedTab}
+        onValueChange={onTabChange}
+        ariaLabel={localize('com_grants_title')}
+      >
         <Tabs.TriggersList>
           <Tabs.Trigger value="management">{localize('com_grants_tab_management')}</Tabs.Trigger>
           {canReadAuditLog && (
@@ -33,8 +37,12 @@ export function GrantsPage({ activeTab, onTabChange }: t.GrantsPageProps) {
       </Tabs>
 
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden pt-3">
-        {resolvedTab === 'management' && <GrantManagementTab />}
-        {resolvedTab === 'audit-log' && canReadAuditLog && <AuditLogTab />}
+        {resolvedTab === 'management' && (
+          <GrantManagementTab expectedTenantId={effectiveTenantId} />
+        )}
+        {resolvedTab === 'audit-log' && canReadAuditLog && (
+          <AuditLogTab expectedTenantId={effectiveTenantId} />
+        )}
       </div>
     </div>
   );

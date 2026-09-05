@@ -23,6 +23,7 @@ import { ListRecordField } from './fields/ListRecordField';
 import { renderCollapsible } from './renderCollapsible';
 import { TextareaField } from './fields/TextareaField';
 import { KeyValueField } from './fields/KeyValueField';
+import { cn, getSecretPreviewValue } from '@/utils';
 import { NumberField } from './fields/NumberField';
 import { SecretField } from './fields/SecretField';
 import { ToggleField } from './fields/ToggleField';
@@ -32,7 +33,17 @@ import { ListField } from './fields/ListField';
 import { CodeField } from './fields/CodeField';
 import { ConfigRow } from './ConfigRow';
 import { useLocalize } from '@/hooks';
-import { cn, getSecretPreviewValue } from '@/utils';
+
+/**
+ * Array-of-object schema paths whose items carry a stable identity field used
+ * for encrypted-credential preservation on the backend (`endpoints.custom` is
+ * wired directly in its own dedicated renderer). Lets `ArrayObjectField`
+ * attach a pre-edit identity hint so renaming the field doesn't strand the
+ * entry's apiKey/headers — see `ArrayObjectField`'s `identityKey` prop.
+ */
+const ARRAY_SECRET_IDENTITY_KEYS: Record<string, string> = {
+  'endpoints.azureOpenAI.groups': 'group',
+};
 
 function formatDefault(value: t.ConfigValue): string | null {
   if (value === undefined || value === null) return null;
@@ -68,6 +79,7 @@ function ArrayObjectNestedGroup({
   const items = Array.isArray(currentValue) ? currentValue : [];
   const addTriggerRef = useRef<(() => void) | null>(null);
   const handleAdd = disabled ? undefined : () => addTriggerRef.current?.();
+  const identityKey = ARRAY_SECRET_IDENTITY_KEYS[field.path];
 
   const handleEntryChange = useCallback(
     (index: number, value: t.ConfigValue) => onChange(`${path}.${index}`, value),
@@ -76,6 +88,12 @@ function ArrayObjectNestedGroup({
 
   const arrayField = (
     <ArrayObjectField
+      // Forces a full remount at a session boundary for array-secret paths
+      // only, so the rename-origin cache never survives across it — see the
+      // doc comment on ArrayObjectField's originalIdentityRef. Fields
+      // without an identityKey have no such cache and remount unnecessarily
+      // otherwise, losing expand state on every save for no benefit.
+      key={identityKey ? editSessionId : undefined}
       id={fieldId}
       value={currentValue}
       fields={field.children ?? []}
@@ -86,6 +104,7 @@ function ArrayObjectNestedGroup({
       addTriggerRef={addTriggerRef}
       renderFields={renderCollectionEntryFields}
       editSessionId={editSessionId}
+      identityKey={identityKey}
     />
   );
   if (isSoleField) return arrayField;
@@ -481,6 +500,7 @@ export function SingleFieldRenderer({
           disabled={disabled}
           valueTypes={field.recordValueKVTypes}
           aria-label={fieldLabel}
+          fieldPath={path}
         />
       </ConfigRow>
     );
@@ -1225,6 +1245,7 @@ export function renderInlineField(
           disabled={disabled}
           valueTypes={field.recordValueKVTypes}
           aria-label={fieldLabel}
+          fieldPath={`${parentPath}.${field.key}`}
         />
       </InlineRow>
     );

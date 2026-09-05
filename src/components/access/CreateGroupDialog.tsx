@@ -3,12 +3,12 @@ import { Button, Dialog, Tabs } from '@clickhouse/click-ui';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import type { AdminUserSearchResult } from '@librechat/data-schemas';
 import type * as t from '@/types';
+import { addGroupMemberFn, createGroupFn, tenantQueryKeys } from '@/server';
 import { SelectedMemberList, UserSearchInline } from '@/components/shared';
-import { addGroupMemberFn, createGroupFn } from '@/server';
 import { cn, notifySuccess, notifyError } from '@/utils';
 import { useLocalize } from '@/hooks';
 
-export function CreateGroupDialog({ open, onClose }: t.CreateGroupDialogProps) {
+export function CreateGroupDialog({ open, expectedTenantId, onClose }: t.CreateGroupDialogProps) {
   const localize = useLocalize();
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<t.CreateGroupTab>('details');
@@ -29,18 +29,24 @@ export function CreateGroupDialog({ open, onClose }: t.CreateGroupDialogProps) {
   const mutation = useMutation({
     mutationFn: async ({ name: submittedName }: { name: string }) => {
       const { group } = await createGroupFn({
-        data: { name: submittedName, description },
+        data: { name: submittedName, description, expectedTenantId },
       });
       for (const user of selectedUsers) {
-        await addGroupMemberFn({ data: { groupId: group.id, userId: user.id } });
+        await addGroupMemberFn({
+          data: { groupId: group.id, userId: user.id, expectedTenantId },
+        });
       }
       return { name: submittedName };
     },
     onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ['groups'] });
-      queryClient.invalidateQueries({ queryKey: ['groupMembers'] });
-      queryClient.invalidateQueries({ queryKey: ['availableScopes'] });
-      queryClient.invalidateQueries({ queryKey: ['groupAssignments'] });
+      queryClient.invalidateQueries({ queryKey: tenantQueryKeys.groups(expectedTenantId) });
+      queryClient.invalidateQueries({ queryKey: tenantQueryKeys.groupMembers(expectedTenantId) });
+      queryClient.invalidateQueries({
+        queryKey: tenantQueryKeys.availableScopes(expectedTenantId),
+      });
+      queryClient.invalidateQueries({
+        queryKey: tenantQueryKeys.groupAssignments(expectedTenantId),
+      });
       notifySuccess(localize('com_toast_group_created', { name: data.name }));
       resetAndClose();
     },
@@ -148,6 +154,7 @@ export function CreateGroupDialog({ open, onClose }: t.CreateGroupDialogProps) {
                 <UserSearchInline
                   existingIds={selectedUsers.map((u) => u.id)}
                   onAdd={addUser}
+                  expectedTenantId={expectedTenantId}
                   listboxId="create-group-member-results"
                   disabled={mutation.isPending}
                 />

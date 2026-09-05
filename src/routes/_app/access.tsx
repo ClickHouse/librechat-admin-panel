@@ -23,7 +23,7 @@ export const Route = createFileRoute('/_app/access')({
 
 function AccessRoute() {
   const { tab } = Route.useSearch();
-  const { hasCapability, isLoading, isError } = useCapabilities();
+  const { hasCapability, effectiveTenantId, isLoading, isError } = useCapabilities();
   const navigate = useNavigate({ from: '/access' });
 
   if (isLoading) return null;
@@ -55,6 +55,7 @@ function AccessRoute() {
       onTabChange={handleTabChange}
       canReadRoles={canReadRoles}
       canReadGroups={canReadGroups}
+      expectedTenantId={effectiveTenantId}
     />
   );
 }

@@ -30,6 +30,20 @@ export interface AdminVerifyResponse {
   user: SerializableUser;
 }
 
+export interface EffectiveCapabilitiesResponse {
+  capabilities: string[];
+  effectiveTenantId: string;
+}
+
+export interface TenantChangedResponse {
+  currentTenantId: string;
+  tenantChanged: true;
+}
+
+export type TenantCapabilitiesResponse =
+  | (EffectiveCapabilitiesResponse & { tenantChanged: false })
+  | TenantChangedResponse;
+
 export interface OAuthExchangeResponse {
   token: string;
   refreshToken?: string;

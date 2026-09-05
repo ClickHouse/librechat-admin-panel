@@ -99,7 +99,7 @@ function downloadBlob(blob: Blob): void {
   setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
-export function AuditLogTab() {
+export function AuditLogTab({ expectedTenantId }: t.TenantScopedProps) {
   const localize = useLocalize();
   const navigate = useNavigate({ from: '/grants' });
   const { entryId } = useSearch({ from: '/_app/grants' });
@@ -174,7 +174,7 @@ export function AuditLogTab() {
   );
 
   const { data, isPending, isFetching, isError } = useQuery({
-    ...auditLogQueryOptions(currentPage, filters),
+    ...auditLogQueryOptions(expectedTenantId, currentPage, filters),
     placeholderData: keepPreviousData,
   });
 
@@ -271,7 +271,7 @@ export function AuditLogTab() {
   // the current page (older entries, or arriving via permalink with no filters
   // loaded yet). Skip the round-trip whenever the row is already in `pageEntries`.
   const entryFetch = useQuery({
-    ...auditLogEntryQueryOptions(entryId),
+    ...auditLogEntryQueryOptions(entryId, expectedTenantId),
     /** Keep the option's id-validity guard (a malformed `?entryId=` must not
      * reach the server fn) AND skip the round-trip when the row is on-page. */
     enabled: isAuditEntryId(entryId) && !entryOnPage,
@@ -314,7 +314,11 @@ export function AuditLogTab() {
         announce(localize('com_a11y_copy_failed'));
         return false;
       }
-      const url = buildEntryPermalink(id, window.location.origin, import.meta.env.VITE_BASE_PATH || '');
+      const url = buildEntryPermalink(
+        id,
+        window.location.origin,
+        import.meta.env.VITE_BASE_PATH || '',
+      );
       try {
         await navigator.clipboard.writeText(url);
         return true;
@@ -358,7 +362,9 @@ export function AuditLogTab() {
       );
       /** The server fn streams the backend CSV through as a `Response`; turn its
        * body into a Blob for the browser download (no BFF-side buffering). */
-      const response = await exportAuditLogServerFn({ data: exportFilters });
+      const response = await exportAuditLogServerFn({
+        data: { ...exportFilters, expectedTenantId },
+      });
       downloadBlob(await response.blob());
     } catch {
       /**
@@ -377,6 +383,7 @@ export function AuditLogTab() {
     actorIdFilter.value,
     targetIdFilter.value,
     capabilityFilter.value,
+    expectedTenantId,
     announce,
     localize,
   ]);

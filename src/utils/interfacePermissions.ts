@@ -1,7 +1,4 @@
-import {
-  INTERFACE_PERMISSION_FIELDS,
-  PERMISSION_SUB_KEYS,
-} from 'librechat-data-provider';
+import { INTERFACE_PERMISSION_FIELDS, PERMISSION_SUB_KEYS } from 'librechat-data-provider';
 import type { TInterfaceConfig } from 'librechat-data-provider';
 import type * as t from '@/types';
 

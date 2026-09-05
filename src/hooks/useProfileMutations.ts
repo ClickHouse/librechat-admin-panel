@@ -8,6 +8,7 @@ import { useLocalize } from './useLocalize';
 
 export function useProfileMutations({
   fieldPath,
+  expectedTenantId,
   onProfileChange,
 }: t.UseProfileMutationsOptions): t.UseProfileMutationsReturn {
   const queryClient = useQueryClient();
@@ -22,7 +23,7 @@ export function useProfileMutations({
 
   const saveMutation = useMutation({
     mutationFn: (params: { principalType: PrincipalType; principalId: string; value: unknown }) =>
-      saveFieldProfileValueFn({ data: { fieldPath, ...params } }),
+      saveFieldProfileValueFn({ data: { fieldPath, expectedTenantId, ...params } }),
     onSuccess: () => {
       invalidate();
       notifySuccess(localize('com_toast_profile_value_saved'));
@@ -32,7 +33,7 @@ export function useProfileMutations({
 
   const removeMutation = useMutation({
     mutationFn: (params: { principalType: PrincipalType; principalId: string }) =>
-      removeFieldProfileValueFn({ data: { fieldPath, ...params } }),
+      removeFieldProfileValueFn({ data: { fieldPath, expectedTenantId, ...params } }),
     onSuccess: () => {
       invalidate();
       notifySuccess(localize('com_toast_profile_value_removed'));

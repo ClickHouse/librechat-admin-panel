@@ -7,6 +7,7 @@ import {
   addGroupMemberFn,
   groupMembersQueryOptions,
   removeGroupMemberFn,
+  tenantQueryKeys,
   updateGroupFn,
   MEMBERS_PAGE_SIZE,
 } from '@/server';
@@ -23,7 +24,12 @@ import { useLocalize } from '@/hooks';
 
 type EditGroupTab = 'details' | 'members';
 
-export function EditGroupDialog({ group, canManage, onClose }: t.EditGroupDialogProps) {
+export function EditGroupDialog({
+  group,
+  canManage,
+  expectedTenantId,
+  onClose,
+}: t.EditGroupDialogProps) {
   const localize = useLocalize();
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<EditGroupTab>('details');
@@ -36,7 +42,7 @@ export function EditGroupDialog({ group, canManage, onClose }: t.EditGroupDialog
   const [pendingRemovals, setPendingRemovals] = useState<AdminMember[]>([]);
 
   const membersQuery = useQuery({
-    ...groupMembersQueryOptions(group?.id ?? '', page),
+    ...groupMembersQueryOptions(group?.id ?? '', expectedTenantId, page),
     placeholderData: keepPreviousData,
     enabled: !!group,
   });
@@ -76,14 +82,20 @@ export function EditGroupDialog({ group, canManage, onClose }: t.EditGroupDialog
     mutationFn: async ({ name: submittedName }: { name: string }) => {
       if (!group) throw new Error(localize('com_access_group_unavailable'));
       if (detailsDirty) {
-        await updateGroupFn({ data: { id: group.id, name: submittedName, description } });
+        await updateGroupFn({
+          data: { id: group.id, name: submittedName, description, expectedTenantId },
+        });
       }
       const memberResults = await Promise.allSettled([
         ...pendingAdditions.map((user) =>
-          addGroupMemberFn({ data: { groupId: group.id, userId: user.id } }),
+          addGroupMemberFn({
+            data: { groupId: group.id, userId: user.id, expectedTenantId },
+          }),
         ),
         ...pendingRemovals.map((member) =>
-          removeGroupMemberFn({ data: { groupId: group.id, userId: member.userId } }),
+          removeGroupMemberFn({
+            data: { groupId: group.id, userId: member.userId, expectedTenantId },
+          }),
         ),
       ]);
       const failures = memberResults.filter(
@@ -98,9 +110,15 @@ export function EditGroupDialog({ group, canManage, onClose }: t.EditGroupDialog
       return { name: submittedName };
     },
     onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ['groups'] });
-      queryClient.invalidateQueries({ queryKey: ['groupAssignments'] });
-      queryClient.invalidateQueries({ queryKey: ['groupMembers', group?.id] });
+      queryClient.invalidateQueries({ queryKey: tenantQueryKeys.groups(expectedTenantId) });
+      queryClient.invalidateQueries({
+        queryKey: tenantQueryKeys.groupAssignments(expectedTenantId),
+      });
+      if (group) {
+        queryClient.invalidateQueries({
+          queryKey: tenantQueryKeys.groupMemberList(expectedTenantId, group.id),
+        });
+      }
       notifySuccess(localize('com_toast_group_updated', { name: data.name }));
       onClose();
     },
@@ -203,6 +221,7 @@ export function EditGroupDialog({ group, canManage, onClose }: t.EditGroupDialog
                   <UserSearchInline
                     existingIds={existingIds}
                     onAdd={addUser}
+                    expectedTenantId={expectedTenantId}
                     listboxId="edit-group-member-search"
                     disabled={mutation.isPending}
                   />

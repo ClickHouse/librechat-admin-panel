@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import type * as t from '@/types';
-import { ProvidersRenderer } from '../EndpointsRenderer';
+import { ProvidersRenderer, CustomEndpointsRenderer } from '../EndpointsRenderer';
 import { createField } from '@/test/fixtures';
 
 vi.mock('@/hooks/useLocalize', () => ({
@@ -19,6 +19,16 @@ interface MockTextFieldProps {
 
 vi.mock('@clickhouse/click-ui', () => ({
   Icon: () => <span />,
+  IconButton: ({
+    onClick,
+    'aria-label': ariaLabel,
+  }: {
+    onClick?: () => void;
+    'aria-label'?: string;
+  }) => <button onClick={onClick} aria-label={ariaLabel} />,
+  Button: ({ label, onClick }: { label?: string; onClick?: () => void }) => (
+    <button onClick={onClick}>{label}</button>
+  ),
   MultiAccordion: Object.assign(
     ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
     {
@@ -34,6 +44,16 @@ vi.mock('@clickhouse/click-ui', () => ({
       onChange={(e) => onChange?.(e.target.value)}
     />
   ),
+}));
+
+vi.mock('../CreateCustomEndpointDialog', () => ({
+  CreateCustomEndpointDialog: ({
+    open,
+    onSave,
+  }: {
+    open: boolean;
+    onSave: (entry: Record<string, t.ConfigValue>) => void;
+  }) => (open ? <button onClick={() => onSave({ name: 'NewEndpoint' })}>save-new-endpoint</button> : null),
 }));
 
 const noop = () => {};
@@ -89,5 +109,37 @@ describe('ProvidersRenderer', () => {
     );
     expect(screen.queryByDisplayValue('sk-test...1234')).not.toBeInTheDocument();
     expect(screen.getByRole('textbox')).not.toBeDisabled();
+  });
+});
+
+describe('CustomEndpointsRenderer', () => {
+  const customFields: t.SchemaField[] = [
+    createField({
+      key: 'custom',
+      children: [
+        createField({ key: 'name', type: 'string' }),
+        createField({ key: 'baseURL', type: 'string' }),
+        createField({ key: 'headers', type: 'record', recordValueType: 'primitive' }),
+      ],
+    }),
+  ];
+
+  it('strips a redacted headers placeholder from a surviving entry when creating a new one', () => {
+    const onChange = vi.fn();
+    render(
+      <CustomEndpointsRenderer
+        fields={customFields}
+        parentValue={{ custom: [{ name: 'OpenRouter', baseURL: 'https://old', headers: {} }] }}
+        parentPath="endpoints"
+        getValue={getValue}
+        onChange={onChange}
+      />,
+    );
+    fireEvent.click(screen.getByText('com_config_create_endpoint'));
+    fireEvent.click(screen.getByText('save-new-endpoint'));
+    expect(onChange).toHaveBeenCalledWith('endpoints.custom', [
+      { name: 'OpenRouter', baseURL: 'https://old' },
+      { name: 'NewEndpoint' },
+    ]);
   });
 });

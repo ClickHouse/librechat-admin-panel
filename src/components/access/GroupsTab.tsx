@@ -10,14 +10,14 @@ import {
   Pagination,
   TrashButton,
 } from '@/components/shared';
-import { deleteGroupFn, groupsQueryOptions, GROUPS_PAGE_SIZE } from '@/server';
+import { deleteGroupFn, groupsQueryOptions, tenantQueryKeys, GROUPS_PAGE_SIZE } from '@/server';
 import { cn, notifySuccess, notifyError } from '@/utils';
 import { useCapabilities, useLocalize } from '@/hooks';
 import { EditGroupDialog } from './EditGroupDialog';
 import { SystemCapabilities } from '@/constants';
 import { ConfirmDialog } from './ConfirmDialog';
 
-export function GroupsTab({ onCreateGroup }: t.GroupsTabProps) {
+export function GroupsTab({ onCreateGroup, expectedTenantId }: t.GroupsTabProps) {
   const localize = useLocalize();
   const queryClient = useQueryClient();
   const { hasCapability } = useCapabilities();
@@ -43,7 +43,7 @@ export function GroupsTab({ onCreateGroup }: t.GroupsTabProps) {
   };
 
   const { data, isLoading, isError, isFetching } = useQuery({
-    ...groupsQueryOptions(page, debouncedSearch),
+    ...groupsQueryOptions(expectedTenantId, page, debouncedSearch),
     placeholderData: keepPreviousData,
   });
 
@@ -52,12 +52,16 @@ export function GroupsTab({ onCreateGroup }: t.GroupsTabProps) {
   const totalPages = Math.ceil(total / GROUPS_PAGE_SIZE);
 
   const deleteMutation = useMutation({
-    mutationFn: (group: AdminGroup) => deleteGroupFn({ data: { id: group.id } }),
+    mutationFn: (group: AdminGroup) => deleteGroupFn({ data: { id: group.id, expectedTenantId } }),
     onSuccess: (_data, group) => {
-      queryClient.invalidateQueries({ queryKey: ['groups'] });
-      queryClient.invalidateQueries({ queryKey: ['availableScopes'] });
-      queryClient.invalidateQueries({ queryKey: ['groupAssignments'] });
-      queryClient.invalidateQueries({ queryKey: ['groupMembers'] });
+      queryClient.invalidateQueries({ queryKey: tenantQueryKeys.groups(expectedTenantId) });
+      queryClient.invalidateQueries({
+        queryKey: tenantQueryKeys.availableScopes(expectedTenantId),
+      });
+      queryClient.invalidateQueries({
+        queryKey: tenantQueryKeys.groupAssignments(expectedTenantId),
+      });
+      queryClient.invalidateQueries({ queryKey: tenantQueryKeys.groupMembers(expectedTenantId) });
       notifySuccess(localize('com_toast_group_deleted', { name: group.name }));
       setDeleteTarget(null);
       if (groups.length === 1) {
@@ -143,6 +147,7 @@ export function GroupsTab({ onCreateGroup }: t.GroupsTabProps) {
         key={editTarget?.id}
         group={editTarget}
         canManage={canManage}
+        expectedTenantId={expectedTenantId}
         onClose={() => setEditTarget(null)}
       />
 

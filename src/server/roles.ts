@@ -13,6 +13,7 @@ import type { AdminMember } from '@librechat/data-schemas';
 import type * as t from '@/types';
 import { apiFetch, extractApiError } from './utils/api';
 import { MEMBERS_PAGE_SIZE } from './groups';
+import { tenantQueryKeys } from './keys';
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
@@ -53,19 +54,24 @@ export const getRolesFn = createServerFn({ method: 'GET' })
     z.object({
       limit: z.number().optional(),
       offset: z.number().optional(),
+      expectedTenantId: z.string(),
     }),
   )
   .handler(
     async ({
       data,
     }: {
-      data: { limit?: number; offset?: number };
+      data: { limit?: number; offset?: number; expectedTenantId: string };
     }): Promise<{ roles: t.Role[]; total: number }> => {
       const params = new URLSearchParams();
       if (data.limit != null) params.set('limit', String(data.limit));
       if (data.offset != null) params.set('offset', String(data.offset));
       const qs = params.toString();
-      const response = await apiFetch(`/api/admin/roles${qs ? `?${qs}` : ''}`);
+      const response = await apiFetch(
+        `/api/admin/roles${qs ? `?${qs}` : ''}`,
+        undefined,
+        data.expectedTenantId,
+      );
       if (!response.ok) {
         throw new Error(`Failed to fetch roles: ${response.status}`);
       }
@@ -74,71 +80,100 @@ export const getRolesFn = createServerFn({ method: 'GET' })
     },
   );
 
-export const rolesQueryOptions = (page = 1) =>
+export const rolesQueryOptions = (expectedTenantId: string, page = 1) =>
   queryOptions<{ roles: t.Role[]; total: number }>({
-    queryKey: ['roles', page],
+    queryKey: [...tenantQueryKeys.roles(expectedTenantId), page],
     queryFn: () =>
       getRolesFn({
         data: {
           limit: ROLES_PAGE_SIZE,
           offset: (page - 1) * ROLES_PAGE_SIZE,
+          expectedTenantId,
         },
       }),
     staleTime: 30_000,
   });
 
-export const allRolesQueryOptions = queryOptions<t.Role[]>({
-  queryKey: ['roles', 'all'],
-  queryFn: () => getRolesFn({ data: { limit: ALL_ROLES_LIMIT } }).then((r) => r.roles),
-  staleTime: 30_000,
-});
-
-export const getRoleFn = createServerFn({ method: 'GET' })
-  .inputValidator(z.object({ name: z.string() }))
-  .handler(async ({ data }: { data: { name: string } }): Promise<{ role: t.Role }> => {
-    const response = await apiFetch(`/api/admin/roles/${encodeURIComponent(data.name)}`);
-    if (!response.ok) {
-      throw new Error(`Failed to fetch role: ${response.status}`);
-    }
-    const json = (await response.json()) as { role: RawRole };
-    return { role: toRole(json.role) };
-  });
-
-export const roleQueryOptions = (roleName: string) =>
-  queryOptions<t.Role>({
-    queryKey: ['role', roleName],
-    queryFn: () => getRoleFn({ data: { name: roleName } }).then((r) => r.role),
+export const allRolesQueryOptions = (expectedTenantId: string) =>
+  queryOptions<t.Role[]>({
+    queryKey: tenantQueryKeys.allRoles(expectedTenantId),
+    queryFn: () =>
+      getRolesFn({ data: { limit: ALL_ROLES_LIMIT, expectedTenantId } }).then((r) => r.roles),
     staleTime: 30_000,
   });
 
-export const getRoleAssignmentsFn = createServerFn({ method: 'GET' }).handler(
-  async (): Promise<{ assignments: Record<string, t.AssignmentRef[]> }> => ({ assignments: {} }),
-);
+export const allRolesForTenantQueryOptions = allRolesQueryOptions;
 
-export const roleAssignmentsQueryOptions = queryOptions({
-  queryKey: ['roleAssignments'],
-  queryFn: () => getRoleAssignmentsFn().then((r) => r.assignments),
-  staleTime: 30_000,
-});
+export const getRoleFn = createServerFn({ method: 'GET' })
+  .inputValidator(z.object({ name: z.string(), expectedTenantId: z.string() }))
+  .handler(
+    async ({
+      data,
+    }: {
+      data: { name: string; expectedTenantId: string };
+    }): Promise<{ role: t.Role }> => {
+      const response = await apiFetch(
+        `/api/admin/roles/${encodeURIComponent(data.name)}`,
+        undefined,
+        data.expectedTenantId,
+      );
+      if (!response.ok) {
+        throw new Error(`Failed to fetch role: ${response.status}`);
+      }
+      const json = (await response.json()) as { role: RawRole };
+      return { role: toRole(json.role) };
+    },
+  );
+
+export const roleQueryOptions = (roleName: string, expectedTenantId: string) =>
+  queryOptions<t.Role>({
+    queryKey: tenantQueryKeys.roleDetail(expectedTenantId, roleName),
+    queryFn: () => getRoleFn({ data: { name: roleName, expectedTenantId } }).then((r) => r.role),
+    staleTime: 30_000,
+  });
+
+export const getRoleAssignmentsFn = createServerFn({ method: 'GET' })
+  .inputValidator(z.object({ expectedTenantId: z.string() }))
+  .handler(
+    async (): Promise<{ assignments: Record<string, t.AssignmentRef[]> }> => ({ assignments: {} }),
+  );
+
+export const roleAssignmentsQueryOptions = (expectedTenantId: string) =>
+  queryOptions({
+    queryKey: tenantQueryKeys.roleAssignments(expectedTenantId),
+    queryFn: () => getRoleAssignmentsFn({ data: { expectedTenantId } }).then((r) => r.assignments),
+    staleTime: 30_000,
+  });
 
 export const createRoleFn = createServerFn({ method: 'POST' })
   .inputValidator(
     z.object({
       name: z.string().min(1),
       description: z.string().optional(),
+      expectedTenantId: z.string(),
     }),
   )
-  .handler(async ({ data }: { data: { name: string; description?: string } }) => {
-    const response = await apiFetch('/api/admin/roles', {
-      method: 'POST',
-      body: JSON.stringify({ name: data.name, description: data.description }),
-    });
-    if (!response.ok) {
-      await extractApiError(response, 'Failed to create role');
-    }
-    const { role } = (await response.json()) as { role: RawRole };
-    return { role: toRole(role) };
-  });
+  .handler(
+    async ({
+      data,
+    }: {
+      data: { name: string; description?: string; expectedTenantId: string };
+    }) => {
+      const response = await apiFetch(
+        '/api/admin/roles',
+        {
+          method: 'POST',
+          body: JSON.stringify({ name: data.name, description: data.description }),
+        },
+        data.expectedTenantId,
+      );
+      if (!response.ok) {
+        await extractApiError(response, 'Failed to create role');
+      }
+      const { role } = (await response.json()) as { role: RawRole };
+      return { role: toRole(role) };
+    },
+  );
 
 export const updateRoleFn = createServerFn({ method: 'POST' })
   .inputValidator(
@@ -146,13 +181,18 @@ export const updateRoleFn = createServerFn({ method: 'POST' })
       id: z.string(),
       name: z.string().min(1).optional(),
       description: z.string().optional(),
+      expectedTenantId: z.string(),
     }),
   )
-  .handler(async ({ data }: { data: { id: string; name?: string; description?: string } }) => {
-    const response = await apiFetch(`/api/admin/roles/${encodeURIComponent(data.id)}`, {
-      method: 'PATCH',
-      body: JSON.stringify({ name: data.name, description: data.description }),
-    });
+  .handler(async ({ data }) => {
+    const response = await apiFetch(
+      `/api/admin/roles/${encodeURIComponent(data.id)}`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify({ name: data.name, description: data.description }),
+      },
+      data.expectedTenantId,
+    );
     if (!response.ok) {
       await extractApiError(response, 'Failed to update role');
     }
@@ -165,13 +205,18 @@ export const updateRolePermissionsFn = createServerFn({ method: 'POST' })
     z.object({
       id: z.string(),
       permissions: z.record(z.string(), z.record(z.string(), z.boolean())),
+      expectedTenantId: z.string(),
     }),
   )
   .handler(
     async ({
       data,
     }: {
-      data: { id: string; permissions: Record<string, Record<string, boolean>> };
+      data: {
+        id: string;
+        permissions: Record<string, Record<string, boolean>>;
+        expectedTenantId: string;
+      };
     }) => {
       const response = await apiFetch(
         `/api/admin/roles/${encodeURIComponent(data.id)}/permissions`,
@@ -179,6 +224,7 @@ export const updateRolePermissionsFn = createServerFn({ method: 'POST' })
           method: 'PATCH',
           body: JSON.stringify({ permissions: data.permissions }),
         },
+        data.expectedTenantId,
       );
       if (!response.ok) {
         await extractApiError(response, 'Failed to update role permissions');
@@ -189,11 +235,13 @@ export const updateRolePermissionsFn = createServerFn({ method: 'POST' })
   );
 
 export const deleteRoleFn = createServerFn({ method: 'POST' })
-  .inputValidator(z.object({ id: z.string() }))
-  .handler(async ({ data }: { data: { id: string } }) => {
-    const response = await apiFetch(`/api/admin/roles/${encodeURIComponent(data.id)}`, {
-      method: 'DELETE',
-    });
+  .inputValidator(z.object({ id: z.string(), expectedTenantId: z.string() }))
+  .handler(async ({ data }) => {
+    const response = await apiFetch(
+      `/api/admin/roles/${encodeURIComponent(data.id)}`,
+      { method: 'DELETE' },
+      data.expectedTenantId,
+    );
     if (!response.ok && response.status !== 404) {
       await extractApiError(response, 'Failed to delete role');
     }
@@ -206,20 +254,21 @@ export const getRoleMembersFn = createServerFn({ method: 'GET' })
       roleId: z.string(),
       limit: z.number().optional(),
       offset: z.number().optional(),
+      expectedTenantId: z.string(),
     }),
   )
   .handler(
     async ({
       data,
     }: {
-      data: { roleId: string; limit?: number; offset?: number };
+      data: { roleId: string; limit?: number; offset?: number; expectedTenantId: string };
     }): Promise<{ members: AdminMember[]; total: number }> => {
       const params = new URLSearchParams();
       if (data.limit != null) params.set('limit', String(data.limit));
       if (data.offset != null) params.set('offset', String(data.offset));
       const qs = params.toString();
       const url = `/api/admin/roles/${encodeURIComponent(data.roleId)}/members${qs ? `?${qs}` : ''}`;
-      const response = await apiFetch(url);
+      const response = await apiFetch(url, undefined, data.expectedTenantId);
       if (!response.ok) {
         throw new Error(`Failed to fetch role members: ${response.status}`);
       }
@@ -228,27 +277,34 @@ export const getRoleMembersFn = createServerFn({ method: 'GET' })
     },
   );
 
-export const roleMembersQueryOptions = (roleId: string, page = 1) =>
+export const roleMembersQueryOptions = (roleId: string, expectedTenantId: string, page = 1) =>
   queryOptions<{ members: AdminMember[]; total: number }>({
-    queryKey: ['roleMembers', roleId, page],
+    queryKey: tenantQueryKeys.roleMemberPage(expectedTenantId, roleId, page),
     queryFn: () =>
       getRoleMembersFn({
         data: {
           roleId,
           limit: MEMBERS_PAGE_SIZE,
           offset: (page - 1) * MEMBERS_PAGE_SIZE,
+          expectedTenantId,
         },
       }),
     staleTime: 30_000,
   });
 
 export const addRoleMemberFn = createServerFn({ method: 'POST' })
-  .inputValidator(z.object({ roleId: z.string(), userId: z.string() }))
-  .handler(async ({ data }: { data: { roleId: string; userId: string } }) => {
-    const response = await apiFetch(`/api/admin/roles/${encodeURIComponent(data.roleId)}/members`, {
-      method: 'POST',
-      body: JSON.stringify({ userId: data.userId }),
-    });
+  .inputValidator(
+    z.object({ roleId: z.string(), userId: z.string(), expectedTenantId: z.string() }),
+  )
+  .handler(async ({ data }) => {
+    const response = await apiFetch(
+      `/api/admin/roles/${encodeURIComponent(data.roleId)}/members`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ userId: data.userId }),
+      },
+      data.expectedTenantId,
+    );
     if (!response.ok) {
       await extractApiError(response, 'Failed to add role member');
     }
@@ -256,11 +312,14 @@ export const addRoleMemberFn = createServerFn({ method: 'POST' })
   });
 
 export const removeRoleMemberFn = createServerFn({ method: 'POST' })
-  .inputValidator(z.object({ roleId: z.string(), userId: z.string() }))
-  .handler(async ({ data }: { data: { roleId: string; userId: string } }) => {
+  .inputValidator(
+    z.object({ roleId: z.string(), userId: z.string(), expectedTenantId: z.string() }),
+  )
+  .handler(async ({ data }) => {
     const response = await apiFetch(
       `/api/admin/roles/${encodeURIComponent(data.roleId)}/members/${encodeURIComponent(data.userId)}`,
       { method: 'DELETE' },
+      data.expectedTenantId,
     );
     if (!response.ok && response.status !== 404) {
       await extractApiError(response, 'Failed to remove role member');

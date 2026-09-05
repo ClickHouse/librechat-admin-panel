@@ -9,7 +9,10 @@ import {
   retainSnapshotSecretsOnly,
   collectSecretFieldPaths,
   isSecretFieldPath,
+  isSecretRecordSchemaField,
   filterSecretPreviewFields,
+  withPreviousIdentityHint,
+  PREVIOUS_IDENTITY_HINT_KEY,
 } from './secrets';
 import { createField } from '@/test/fixtures';
 
@@ -37,6 +40,51 @@ describe('getSecretPreviewValue', () => {
     expect(getSecretPreviewValue('sk-real', 'apiKey')).toBeUndefined();
     expect(getSecretPreviewValue(null, 'apiKey')).toBeUndefined();
     expect(getSecretPreviewValue(['apiKeyPreview'], 'apiKey')).toBeUndefined();
+  });
+});
+
+describe('isSecretRecordSchemaField', () => {
+  it('recognizes a registered credential-record container field', () => {
+    const field = createField({ key: 'headers', type: 'record', recordValueType: 'primitive' });
+    expect(isSecretRecordSchemaField(field)).toBe(true);
+  });
+
+  it('rejects a record field with an unregistered key', () => {
+    const field = createField({ key: 'metadata', type: 'record', recordValueType: 'primitive' });
+    expect(isSecretRecordSchemaField(field)).toBe(false);
+  });
+
+  it('rejects a registered key when the field is not a primitive record', () => {
+    const complexRecord = createField({ key: 'headers', type: 'record', recordValueType: 'complex' });
+    expect(isSecretRecordSchemaField(complexRecord)).toBe(false);
+
+    const nonRecord = createField({ key: 'headers', type: 'string' });
+    expect(isSecretRecordSchemaField(nonRecord)).toBe(false);
+  });
+});
+
+describe('withPreviousIdentityHint', () => {
+  it('leaves the value unchanged when origin is undefined', () => {
+    expect(withPreviousIdentityHint({ name: 'A' }, undefined)).toEqual({ name: 'A' });
+  });
+
+  it('stamps a string origin as the rename hint', () => {
+    expect(withPreviousIdentityHint({ name: 'A EU' }, 'A')).toEqual({
+      name: 'A EU',
+      [PREVIOUS_IDENTITY_HINT_KEY]: 'A',
+    });
+  });
+
+  it('stamps an explicit null origin, distinct from leaving the hint absent', () => {
+    const stamped = withPreviousIdentityHint({ name: 'A' }, null);
+    expect(stamped).toEqual({ name: 'A', [PREVIOUS_IDENTITY_HINT_KEY]: null });
+    expect(Object.hasOwn(stamped as object, PREVIOUS_IDENTITY_HINT_KEY)).toBe(true);
+  });
+
+  it('returns non-object values unchanged', () => {
+    expect(withPreviousIdentityHint('A', 'B')).toBe('A');
+    expect(withPreviousIdentityHint(null, 'B')).toBe(null);
+    expect(withPreviousIdentityHint(['A'], 'B')).toEqual(['A']);
   });
 });
 
@@ -284,10 +332,7 @@ describe('mergeUntouchedSecrets', () => {
 });
 
 describe('retainSnapshotSecretsOnly', () => {
-  const secretFieldPaths = new Set([
-    'endpoints.custom.apiKey',
-    'endpoints.custom.headers.*',
-  ]);
+  const secretFieldPaths = new Set(['endpoints.custom.apiKey', 'endpoints.custom.headers.*']);
 
   it('drops YAML-only secrets from untouched entries', () => {
     expect(

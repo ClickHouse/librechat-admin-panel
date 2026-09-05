@@ -14,7 +14,7 @@ function secretKeyForPreviewKey(key: string): string | null {
  * `endpoints.custom.apiKey`) so an edited array entry's path matches the
  * schema's index-free field paths.
  */
-function stripArrayIndices(path: string): string {
+export function stripArrayIndices(path: string): string {
   return path.replace(ARRAY_INDEX_SEGMENT_RE, '');
 }
 
@@ -96,14 +96,61 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return value != null && typeof value === 'object' && !Array.isArray(value);
 }
 
+const ENCRYPTED_SECRET_RE = /^v3:[0-9a-f]{32}:[0-9a-f]+$/;
+
+/**
+ * Whether a stored value is backend ciphertext.
+ *
+ * The API rejects submitted encrypted values, so a snapshot secret in this
+ * shape is omitted from the outgoing payload rather than echoed back. The
+ * backend re-attaches it inside the mutation transaction, matching entries by
+ * their stable identity — which is also the only place that can do it without
+ * a decrypt/re-encrypt round trip through the browser.
+ */
+export function isEncryptedSecretValue(value: unknown): boolean {
+  return typeof value === 'string' && ENCRYPTED_SECRET_RE.test(value.trim());
+}
+
 const SECRET_LEAF_KEY_RE = /^(apiKey|secretKey|client_secret|.*ApiKey)$/;
 /** Primitive string records that commonly carry literal credentials. */
-const SECRET_RECORD_KEYS = new Set([
-  'headers',
-  'oauth_headers',
-  'additionalHeaders',
-  'env',
-]);
+const SECRET_RECORD_KEYS = new Set(['headers', 'oauth_headers', 'additionalHeaders', 'env']);
+
+/**
+ * Hidden field an array entry (`endpoints.custom[]`, `endpoints.azureOpenAI.groups[]`)
+ * carries alongside its visible identity (`name`/`group`) so the backend can
+ * restore encrypted credentials by stable identity across a rename, which an
+ * exact-identity match alone can't do once the identity itself has changed.
+ *
+ * Three distinct wire states, all meaningful to the backend's matching:
+ * - key absent entirely: no signal — an old/non-upgraded client, or an
+ *   untouched sibling entry the panel's own merge layer resubmitted as-is.
+ *   Falls back to bare-identity matching, exactly like the pre-hint behavior.
+ * - `null`: an explicit "this entry has no origin" — stamped at creation
+ *   (`ArrayObjectField`'s add, `CreateCustomEndpointDialog`'s create) so a
+ *   brand-new entry can never inherit another entry's credentials merely by
+ *   reusing a name freed up by a delete elsewhere in the same submission.
+ * - a non-empty string: the entry's identity before the rename that produced
+ *   its current one.
+ *
+ * Must match `PREVIOUS_IDENTITY_HINT_KEY` in the backend's `secrets.ts`.
+ */
+export const PREVIOUS_IDENTITY_HINT_KEY = '__previousIdentity';
+
+/**
+ * Attaches (or clears) the rename-origin hint on an array entry's value.
+ * `origin === undefined` leaves the value untouched (no hint tracked yet, or
+ * this array doesn't use identity tracking); `null` stamps the explicit
+ * "no origin" marker; a string stamps the entry's real previous identity.
+ */
+export function withPreviousIdentityHint(
+  value: t.ConfigValue,
+  origin: string | null | undefined,
+): t.ConfigValue {
+  if (origin === undefined || typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return value;
+  }
+  return { ...value, [PREVIOUS_IDENTITY_HINT_KEY]: origin };
+}
 
 /**
  * Whether `path` is a registered secret leaf or matches a wildcard pattern
@@ -113,10 +160,7 @@ const SECRET_RECORD_KEYS = new Set([
  * numeric and dotted credential-record keys (header `"123"`, `"X.Foo"`)
  * remain part of the secret key rather than being treated as path structure.
  */
-export function isSecretFieldPath(
-  path: string,
-  secretFieldPaths: ReadonlySet<string>,
-): boolean {
+export function isSecretFieldPath(path: string, secretFieldPaths: ReadonlySet<string>): boolean {
   if (secretFieldPaths.has(path) || secretFieldPaths.has(stripArrayIndices(path))) {
     return true;
   }
@@ -153,6 +197,50 @@ function isUnderSecretContainer(path: string, container: string): boolean {
   return i < pathParts.length;
 }
 
+/** Whether `field` is a schema-registered credential-record container (`headers`, `env`, …). */
+export function isSecretRecordSchemaField(field: t.SchemaField): boolean {
+  return (
+    field.type === 'record' &&
+    field.recordValueType === 'primitive' &&
+    SECRET_RECORD_KEYS.has(field.key)
+  );
+}
+
+/**
+ * Drops redacted credential-record containers (`headers`, `env`, …) left as an
+ * empty/placeholder object on an entry that wasn't itself the one being edited.
+ *
+ * A redacted read leaves these containers present rather than omitted, so any
+ * structural collection operation that copies an entry forward verbatim (array
+ * add/remove, endpoint creation) would otherwise resubmit the placeholder as if
+ * the admin had deliberately cleared it, erasing the real secret on save.
+ * `ObjectEntryCard` applies the same rule for direct field edits; this is the
+ * shared version for callers that rewrite a whole collection at once. A
+ * container the admin actually edited is left alone — `KeyValueField` always
+ * produces an array, never a plain object, so the `!Array.isArray` check below
+ * distinguishes an untouched placeholder from a real (even emptied) edit.
+ */
+export function stripUntouchedSecretRecordContainers(
+  entry: t.ConfigValue,
+  fields: t.SchemaField[],
+): t.ConfigValue {
+  if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) {
+    return entry;
+  }
+  let next = entry as Record<string, t.ConfigValue>;
+  for (const field of fields) {
+    if (!isSecretRecordSchemaField(field)) continue;
+    const containerValue = next[field.key];
+    if (typeof containerValue === 'object' && containerValue !== null && !Array.isArray(containerValue)) {
+      if (next === entry) {
+        next = { ...next };
+      }
+      delete next[field.key];
+    }
+  }
+  return next;
+}
+
 /** Collects index-free secret leaf paths and `record.*` wildcards from a schema tree. */
 export function collectSecretFieldPaths(fields: t.SchemaField[]): Set<string> {
   const secretPaths = new Set<string>();
@@ -160,20 +248,13 @@ export function collectSecretFieldPaths(fields: t.SchemaField[]): Set<string> {
   return secretPaths;
 }
 
-function collectSecretFieldPathsRecursive(
-  fields: t.SchemaField[],
-  secretPaths: Set<string>,
-): void {
+function collectSecretFieldPathsRecursive(fields: t.SchemaField[], secretPaths: Set<string>): void {
   for (const field of fields) {
     const path = field.path.replace(/\.(\[\]|\{\})/g, '');
     if (field.type === 'string' && SECRET_LEAF_KEY_RE.test(field.key)) {
       secretPaths.add(path);
     }
-    if (
-      field.type === 'record' &&
-      field.recordValueType === 'primitive' &&
-      SECRET_RECORD_KEYS.has(field.key)
-    ) {
+    if (isSecretRecordSchemaField(field)) {
       secretPaths.add(`${path}.*`);
     }
     if (field.children?.length) {
@@ -190,10 +271,7 @@ export function isSecretRecordContainerPath(
   path: string,
   secretFieldPaths: ReadonlySet<string>,
 ): boolean {
-  return (
-    secretFieldPaths.has(`${path}.*`) ||
-    secretFieldPaths.has(`${stripArrayIndices(path)}.*`)
-  );
+  return secretFieldPaths.has(`${path}.*`) || secretFieldPaths.has(`${stripArrayIndices(path)}.*`);
 }
 
 /**
@@ -219,14 +297,14 @@ export function mergeUntouchedSecrets(
   const result: Record<string, unknown> = { ...edited };
   for (const [key, snapshotVal] of Object.entries(snapshot)) {
     if (parentIsSecretContainer) {
-      if (!Object.hasOwn(result, key)) {
+      if (!Object.hasOwn(result, key) && !isEncryptedSecretValue(snapshotVal)) {
         result[key] = snapshotVal;
       }
       continue;
     }
     const fieldPath = parentPath ? `${parentPath}.${key}` : key;
     if (isSecretFieldPath(fieldPath, secretFieldPaths)) {
-      if (!Object.hasOwn(result, key)) {
+      if (!Object.hasOwn(result, key) && !isEncryptedSecretValue(snapshotVal)) {
         result[key] = snapshotVal;
       }
       continue;
@@ -251,6 +329,27 @@ export function mergeUntouchedSecrets(
 }
 
 /**
+ * Restores one secret key from the Mongo snapshot onto an untouched entry.
+ * A ciphertext snapshot value is dropped rather than echoed back: the backend
+ * rejects submitted ciphertext and preserves the omitted secret itself.
+ */
+function restoreSnapshotSecret(
+  result: Record<string, unknown>,
+  snapshotEntry: unknown,
+  key: string,
+): void {
+  if (!isPlainObject(snapshotEntry) || !Object.hasOwn(snapshotEntry, key)) {
+    delete result[key];
+    return;
+  }
+  if (isEncryptedSecretValue(snapshotEntry[key])) {
+    delete result[key];
+    return;
+  }
+  result[key] = snapshotEntry[key];
+}
+
+/**
  * For untouched array entries, keep only secret values present in the Mongo
  * snapshot. YAML/environment credentials must not materialize into Mongo.
  * Recurses into nested objects and wildcard credential records.
@@ -268,20 +367,12 @@ export function retainSnapshotSecretsOnly(
   const result: Record<string, unknown> = { ...entry };
   for (const key of Object.keys(result)) {
     if (parentIsSecretContainer) {
-      if (!isPlainObject(snapshotEntry) || !Object.hasOwn(snapshotEntry, key)) {
-        delete result[key];
-      } else {
-        result[key] = snapshotEntry[key];
-      }
+      restoreSnapshotSecret(result, snapshotEntry, key);
       continue;
     }
     const fieldPath = parentPath ? `${parentPath}.${key}` : key;
     if (isSecretFieldPath(fieldPath, secretFieldPaths)) {
-      if (!isPlainObject(snapshotEntry) || !Object.hasOwn(snapshotEntry, key)) {
-        delete result[key];
-      } else {
-        result[key] = snapshotEntry[key];
-      }
+      restoreSnapshotSecret(result, snapshotEntry, key);
       continue;
     }
     if (isPlainObject(result[key])) {
