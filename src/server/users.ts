@@ -12,25 +12,27 @@ import { createServerFn } from '@tanstack/react-start';
 import type { AdminUserSearchResult } from '@librechat/data-schemas';
 import type { TUser } from 'librechat-data-provider';
 import { apiFetch, extractApiError } from './utils/api';
+import { tenantQueryKeys } from './keys';
 
 // ── Server functions ─────────────────────────────────────────────────
 
-export const getUsersFn = createServerFn({ method: 'GET' }).handler(
-  async (): Promise<{ users: TUser[] }> => {
-    const response = await apiFetch('/api/admin/users');
+export const getUsersFn = createServerFn({ method: 'GET' })
+  .inputValidator(z.object({ expectedTenantId: z.string() }))
+  .handler(async ({ data }): Promise<{ users: TUser[] }> => {
+    const response = await apiFetch('/api/admin/users', undefined, data.expectedTenantId);
     if (!response.ok) {
       throw new Error(`Failed to fetch users: ${response.status}`);
     }
     const json = (await response.json()) as { users: TUser[] };
     return { users: json.users ?? [] };
-  },
-);
+  });
 
-export const usersQueryOptions = queryOptions({
-  queryKey: ['users'],
-  queryFn: () => getUsersFn().then((r) => r.users),
-  staleTime: 30_000,
-});
+export const usersQueryOptions = (expectedTenantId: string) =>
+  queryOptions({
+    queryKey: tenantQueryKeys.users(expectedTenantId),
+    queryFn: () => getUsersFn({ data: { expectedTenantId } }).then((r) => r.users),
+    staleTime: 30_000,
+  });
 
 export const createUserFn = createServerFn({ method: 'POST' })
   .inputValidator(
@@ -38,6 +40,7 @@ export const createUserFn = createServerFn({ method: 'POST' })
       name: z.string().min(1),
       email: z.string().email(),
       role: z.nativeEnum(SystemRoles),
+      expectedTenantId: z.string(),
     }),
   )
   .handler(async (): Promise<{ user: TUser }> => {
@@ -45,20 +48,26 @@ export const createUserFn = createServerFn({ method: 'POST' })
   });
 
 export const deleteUserFn = createServerFn({ method: 'POST' })
-  .inputValidator(z.object({ id: z.string() }))
+  .inputValidator(z.object({ id: z.string(), expectedTenantId: z.string() }))
   .handler(async ({ data }) => {
-    const response = await apiFetch(`/api/admin/users/${encodeURIComponent(data.id)}`, {
-      method: 'DELETE',
-    });
+    const response = await apiFetch(
+      `/api/admin/users/${encodeURIComponent(data.id)}`,
+      { method: 'DELETE' },
+      data.expectedTenantId,
+    );
     if (!response.ok && response.status !== 404) {
       throw new Error(`Failed to delete user: ${response.status}`);
     }
   });
 
 export const searchUsersFn = createServerFn({ method: 'GET' })
-  .inputValidator(z.object({ query: z.string() }))
+  .inputValidator(z.object({ query: z.string(), expectedTenantId: z.string() }))
   .handler(async ({ data }): Promise<{ users: AdminUserSearchResult[] }> => {
-    const response = await apiFetch(`/api/admin/users/search?q=${encodeURIComponent(data.query)}`);
+    const response = await apiFetch(
+      `/api/admin/users/search?q=${encodeURIComponent(data.query)}`,
+      undefined,
+      data.expectedTenantId,
+    );
     if (!response.ok) {
       await extractApiError(response, 'Failed to search users');
     }

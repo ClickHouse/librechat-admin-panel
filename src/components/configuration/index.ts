@@ -7,6 +7,7 @@ export { ConfigTabBar } from './ConfigTabBar';
 export { ConfigTabContent } from './ConfigTabContent';
 export { ConfigPage } from './ConfigPage';
 export { ImportYamlDialog } from './ImportYamlDialog';
+export { RevisionHistoryDialog } from './RevisionHistoryDialog';
 export { InfoBanner } from './InfoBanner';
 export { getControlType, getEnumOptions, getArrayItemType } from './utils';
 

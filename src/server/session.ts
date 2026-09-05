@@ -1,5 +1,5 @@
-import { createServerOnlyFn } from '@tanstack/react-start';
 import { useSession } from '@tanstack/react-start/server';
+import { createServerOnlyFn } from '@tanstack/react-start';
 import type * as t from '@/types';
 
 const DEV_SECRET = 'dev-only-session-secret-minimum-32-chars!';

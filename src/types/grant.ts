@@ -25,12 +25,17 @@ export interface EditCapabilitiesDialogProps {
   principalType: PrincipalType | null;
   principalId: string | null;
   principalName: string;
+  expectedTenantId: string;
   onClose: () => void;
 }
 
 export interface GrantsPageProps {
   activeTab: 'management' | 'audit-log';
   onTabChange: (tab: string) => void;
+}
+
+export interface TenantScopedProps {
+  expectedTenantId: string;
 }
 
 export interface GrantTableRowProps {

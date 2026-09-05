@@ -12,7 +12,9 @@ import {
   normalizeAppServiceKeys,
   mergeConfigArraySources,
   mergeIndexedArrayEntriesIntoBase,
+  mergeIndexedArrayEntriesIntoScopeOverlay,
   applyLangfuseSchemaVisibility,
+  getSecretFieldPathSet,
 } from './config';
 import {
   coerceEnumValue,
@@ -20,6 +22,7 @@ import {
   getEnumOptions,
   getArrayItemType,
   splitUnionTypes,
+  buildSavePayload,
 } from '@/components/configuration/utils';
 
 interface ZodV3Schema extends t.ZodSchemaLike {
@@ -66,6 +69,50 @@ interface ZodV3Module {
 const require3 = createRequire(import.meta.url);
 const ldpPath = require3.resolve('librechat-data-provider');
 const z3 = require3(require3.resolve('zod', { paths: [ldpPath] })) as ZodV3Module;
+
+it('accepts the normalized MCP remove/recreate payload at the panel save boundary', () => {
+  const edits: t.FlatConfigMap = {
+    'mcpServers.remote': undefined,
+    'mcpServers.remote.type': 'sse',
+    'mcpServers.remote.url': 'https://new.example.com',
+  };
+  const { saves, resets } = buildSavePayload(
+    new Set(Object.keys(edits)),
+    edits,
+    new Set(),
+    new Set(),
+  );
+  expect(resets).toEqual([]);
+  expect(saves).toHaveLength(1);
+  expect(validateFieldValue(saves[0].fieldPath, saves[0].value)).toEqual({ success: true });
+  expect(saves[0].value).toMatchObject({
+    headers: { __previousIdentity: null },
+    oauth_headers: { __previousIdentity: null },
+  });
+});
+
+it.each(['headers', 'oauth_headers'])(
+  'validates MCP %s values without treating identity metadata as a header',
+  (container) => {
+    expect(
+      validateFieldValue(`mcpServers.remote.${container}`, {
+        __previousIdentity: null,
+        Authorization: 'new-token',
+      }),
+    ).toEqual({ success: true });
+    expect(
+      validateFieldValue(`mcpServers.remote.${container}`, {
+        __previousIdentity: null,
+        Authorization: null,
+      }).success,
+    ).toBe(false);
+    expect(
+      validateFieldValue(`mcpServers.remote.${container}`, {
+        __previousIdentity: 123,
+      }).success,
+    ).toBe(false);
+  },
+);
 
 function findField(fields: t.SchemaField[], key: string): t.SchemaField | undefined {
   for (const f of fields) {
@@ -1094,13 +1141,63 @@ describe('resolveSubSchema for endpoints', () => {
 describe('parseIndexedArrayPath', () => {
   it('accepts numeric suffixes when the parent path is an array', () => {
     expect(parseIndexedArrayPath('endpoints.custom.0')).toEqual({
+      kind: 'indexed',
       arrayPath: 'endpoints.custom',
       index: 0,
     });
   });
 
   it('rejects numeric suffixes when the parent path is a record', () => {
-    expect(parseIndexedArrayPath('mcpServers.foo.headers.2024')).toBeNull();
+    expect(parseIndexedArrayPath('mcpServers.foo.headers.2024')).toEqual({ kind: 'none' });
+  });
+
+  it('rejects indexes above the configured maximum as invalid, not as ordinary paths', () => {
+    expect(parseIndexedArrayPath('endpoints.custom.10001')).toEqual({
+      kind: 'invalid',
+      error: 'Invalid array index in path: endpoints.custom.10001',
+    });
+    expect(parseIndexedArrayPath('endpoints.custom.4294967294')).toEqual({
+      kind: 'invalid',
+      error: 'Invalid array index in path: endpoints.custom.4294967294',
+    });
+  });
+
+  it('rejects negative indexes on array parents as invalid', () => {
+    expect(parseIndexedArrayPath('endpoints.custom.-1')).toEqual({
+      kind: 'invalid',
+      error: 'Invalid array index in path: endpoints.custom.-1',
+    });
+  });
+
+  it('rejects noncanonical and nested paths that cross an array', () => {
+    expect(parseIndexedArrayPath('endpoints.custom.+1')).toEqual({
+      kind: 'invalid',
+      error: 'Invalid array index in path: endpoints.custom.+1',
+    });
+    expect(parseIndexedArrayPath('endpoints.custom.foo')).toEqual({
+      kind: 'invalid',
+      error: 'Invalid array index in path: endpoints.custom.foo',
+    });
+    expect(parseIndexedArrayPath('endpoints.custom.0.baseURL')).toEqual({
+      kind: 'invalid',
+      error: 'Unsupported array path: endpoints.custom.0.baseURL',
+    });
+  });
+
+  it('classifies union-wrapped arrays and fails closed on array|record ambiguity', () => {
+    expect(parseIndexedArrayPath('interface.termsOfService.modalContent.0')).toEqual({
+      kind: 'indexed',
+      arrayPath: 'interface.termsOfService.modalContent',
+      index: 0,
+    });
+    expect(parseIndexedArrayPath('interface.termsOfService.modalContent.foo')).toEqual({
+      kind: 'invalid',
+      error: 'Invalid array index in path: interface.termsOfService.modalContent.foo',
+    });
+    expect(parseIndexedArrayPath('endpoints.anthropic.vertex.models.0')).toEqual({
+      kind: 'invalid',
+      error: 'Unsupported array path: endpoints.anthropic.vertex.models.0',
+    });
   });
 });
 
@@ -1222,6 +1319,170 @@ describe('mergeIndexedArrayEntriesIntoBase', () => {
     expect(mergedPaths.has('mcpServers.filesystem.args')).toBe(true);
   });
 
+  it('rejects out-of-range indexes against the effective array length', () => {
+    expect(() =>
+      mergeIndexedArrayEntriesIntoBase(
+        [{ fieldPath: 'endpoints.custom.2', value: { name: 'too-far' } }],
+        {
+          endpoints: {
+            custom: [
+              { name: 'a', baseURL: 'https://a.example.com' },
+              { name: 'b', baseURL: 'https://b.example.com' },
+            ],
+          },
+        },
+      ),
+    ).toThrow(/out of range for array of length 2/);
+  });
+
+  it('keeps YAML-inherited array items when Mongo overrides omit the array', () => {
+    const result = mergeIndexedArrayEntriesIntoBase(
+      [
+        {
+          fieldPath: 'endpoints.custom.1',
+          value: { name: 'edited', baseURL: 'https://edited.example.com' },
+        },
+      ],
+      {
+        endpoints: {
+          custom: [
+            { name: 'yaml-0', baseURL: 'https://yaml-0.example.com' },
+            { name: 'yaml-1', baseURL: 'https://yaml-1.example.com' },
+            { name: 'yaml-2', baseURL: 'https://yaml-2.example.com' },
+          ],
+        },
+      },
+      undefined,
+      { cache: true },
+    );
+
+    expect(result).toEqual([
+      {
+        fieldPath: 'endpoints.custom',
+        value: [
+          { name: 'yaml-0', baseURL: 'https://yaml-0.example.com' },
+          { name: 'edited', baseURL: 'https://edited.example.com' },
+          { name: 'yaml-2', baseURL: 'https://yaml-2.example.com' },
+        ],
+      },
+    ]);
+  });
+
+  it('merges keyed Mongo array overlays with YAML before applying indexed edits', () => {
+    const result = mergeIndexedArrayEntriesIntoBase(
+      [
+        {
+          fieldPath: 'endpoints.custom.1',
+          value: { name: 'b', baseURL: 'https://edited.example.com' },
+        },
+      ],
+      {
+        endpoints: {
+          custom: [
+            { name: 'a', baseURL: 'https://a.example.com' },
+            { name: 'b', baseURL: 'https://b.example.com' },
+            { name: 'c', baseURL: 'https://c.example.com' },
+          ],
+        },
+      },
+      undefined,
+      {
+        endpoints: {
+          custom: [
+            { name: 'b', baseURL: 'https://mongo-b.example.com', apiKey: 'mongo-key' },
+            { name: 'd', baseURL: 'https://d.example.com' },
+          ],
+        },
+      },
+    );
+
+    expect(result).toEqual([
+      {
+        fieldPath: 'endpoints.custom',
+        value: [
+          { name: 'a', baseURL: 'https://a.example.com' },
+          { name: 'b', baseURL: 'https://edited.example.com', apiKey: 'mongo-key' },
+          { name: 'c', baseURL: 'https://c.example.com' },
+          { name: 'd', baseURL: 'https://d.example.com' },
+        ],
+      },
+    ]);
+  });
+
+  it('scope overlay writes only the keyed scope-owned entries', () => {
+    const result = mergeIndexedArrayEntriesIntoScopeOverlay(
+      [
+        {
+          fieldPath: 'endpoints.custom.1',
+          value: { name: 'b', baseURL: 'https://edited.example.com' },
+        },
+      ],
+      {
+        endpoints: {
+          custom: [
+            { name: 'a', baseURL: 'https://a.example.com' },
+            { name: 'b', baseURL: 'https://b.example.com' },
+            { name: 'c', baseURL: 'https://c.example.com' },
+          ],
+        },
+      },
+      {
+        endpoints: {
+          custom: [{ name: 'b', baseURL: 'https://mongo-b.example.com', apiKey: 'mongo-key' }],
+        },
+      },
+    );
+
+    expect(result).toEqual([
+      {
+        fieldPath: 'endpoints.custom',
+        value: [{ name: 'b', baseURL: 'https://edited.example.com', apiKey: 'mongo-key' }],
+      },
+    ]);
+  });
+
+  it('keeps an explicit scope secret replacement and does not restore the old snapshot', () => {
+    const result = mergeIndexedArrayEntriesIntoScopeOverlay(
+      [
+        {
+          fieldPath: 'endpoints.custom.1',
+          value: {
+            name: 'b',
+            baseURL: 'https://edited.example.com',
+            apiKey: 'brand-new-secret',
+          },
+        },
+      ],
+      {
+        endpoints: {
+          custom: [
+            { name: 'a', baseURL: 'https://a.example.com' },
+            { name: 'b', baseURL: 'https://b.example.com' },
+            { name: 'c', baseURL: 'https://c.example.com' },
+          ],
+        },
+      },
+      {
+        endpoints: {
+          custom: [
+            { name: 'b', baseURL: 'https://mongo-b.example.com', apiKey: 'old-secret' },
+            { name: 'd', baseURL: 'https://d.example.com', apiKey: 'keep-me' },
+          ],
+        },
+      },
+    );
+
+    expect(result).toEqual([
+      {
+        fieldPath: 'endpoints.custom',
+        value: [
+          { name: 'b', baseURL: 'https://edited.example.com', apiKey: 'brand-new-secret' },
+          { name: 'd', baseURL: 'https://d.example.com', apiKey: 'keep-me' },
+        ],
+      },
+    ]);
+  });
+
   it('preserves legacy numeric-key array objects while merging', () => {
     const result = mergeIndexedArrayEntriesIntoBase(
       [
@@ -1277,6 +1538,480 @@ describe('mergeIndexedArrayEntriesIntoBase', () => {
         value: [
           { name: 'first', baseURL: 'https://first.example.com' },
           { name: 'edited', baseURL: 'https://edited.example.com', apiKey: '' },
+        ],
+      },
+    ]);
+  });
+
+  it('preserves snapshot secrets on a baseURL-only indexed edit', () => {
+    const result = mergeIndexedArrayEntriesIntoBase(
+      [
+        {
+          fieldPath: 'endpoints.custom.1',
+          value: {
+            name: 'b',
+            baseURL: 'https://edited.example.com',
+            apiKeyPreview: 'sk-...bbbb',
+          },
+        },
+      ],
+      {
+        endpoints: {
+          custom: [
+            { name: 'a', baseURL: 'https://a.example.com', apiKey: 'yaml-a' },
+            { name: 'b', baseURL: 'https://b.example.com' },
+            { name: 'c', baseURL: 'https://c.example.com' },
+          ],
+        },
+      },
+      undefined,
+      {
+        endpoints: {
+          custom: [
+            { name: 'b', baseURL: 'https://mongo-b.example.com', apiKey: 'mongo-key' },
+            { name: 'd', baseURL: 'https://d.example.com', apiKey: 'mongo-d' },
+          ],
+        },
+      },
+    );
+
+    expect(result).toEqual([
+      {
+        fieldPath: 'endpoints.custom',
+        value: [
+          { name: 'a', baseURL: 'https://a.example.com' },
+          { name: 'b', baseURL: 'https://edited.example.com', apiKey: 'mongo-key' },
+          { name: 'c', baseURL: 'https://c.example.com' },
+          { name: 'd', baseURL: 'https://d.example.com', apiKey: 'mongo-d' },
+        ],
+      },
+    ]);
+  });
+
+  it('uses the last duplicate snapshot entry for keyed secret restoration', () => {
+    const result = mergeIndexedArrayEntriesIntoBase(
+      [
+        {
+          fieldPath: 'endpoints.custom.0',
+          value: { name: 'dup', baseURL: 'https://edited.example.com', apiKeyPreview: 'sk-...' },
+        },
+      ],
+      {
+        endpoints: {
+          custom: [{ name: 'dup', baseURL: 'https://yaml.example.com' }],
+        },
+      },
+      undefined,
+      {
+        endpoints: {
+          custom: [
+            { name: 'dup', apiKey: 'first-key' },
+            { name: 'dup', apiKey: 'last-key' },
+          ],
+        },
+      },
+    );
+
+    expect(result).toEqual([
+      {
+        fieldPath: 'endpoints.custom',
+        value: [{ name: 'dup', baseURL: 'https://edited.example.com', apiKey: 'last-key' }],
+      },
+    ]);
+  });
+
+  it('uses the production secret-field registry for indexed array saves', () => {
+    const secretFieldPaths = getSecretFieldPathSet();
+    expect(secretFieldPaths.has('endpoints.custom.apiKey')).toBe(true);
+    expect(secretFieldPaths.has('endpoints.custom.headers.*')).toBe(true);
+    expect(secretFieldPaths.has('endpoints.custom.baseURL')).toBe(false);
+    expect(secretFieldPaths.has('endpoints.custom.name')).toBe(false);
+  });
+
+  it('preserves numeric header credentials from the Mongo snapshot on indexed edits', () => {
+    const result = mergeIndexedArrayEntriesIntoBase(
+      [
+        {
+          fieldPath: 'endpoints.custom.0',
+          value: {
+            name: 'b',
+            baseURL: 'https://edited.example.com',
+          },
+        },
+      ],
+      {
+        endpoints: {
+          custom: [
+            {
+              name: 'b',
+              baseURL: 'https://b.example.com',
+              headers: { 123: 'Bearer yaml' },
+            },
+          ],
+        },
+      },
+      undefined,
+      {
+        endpoints: {
+          custom: [
+            {
+              name: 'b',
+              headers: { 123: 'Bearer mongo' },
+            },
+          ],
+        },
+      },
+    );
+
+    expect(result).toEqual([
+      {
+        fieldPath: 'endpoints.custom',
+        value: [
+          {
+            name: 'b',
+            baseURL: 'https://edited.example.com',
+            headers: { 123: 'Bearer mongo' },
+          },
+        ],
+      },
+    ]);
+  });
+
+  it('does not materialize YAML-only numeric header credentials into the outgoing array', () => {
+    const result = mergeIndexedArrayEntriesIntoBase(
+      [
+        {
+          fieldPath: 'endpoints.custom.1',
+          value: { name: 'b', baseURL: 'https://edited.example.com' },
+        },
+      ],
+      {
+        endpoints: {
+          custom: [
+            {
+              name: 'a',
+              baseURL: 'https://a.example.com',
+              headers: { 123: 'Bearer yaml-a' },
+            },
+            { name: 'b', baseURL: 'https://b.example.com' },
+          ],
+        },
+      },
+      undefined,
+      {
+        endpoints: {
+          custom: [{ name: 'b', apiKey: 'mongo-b' }],
+        },
+      },
+    );
+
+    expect(result).toEqual([
+      {
+        fieldPath: 'endpoints.custom',
+        value: [
+          { name: 'a', baseURL: 'https://a.example.com' },
+          { name: 'b', baseURL: 'https://edited.example.com', apiKey: 'mongo-b' },
+        ],
+      },
+    ]);
+  });
+
+  it('preserves dotted header credentials from the Mongo snapshot on indexed edits', () => {
+    const result = mergeIndexedArrayEntriesIntoBase(
+      [
+        {
+          fieldPath: 'endpoints.custom.0',
+          value: {
+            name: 'b',
+            baseURL: 'https://edited.example.com',
+          },
+        },
+      ],
+      {
+        endpoints: {
+          custom: [
+            {
+              name: 'b',
+              baseURL: 'https://b.example.com',
+              headers: { 'X.Foo': 'Bearer yaml' },
+            },
+          ],
+        },
+      },
+      undefined,
+      {
+        endpoints: {
+          custom: [
+            {
+              name: 'b',
+              headers: { 'X.Foo': 'Bearer mongo' },
+            },
+          ],
+        },
+      },
+    );
+
+    expect(result).toEqual([
+      {
+        fieldPath: 'endpoints.custom',
+        value: [
+          {
+            name: 'b',
+            baseURL: 'https://edited.example.com',
+            headers: { 'X.Foo': 'Bearer mongo' },
+          },
+        ],
+      },
+    ]);
+  });
+
+  it('does not materialize YAML-only dotted header credentials into the outgoing array', () => {
+    const result = mergeIndexedArrayEntriesIntoBase(
+      [
+        {
+          fieldPath: 'endpoints.custom.1',
+          value: { name: 'b', baseURL: 'https://edited.example.com' },
+        },
+      ],
+      {
+        endpoints: {
+          custom: [
+            {
+              name: 'a',
+              baseURL: 'https://a.example.com',
+              headers: { 'X.Foo': 'Bearer yaml-a' },
+            },
+            { name: 'b', baseURL: 'https://b.example.com' },
+          ],
+        },
+      },
+      undefined,
+      {
+        endpoints: {
+          custom: [{ name: 'b', apiKey: 'mongo-b' }],
+        },
+      },
+    );
+
+    expect(result).toEqual([
+      {
+        fieldPath: 'endpoints.custom',
+        value: [
+          { name: 'a', baseURL: 'https://a.example.com' },
+          { name: 'b', baseURL: 'https://edited.example.com', apiKey: 'mongo-b' },
+        ],
+      },
+    ]);
+  });
+
+  it('does not materialize YAML-only header credentials into the outgoing array', () => {
+    const result = mergeIndexedArrayEntriesIntoBase(
+      [
+        {
+          fieldPath: 'endpoints.custom.1',
+          value: {
+            name: 'b',
+            baseURL: 'https://edited.example.com',
+            headers: { 'X-Custom': 'edited' },
+          },
+        },
+      ],
+      {
+        endpoints: {
+          custom: [
+            {
+              name: 'a',
+              baseURL: 'https://a.example.com',
+              headers: { Authorization: 'Bearer yaml-a' },
+            },
+            { name: 'b', baseURL: 'https://b.example.com' },
+            {
+              name: 'c',
+              baseURL: 'https://c.example.com',
+              headers: { Authorization: 'Bearer yaml-c' },
+            },
+          ],
+        },
+      },
+      undefined,
+      {
+        endpoints: {
+          custom: [
+            {
+              name: 'b',
+              headers: { Authorization: 'Bearer mongo-b', 'X-Custom': 'old' },
+            },
+          ],
+        },
+      },
+    );
+
+    expect(result).toEqual([
+      {
+        fieldPath: 'endpoints.custom',
+        value: [
+          { name: 'a', baseURL: 'https://a.example.com' },
+          {
+            name: 'b',
+            baseURL: 'https://edited.example.com',
+            headers: { 'X-Custom': 'edited' },
+          },
+          { name: 'c', baseURL: 'https://c.example.com' },
+        ],
+      },
+    ]);
+  });
+
+  it('clears all headers when the edited entry supplies an empty headers object', () => {
+    const result = mergeIndexedArrayEntriesIntoBase(
+      [
+        {
+          fieldPath: 'endpoints.custom.0',
+          value: {
+            name: 'b',
+            baseURL: 'https://edited.example.com',
+            headers: {},
+          },
+        },
+      ],
+      {
+        endpoints: {
+          custom: [{ name: 'b', baseURL: 'https://b.example.com' }],
+        },
+      },
+      undefined,
+      {
+        endpoints: {
+          custom: [
+            {
+              name: 'b',
+              headers: { Authorization: 'Bearer mongo-b', 'X-API-Key': 'mongo-key' },
+            },
+          ],
+        },
+      },
+    );
+
+    expect(result).toEqual([
+      {
+        fieldPath: 'endpoints.custom',
+        value: [{ name: 'b', baseURL: 'https://edited.example.com', headers: {} }],
+      },
+    ]);
+  });
+
+  it('restores snapshot headers only when the edited entry omits the headers key', () => {
+    const result = mergeIndexedArrayEntriesIntoBase(
+      [
+        {
+          fieldPath: 'endpoints.custom.0',
+          value: {
+            name: 'b',
+            baseURL: 'https://edited.example.com',
+          },
+        },
+      ],
+      {
+        endpoints: {
+          custom: [{ name: 'b', baseURL: 'https://b.example.com' }],
+        },
+      },
+      undefined,
+      {
+        endpoints: {
+          custom: [
+            {
+              name: 'b',
+              headers: { Authorization: 'Bearer mongo-b' },
+            },
+          ],
+        },
+      },
+    );
+
+    expect(result).toEqual([
+      {
+        fieldPath: 'endpoints.custom',
+        value: [
+          {
+            name: 'b',
+            baseURL: 'https://edited.example.com',
+            headers: { Authorization: 'Bearer mongo-b' },
+          },
+        ],
+      },
+    ]);
+  });
+
+  it('does not copy YAML-only secrets into the edited entry', () => {
+    const result = mergeIndexedArrayEntriesIntoBase(
+      [
+        {
+          fieldPath: 'endpoints.custom.0',
+          value: {
+            name: 'a',
+            baseURL: 'https://edited.example.com',
+            apiKeyPreview: 'sk-...aaaa',
+          },
+        },
+      ],
+      {
+        endpoints: {
+          custom: [
+            { name: 'a', baseURL: 'https://a.example.com', apiKey: 'yaml-a' },
+            { name: 'b', baseURL: 'https://b.example.com' },
+          ],
+        },
+      },
+      undefined,
+      {
+        endpoints: {
+          custom: [{ name: 'b', apiKey: 'mongo-b' }],
+        },
+      },
+    );
+
+    expect(result).toEqual([
+      {
+        fieldPath: 'endpoints.custom',
+        value: [
+          { name: 'a', baseURL: 'https://edited.example.com' },
+          { name: 'b', baseURL: 'https://b.example.com', apiKey: 'mongo-b' },
+        ],
+      },
+    ]);
+  });
+
+  it('lets an explicit empty secret replace the snapshot value', () => {
+    const result = mergeIndexedArrayEntriesIntoBase(
+      [
+        {
+          fieldPath: 'endpoints.custom.1',
+          value: { name: 'b', baseURL: 'https://edited.example.com', apiKey: '' },
+        },
+      ],
+      {
+        endpoints: {
+          custom: [
+            { name: 'a', baseURL: 'https://a.example.com' },
+            { name: 'b', baseURL: 'https://b.example.com' },
+          ],
+        },
+      },
+      undefined,
+      {
+        endpoints: {
+          custom: [{ name: 'b', apiKey: 'mongo-key' }],
+        },
+      },
+    );
+
+    expect(result).toEqual([
+      {
+        fieldPath: 'endpoints.custom',
+        value: [
+          { name: 'a', baseURL: 'https://a.example.com' },
+          { name: 'b', baseURL: 'https://edited.example.com', apiKey: '' },
         ],
       },
     ]);

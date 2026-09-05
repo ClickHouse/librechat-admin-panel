@@ -29,18 +29,23 @@ if (env.NODE_ENV !== 'development') {
 }
 
 const ONE_DAY = 86400;
-const rawMaxAge = Number(env.ADMIN_PANEL_STATIC_CACHE_MAX_AGE ?? env.STATIC_CACHE_MAX_AGE);
-const rawSMaxAge = Number(env.ADMIN_PANEL_STATIC_CACHE_S_MAX_AGE ?? env.STATIC_CACHE_S_MAX_AGE);
+const firstNonEmpty = (...values: Array<string | undefined>): string | undefined =>
+  values.find((value) => typeof value === 'string' && value.trim().length > 0);
+const rawMaxAge = Number(
+  firstNonEmpty(env.ADMIN_PANEL_STATIC_CACHE_MAX_AGE, env.STATIC_CACHE_MAX_AGE),
+);
+const rawSMaxAge = Number(
+  firstNonEmpty(env.ADMIN_PANEL_STATIC_CACHE_S_MAX_AGE, env.STATIC_CACHE_S_MAX_AGE),
+);
 const maxAge = Number.isNaN(rawMaxAge) ? ONE_DAY * 2 : rawMaxAge;
 const sMaxAge = Number.isNaN(rawSMaxAge) ? ONE_DAY : rawSMaxAge;
 
 const NO_CACHE: Record<string, string> = {
   'Cache-Control':
-    env.ADMIN_PANEL_INDEX_CACHE_CONTROL ??
-    env.INDEX_CACHE_CONTROL ??
+    firstNonEmpty(env.ADMIN_PANEL_INDEX_CACHE_CONTROL, env.INDEX_CACHE_CONTROL) ??
     'no-cache, no-store, must-revalidate',
-  Pragma: env.ADMIN_PANEL_INDEX_PRAGMA ?? env.INDEX_PRAGMA ?? 'no-cache',
-  Expires: env.ADMIN_PANEL_INDEX_EXPIRES ?? env.INDEX_EXPIRES ?? '0',
+  Pragma: firstNonEmpty(env.ADMIN_PANEL_INDEX_PRAGMA, env.INDEX_PRAGMA) ?? 'no-cache',
+  Expires: firstNonEmpty(env.ADMIN_PANEL_INDEX_EXPIRES, env.INDEX_EXPIRES) ?? '0',
 };
 
 const LONG_CACHE: Record<string, string> = {
@@ -136,9 +141,10 @@ const server = Bun.serve({
     ...(BASE_PATH ? { [`${BASE_PATH}`]: () => Response.redirect(`${BASE_PATH}/`, 302) } : {}),
     '/*': async (req) => {
       const url = new URL(req.url);
-      const metricsPath = BASE_PATH && url.pathname.startsWith(BASE_PATH)
-        ? url.pathname.slice(BASE_PATH.length) || '/'
-        : url.pathname;
+      const metricsPath =
+        BASE_PATH && url.pathname.startsWith(BASE_PATH)
+          ? url.pathname.slice(BASE_PATH.length) || '/'
+          : url.pathname;
       const res = await withHttpMetrics(req, metricsPath, () => handler.fetch(req));
       const patched = new Response(res.body, res);
       for (const [k, v] of Object.entries(NO_CACHE)) {

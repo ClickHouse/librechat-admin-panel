@@ -4,7 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useState, useRef, useEffect, useLayoutEffect } from 'react';
 import type { AdminUserSearchResult } from '@librechat/data-schemas';
 import type * as t from '@/types';
-import { searchUsersFn } from '@/server';
+import { searchUsersFn, tenantQueryKeys } from '@/server';
 import { useLocalize } from '@/hooks';
 import { Avatar } from './Avatar';
 import { cn } from '@/utils';
@@ -12,6 +12,7 @@ import { cn } from '@/utils';
 export function UserSearchInline({
   existingIds,
   onAdd,
+  expectedTenantId,
   listboxId = 'user-search-results',
   disabled,
 }: t.UserSearchInlineProps) {
@@ -38,8 +39,8 @@ export function UserSearchInline({
   }, []);
 
   const searchQuery = useQuery({
-    queryKey: ['userSearch', debouncedQuery],
-    queryFn: () => searchUsersFn({ data: { query: debouncedQuery } }),
+    queryKey: tenantQueryKeys.userSearch(expectedTenantId, debouncedQuery),
+    queryFn: () => searchUsersFn({ data: { query: debouncedQuery, expectedTenantId } }),
     enabled: debouncedQuery.trim().length > 0,
     select: (data) => data.users.filter((u) => !existingIds.includes(u.id)),
   });

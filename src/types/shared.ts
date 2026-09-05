@@ -119,6 +119,7 @@ export interface PaginationProps {
 export interface UserSearchInlineProps {
   existingIds: string[];
   onAdd: (user: AdminUserSearchResult) => void;
+  expectedTenantId: string;
   listboxId?: string;
   disabled?: boolean;
 }

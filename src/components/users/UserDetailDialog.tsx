@@ -11,11 +11,12 @@ import {
   createScopeFn,
   deleteScopeFn,
   groupAssignmentsQueryOptions,
-  allGroupsQueryOptions,
+  allGroupsForTenantQueryOptions,
   removeGroupMemberFn,
   removeRoleMemberFn,
   roleAssignmentsQueryOptions,
-  allRolesQueryOptions,
+  allRolesForTenantQueryOptions,
+  tenantQueryKeys,
 } from '@/server';
 import { Avatar, TrashButton } from '@/components/shared';
 import { cn, notifySuccess, notifyError } from '@/utils';
@@ -38,6 +39,7 @@ const CONFIRM_TITLE_KEYS: Record<t.RemoveTarget['kind'], string> = {
  */
 export function UserDetailDialog({
   user,
+  expectedTenantId,
   onClose,
   canManageRoles = false,
   canManageGroups = false,
@@ -49,11 +51,13 @@ export function UserDetailDialog({
   const [view, setView] = useState<'main' | 'add'>('main');
   const [removeTarget, setRemoveTarget] = useState<t.RemoveTarget | null>(null);
 
-  const { data: roleAssignmentMap = {} } = useQuery(roleAssignmentsQueryOptions);
-  const { data: groupAssignmentMap = {} } = useQuery(groupAssignmentsQueryOptions);
-  const { data: allRoles = [] } = useQuery(allRolesQueryOptions);
-  const { data: allGroups = [] } = useQuery(allGroupsQueryOptions);
-  const { data: allScopes = [] } = useQuery(availableScopesOptions);
+  const { data: roleAssignmentMap = {} } = useQuery(roleAssignmentsQueryOptions(expectedTenantId));
+  const { data: groupAssignmentMap = {} } = useQuery(
+    groupAssignmentsQueryOptions(expectedTenantId),
+  );
+  const { data: allRoles = [] } = useQuery(allRolesForTenantQueryOptions(expectedTenantId));
+  const { data: allGroups = [] } = useQuery(allGroupsForTenantQueryOptions(expectedTenantId));
+  const { data: allScopes = [] } = useQuery(availableScopesOptions(expectedTenantId));
 
   const userId = user?.id;
   const userName = user?.name ?? '';
@@ -80,13 +84,19 @@ export function UserDetailDialog({
   );
 
   const invalidateAll = () => {
-    queryClient.invalidateQueries({ queryKey: ['roleAssignments'] });
-    queryClient.invalidateQueries({ queryKey: ['groupAssignments'] });
-    queryClient.invalidateQueries({ queryKey: ['roles'] });
-    queryClient.invalidateQueries({ queryKey: ['groups'] });
-    queryClient.invalidateQueries({ queryKey: ['roleMembers'] });
-    queryClient.invalidateQueries({ queryKey: ['groupMembers'] });
-    queryClient.invalidateQueries({ queryKey: ['availableScopes'] });
+    queryClient.invalidateQueries({
+      queryKey: tenantQueryKeys.roleAssignments(expectedTenantId),
+    });
+    queryClient.invalidateQueries({
+      queryKey: tenantQueryKeys.groupAssignments(expectedTenantId),
+    });
+    queryClient.invalidateQueries({ queryKey: tenantQueryKeys.roles(expectedTenantId) });
+    queryClient.invalidateQueries({ queryKey: tenantQueryKeys.groups(expectedTenantId) });
+    queryClient.invalidateQueries({ queryKey: tenantQueryKeys.roleMembers(expectedTenantId) });
+    queryClient.invalidateQueries({ queryKey: tenantQueryKeys.groupMembers(expectedTenantId) });
+    queryClient.invalidateQueries({
+      queryKey: tenantQueryKeys.availableScopes(expectedTenantId),
+    });
   };
 
   const handleError = (err: Error) => notifyError(err.message);
@@ -94,7 +104,7 @@ export function UserDetailDialog({
   const addRoleMutation = useMutation({
     mutationFn: (role: { id: string; name: string }) => {
       if (!userId) throw new Error('No user selected');
-      return addRoleMemberFn({ data: { roleId: role.id, userId } });
+      return addRoleMemberFn({ data: { roleId: role.id, userId, expectedTenantId } });
     },
     onSuccess: (_data, role) => {
       invalidateAll();
@@ -106,7 +116,7 @@ export function UserDetailDialog({
   const removeRoleMutation = useMutation({
     mutationFn: (role: { id: string; name: string }) => {
       if (!userId) throw new Error('No user selected');
-      return removeRoleMemberFn({ data: { roleId: role.id, userId } });
+      return removeRoleMemberFn({ data: { roleId: role.id, userId, expectedTenantId } });
     },
     onSuccess: (_data, role) => {
       invalidateAll();
@@ -119,7 +129,7 @@ export function UserDetailDialog({
   const addGroupMutation = useMutation({
     mutationFn: (group: { id: string; name: string }) => {
       if (!userId) throw new Error('No user selected');
-      return addGroupMemberFn({ data: { groupId: group.id, userId } });
+      return addGroupMemberFn({ data: { groupId: group.id, userId, expectedTenantId } });
     },
     onSuccess: (_data, group) => {
       invalidateAll();
@@ -131,7 +141,7 @@ export function UserDetailDialog({
   const removeGroupMutation = useMutation({
     mutationFn: (group: { id: string; name: string }) => {
       if (!userId) throw new Error('No user selected');
-      return removeGroupMemberFn({ data: { groupId: group.id, userId } });
+      return removeGroupMemberFn({ data: { groupId: group.id, userId, expectedTenantId } });
     },
     onSuccess: (_data, group) => {
       invalidateAll();
@@ -149,6 +159,7 @@ export function UserDetailDialog({
           name: vars.name,
           priority: 100,
           principalId: vars.userId,
+          expectedTenantId,
         },
       }),
     onSuccess: (_data, vars) => {
@@ -161,7 +172,11 @@ export function UserDetailDialog({
   const deleteProfileMutation = useMutation({
     mutationFn: (scope: t.ConfigScope) =>
       deleteScopeFn({
-        data: { principalType: scope.principalType, principalId: scope.principalId },
+        data: {
+          principalType: scope.principalType,
+          principalId: scope.principalId,
+          expectedTenantId,
+        },
       }),
     onSuccess: () => {
       invalidateAll();

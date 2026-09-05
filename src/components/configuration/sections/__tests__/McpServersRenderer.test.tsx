@@ -27,7 +27,7 @@ interface SelectProps {
   children: React.ReactNode;
   value: string;
   'aria-label'?: string;
-  onValueChange?: (v: string) => void;
+  onSelect?: (v: string) => void;
 }
 interface SelectItemProps {
   children: React.ReactNode;
@@ -62,6 +62,11 @@ interface IconButtonProps {
   'aria-label'?: string;
 }
 
+/** Shared with the mocked Select below so Select.Item's click can reach the nearest enclosing Select's onSelect — see vi.mock's hoisting note. */
+const { selectHandlerRef } = vi.hoisted(() => ({
+  selectHandlerRef: { current: undefined as ((v: string) => void) | undefined },
+}));
+
 vi.mock('@clickhouse/click-ui', () => ({
   Icon: ({ name }: IconProps) => <span data-testid={`icon-${name}`} />,
   Switch: (props: SwitchProps) => (
@@ -73,14 +78,21 @@ vi.mock('@clickhouse/click-ui', () => ({
     />
   ),
   Select: Object.assign(
-    ({ children, value, ...props }: SelectProps) => (
-      <div data-testid="select" data-value={value} aria-label={props['aria-label']}>
-        {children}
-      </div>
-    ),
+    ({ children, value, onSelect, ...props }: SelectProps) => {
+      selectHandlerRef.current = onSelect;
+      return (
+        <div data-testid="select" data-value={value} aria-label={props['aria-label']}>
+          {children}
+        </div>
+      );
+    },
     {
       Item: ({ children, value }: SelectItemProps) => (
-        <div data-testid="select-item" data-value={value}>
+        <div
+          data-testid="select-item"
+          data-value={value}
+          onClick={() => selectHandlerRef.current?.(value)}
+        >
           {children}
         </div>
       ),
@@ -289,7 +301,14 @@ describe('McpServersRenderer — YAML source detection', () => {
     expect(container.querySelector('button[aria-label^="com_a11y_rename_entry"]')).toBeNull();
   });
 
-  it('allows scoped identity actions on a YAML-defined server', () => {
+  it('allows scoped delete on a YAML-defined server, but never scoped rename', () => {
+    // Rename specifically stays locked in scope mode, unlike delete: a scope
+    // save sends the rename's source-entry reset as a separate DELETE before
+    // the destination's hinted PATCH, so preservation reads the scope
+    // document after the source is already gone -- deterministically losing
+    // any hidden oauth/apiKey/headers/oauth_headers secret. A redacted read
+    // can't tell the admin whether an entry actually has one, so this can't
+    // be conditioned on "does this entry have secrets" -- it's unconditional.
     const baseRecord = {
       kapa: { type: 'sse', url: 'https://example.com', title: 'YAML title' },
     };
@@ -301,7 +320,24 @@ describe('McpServersRenderer — YAML source detection', () => {
 
     expect(container.querySelector('button[aria-label^="com_ui_delete"]')).not.toBeNull();
     fireEvent.click(screen.getByText('kapa'));
-    expect(container.querySelector('button[aria-label^="com_a11y_rename_entry"]')).not.toBeNull();
+    expect(container.querySelector('button[aria-label^="com_a11y_rename_entry"]')).toBeNull();
+  });
+
+  it('locks scoped rename for a non-YAML (admin-created) entry too', () => {
+    // The scope-mode rename hazard isn't specific to YAML-sourced entries --
+    // it applies to any MCP server that might carry a hidden secret.
+    const baseRecord = {
+      adminOnly: { type: 'sse', url: 'https://admin.example.com' },
+    };
+    const { container } = renderRenderer({
+      baseRecord,
+      yamlBaseKeys: new Set<string>(),
+      isEditingScope: true,
+    });
+
+    expect(container.querySelector('button[aria-label^="com_ui_delete"]')).not.toBeNull();
+    fireEvent.click(screen.getByText('adminOnly'));
+    expect(container.querySelector('button[aria-label^="com_a11y_rename_entry"]')).toBeNull();
   });
 
   it('does not lock identity for a server defined only via admin overrides', () => {
@@ -809,7 +845,13 @@ describe('McpServersRenderer — handleRename', () => {
     fireEvent.blur(renameInput!);
   }
 
-  it('preserves nested per-leaf data when renaming an entry with headers', () => {
+  it('moves headers as a whole sub-object stamped with the rename-origin hint, not per-leaf', () => {
+    // A redacted read never surfaces header VALUES that are secrets, only
+    // present-but-empty containers — a per-leaf move can't restore what it
+    // never received. Moving the whole container (even when, as here, every
+    // value happens to be visible) with the origin hint attached is what lets
+    // the backend find and restore the old entry's *actual* hidden secrets
+    // despite the name change; see MCP_SECRET_SUBOBJECT_KEYS's doc comment.
     const onChange = vi.fn();
     const baseRecord = {
       foo: {
@@ -827,20 +869,22 @@ describe('McpServersRenderer — handleRename', () => {
     fireEvent.click(screen.getByText('foo'));
     triggerRename(container, 'bar');
 
-    const newAuth = onChange.mock.calls.find(
-      ([p, v]) => p === 'mcpServers.bar.headers.Authorization' && v === 'Bearer a',
-    );
-    expect(newAuth).toBeDefined();
+    const newHeadersWrite = onChange.mock.calls.find(([p]) => p === 'mcpServers.bar.headers');
+    expect(newHeadersWrite).toBeDefined();
+    expect(newHeadersWrite![1]).toEqual({
+      Authorization: 'Bearer a',
+      __previousIdentity: 'foo',
+    });
 
-    const oldAuthClear = onChange.mock.calls.find(
-      ([p, v]) => p === 'mcpServers.foo.headers.Authorization' && v === undefined,
+    const oldHeadersClear = onChange.mock.calls.find(
+      ([p, v]) => p === 'mcpServers.foo.headers' && v === undefined,
     );
-    expect(oldAuthClear).toBeDefined();
+    expect(oldHeadersClear).toBeDefined();
 
-    const wholeHeadersWrite = onChange.mock.calls.find(
-      ([p, v]) => p === 'mcpServers.bar.headers' && typeof v === 'object' && v !== null,
+    const perLeafWrite = onChange.mock.calls.find(
+      ([p]) => p === 'mcpServers.bar.headers.Authorization',
     );
-    expect(wholeHeadersWrite).toBeUndefined();
+    expect(perLeafWrite).toBeUndefined();
   });
 
   it('emits an entry-path undefined write for the old key so MongoDB unsets the whole subtree', () => {
@@ -895,6 +939,105 @@ describe('McpServersRenderer — handleRename', () => {
     );
     expect(renamePaths).toEqual([]);
     expect(onValidationError).toHaveBeenCalledWith('com_config_server_name_exists');
+  });
+
+  it('moves oauth as a hinted whole sub-object alongside headers', () => {
+    const onChange = vi.fn();
+    const baseRecord = {
+      foo: { type: 'sse', url: 'https://x.com', oauth: { scope: 'read' } },
+    };
+    const { container } = renderRenderer({
+      baseRecord,
+      yamlBaseKeys: new Set<string>(),
+      onChange,
+    });
+
+    fireEvent.click(screen.getByText('foo'));
+    triggerRename(container, 'bar');
+
+    const oauthWrite = onChange.mock.calls.find(([p]) => p === 'mcpServers.bar.oauth');
+    expect(oauthWrite).toBeDefined();
+    expect(oauthWrite![1]).toEqual({ scope: 'read', __previousIdentity: 'foo' });
+
+    const oldOauthClear = onChange.mock.calls.find(
+      ([p, v]) => p === 'mcpServers.foo.oauth' && v === undefined,
+    );
+    expect(oldOauthClear).toBeDefined();
+  });
+
+  it('keeps chaining to the true original identity across a second rename in the same session', () => {
+    // The in-between name ("bar") is never persisted to Mongo — hinting it
+    // instead of the true origin ("foo") would send the backend looking for
+    // an entry that never existed in storage. Mirrors the same guarantee the
+    // array `__previousIdentity` protocol gives renamed endpoints/groups.
+    const onChange = vi.fn();
+    const baseRecord = {
+      foo: { type: 'sse', url: 'https://x.com', oauth: { scope: 'read' } },
+    };
+    const { container, rerender } = renderRenderer({
+      baseRecord,
+      yamlBaseKeys: new Set<string>(),
+      onChange,
+    });
+
+    fireEvent.click(screen.getByText('foo'));
+    triggerRename(container, 'bar');
+
+    const firstOauthWrite = onChange.mock.calls.find(([p]) => p === 'mcpServers.bar.oauth');
+    expect(firstOauthWrite).toBeDefined();
+    expect(firstOauthWrite![1]).toEqual({ scope: 'read', __previousIdentity: 'foo' });
+
+    const editedValues: t.FlatConfigMap = {};
+    for (const [p, v] of onChange.mock.calls) {
+      editedValues[p as string] = v as t.ConfigValue;
+    }
+
+    rerender(
+      <McpServersRenderer
+        fields={fieldsForMcp()}
+        parentValue={baseRecord}
+        parentPath="mcpServers"
+        getValue={(path, fallback) => {
+          if (path in editedValues) return editedValues[path] ?? fallback;
+          if (path === 'mcpServers') return baseRecord;
+          return fallback;
+        }}
+        onChange={onChange}
+        editedValues={editedValues}
+        yamlBaseKeys={new Set<string>()}
+        onValidationError={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByText('bar'));
+    triggerRename(container, 'baz');
+
+    const secondOauthWrite = onChange.mock.calls.find(([p]) => p === 'mcpServers.baz.oauth');
+    expect(secondOauthWrite).toBeDefined();
+    expect(secondOauthWrite![1]).toEqual({ scope: 'read', __previousIdentity: 'foo' });
+  });
+
+  it('preserves an explicit "no origin" hint stamped at creation across a later rename', () => {
+    const onChange = vi.fn();
+    const baseRecord = {};
+    const editedValues: t.FlatConfigMap = {
+      'mcpServers.brandNew.type': 'sse',
+      'mcpServers.brandNew.url': 'https://new.example.com',
+      'mcpServers.brandNew.oauth': { scope: 'read', __previousIdentity: null },
+    };
+    const { container } = renderRenderer({
+      baseRecord,
+      editedValues,
+      yamlBaseKeys: new Set<string>(),
+      onChange,
+    });
+
+    fireEvent.click(screen.getByText('brandNew'));
+    triggerRename(container, 'renamed');
+
+    const oauthWrite = onChange.mock.calls.find(([p]) => p === 'mcpServers.renamed.oauth');
+    expect(oauthWrite).toBeDefined();
+    expect(oauthWrite![1]).toEqual({ scope: 'read', __previousIdentity: null });
   });
 });
 
@@ -971,6 +1114,66 @@ describe('McpServersRenderer — handleCreate per-leaf writes', () => {
   });
 });
 
+describe('McpServersRenderer — handleCreate secret sub-object hint', () => {
+  it('stamps an explicit "no origin" hint on a newly created entry\'s apiKey sub-object', () => {
+    // Prevents a brand-new entry from inheriting another entry's credentials
+    // merely by reusing a name freed up earlier in the same edit — mirrors
+    // ArrayObjectField.handleAdd's blank-entry `__previousIdentity: null` stamp.
+    const onChange = vi.fn();
+    const fields: t.SchemaField[] = [
+      ...fieldsForMcp(),
+      createField({
+        key: 'apiKey',
+        type: 'string',
+        children: [createField({ key: 'key', type: 'string' })],
+      }),
+    ];
+    const props: t.FieldRendererProps = {
+      fields,
+      parentValue: {},
+      parentPath: 'mcpServers',
+      getValue: (_path, fallback) => fallback,
+      onChange,
+      editedValues: {},
+      yamlBaseKeys: new Set<string>(),
+      onValidationError: vi.fn(),
+    };
+    const { container } = render(<McpServersRenderer {...props} />);
+
+    fireEvent.click(screen.getByText('com_config_create_mcp_server'));
+    const dialog = screen.getByTestId('form-dialog');
+    const nameInput = dialog.querySelector('#mcp-server-name') as HTMLInputElement;
+    fireEvent.change(nameInput, { target: { value: 'newServer' } });
+
+    // apiKey is a REMOTE_ONLY_FIELDS entry — only visible once a remote
+    // transport type is selected.
+    const sseOption = dialog.querySelector(
+      '[data-testid="select-item"][data-value="sse"]',
+    ) as HTMLElement;
+    fireEvent.click(sseOption);
+    const urlInput = container.querySelector(
+      'input#create-mcp-server-url',
+    ) as HTMLInputElement | null;
+    expect(urlInput).not.toBeNull();
+    fireEvent.change(urlInput!, { target: { value: 'https://example.com' } });
+    fireEvent.blur(urlInput!);
+
+    fireEvent.click(screen.getByText('com_config_group_authentication'));
+    const apiKeyInput = container.querySelector(
+      'input#create-mcp-server-apiKey-key',
+    ) as HTMLInputElement | null;
+    expect(apiKeyInput).not.toBeNull();
+    fireEvent.change(apiKeyInput!, { target: { value: 'sk-new' } });
+    fireEvent.blur(apiKeyInput!);
+
+    fireEvent.click(screen.getByText('submit'));
+
+    const apiKeyWrite = onChange.mock.calls.find(([p]) => p === 'mcpServers.newServer.apiKey');
+    expect(apiKeyWrite).toBeDefined();
+    expect(apiKeyWrite![1]).toEqual({ key: 'sk-new', __previousIdentity: null });
+  });
+});
+
 describe('McpServersRenderer — rejects reserved server names', () => {
   it('blocks __proto__ at create without emitting onChange', () => {
     const onChange = vi.fn();
@@ -1041,20 +1244,18 @@ describe('McpServersRenderer — create then edit then rename preserves nested d
     fireEvent.change(renameInput!, { target: { value: 'kapa2' } });
     fireEvent.blur(renameInput!);
 
-    const authWrite = onChange.mock.calls.find(
-      ([p]) => p === 'mcpServers.kapa2.headers.Authorization',
-    );
-    expect(authWrite).toBeDefined();
-    expect(authWrite![1]).toBe('new');
+    const headersWrite = onChange.mock.calls.find(([p]) => p === 'mcpServers.kapa2.headers');
+    expect(headersWrite).toBeDefined();
+    expect(headersWrite![1]).toEqual({ Authorization: 'new', __previousIdentity: 'kapa' });
 
     const oldClears = onChange.mock.calls.filter(
       ([p, v]) => typeof p === 'string' && p.startsWith('mcpServers.kapa.') && v === undefined,
     );
     expect(oldClears.length).toBeGreaterThan(0);
 
-    const wholeHeadersWrite = onChange.mock.calls.find(
-      ([p, v]) => p === 'mcpServers.kapa2.headers' && typeof v === 'object' && v !== null,
+    const perLeafWrite = onChange.mock.calls.find(
+      ([p]) => p === 'mcpServers.kapa2.headers.Authorization',
     );
-    expect(wholeHeadersWrite).toBeUndefined();
+    expect(perLeafWrite).toBeUndefined();
   });
 });

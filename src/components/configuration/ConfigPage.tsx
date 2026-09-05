@@ -11,14 +11,17 @@ import {
   bulkSaveProfileValuesFn,
   getBatchFieldProfilesFn,
   availableScopesOptions,
-  resetBaseConfigFieldFn,
   getResolvedConfigFn,
   importBaseConfigFn,
   resetBaseConfigFn,
+  setBaseConfigActiveFn,
   baseConfigOptions,
+  getBaseConfigFn,
   saveBaseConfigFn,
   getLangfuseConnectionFn,
   LANGFUSE_CONNECTION_QUERY_KEY,
+  configRevisionsOptions,
+  restoreConfigRevisionFn,
 } from '@/server';
 import {
   flattenObject,
@@ -27,27 +30,44 @@ import {
   normalizeImportConfig,
   hasConfigCapability,
   getTabsWithPermission,
+  collectSecretFieldPaths,
+  collectRecordFieldPaths,
   mapSecretPreviewPaths,
   secretPathForPreviewPath,
   stripSecretPreviewValues,
   notifySuccess,
   notifyError,
 } from '@/utils';
-import { useLocalize, useHighlightRef, useActiveSection, useCapabilities } from '@/hooks';
-import { CONFIG_TABS, OTHER_TAB, SECTION_META, HIDDEN_SECTIONS } from './configMeta';
 import {
   applyConfigEdit,
+  getBlockingConfigReset,
+  applyConfigReset,
   buildSavePayload,
+  detectStaleContainerEdits,
+  versionedStructuralSharing,
   mergeIndexedArrayEdits,
   partitionScopeResetPaths,
   withLangfuseConfiguredPath,
+  installIfNewer,
 } from './utils';
+import {
+  useLocalize,
+  useHighlightRef,
+  useActiveSection,
+  useCapabilities,
+  useConfigSession,
+} from '@/hooks';
+import { CONFIG_TABS, OTHER_TAB, SECTION_META, HIDDEN_SECTIONS } from './configMeta';
 import { validateMcpCrossField } from './sections/McpServersRenderer';
 import { ScopeSelector, ScopeTriggerButton } from './ScopeSelector';
-import { StickyActionBar } from '@/components/shared';
 import { ConfigTableOfContents } from './ConfigTableOfContents';
 import { ResetBaseConfigDialog } from './ResetBaseConfigDialog';
+import { VersionConflictDialog } from './VersionConflictDialog';
+import { refreshBaseConfig } from './queries';
+import { RevisionHistoryDialog } from './RevisionHistoryDialog';
+import { isVersionConflictError } from '@/server/utils/errors';
 import { ConfirmSaveDialog } from './ConfirmSaveDialog';
+import { StickyActionBar } from '@/components/shared';
 import { ConfigTabContent } from './ConfigTabContent';
 import { ImportYamlDialog } from './ImportYamlDialog';
 import { ContentToolbar } from './ContentToolbar';
@@ -56,7 +76,13 @@ import { ConfigTabBar } from './ConfigTabBar';
 import { InfoBanner } from './InfoBanner';
 
 const routeApi = getRouteApi('/_app/configuration/');
+const appRouteApi = getRouteApi('/_app');
 const LAST_SCOPE_KEY = 'config:lastScope';
+
+const baseConfigQueryKey = (tenantId: string): string[] => [
+  ...baseConfigOptions.queryKey,
+  tenantId,
+];
 
 function collectFieldPaths(fields: t.SchemaField[], prefix = ''): string[] {
   const paths: string[] = [];
@@ -71,30 +97,36 @@ function collectFieldPaths(fields: t.SchemaField[], prefix = ''): string[] {
   return paths;
 }
 
-const profileMapOptions = (fieldPaths: string[]) =>
+const profileMapOptions = (fieldPaths: string[], expectedTenantId?: string) =>
   queryOptions({
-    queryKey: ['profileMap', fieldPaths],
+    queryKey: ['profileMap', expectedTenantId ?? '__pending__', fieldPaths],
     queryFn: () =>
-      getBatchFieldProfilesFn({ data: { paths: fieldPaths } }).then(
-        (r: { profileMap: Record<string, string[]> }) => r.profileMap,
-      ),
-    enabled: fieldPaths.length > 0,
+      getBatchFieldProfilesFn({
+        data: { paths: fieldPaths, expectedTenantId: expectedTenantId! },
+      }).then((r: { profileMap: Record<string, string[]> }) => r.profileMap),
+    enabled: fieldPaths.length > 0 && expectedTenantId !== undefined,
     staleTime: 60_000,
   });
 
-function resolvedConfigOptions(scope: t.ScopeSelection) {
+function resolvedConfigOptions(scope: t.ScopeSelection, expectedTenantId?: string) {
   const principalType = scope.type === 'SCOPE' ? scope.scope.principalType : null;
   const principalId = scope.type === 'SCOPE' ? scope.scope.principalId : null;
   return queryOptions({
-    queryKey: ['resolvedConfig', principalType, principalId] as const,
+    queryKey: [
+      'resolvedConfig',
+      expectedTenantId ?? '__pending__',
+      principalType,
+      principalId,
+    ] as const,
     queryFn: () =>
       getResolvedConfigFn({
         data: {
           principalType: principalType!,
           principalId: principalId!,
+          expectedTenantId: expectedTenantId!,
         },
       }),
-    enabled: principalType != null && principalId != null,
+    enabled: principalType != null && principalId != null && expectedTenantId !== undefined,
     staleTime: 60_000,
   });
 }
@@ -102,6 +134,7 @@ function resolvedConfigOptions(scope: t.ScopeSelection) {
 export function ConfigPage({ initialTab, highlightField, initialScope }: t.ConfigPageProps) {
   const localize = useLocalize();
   const queryClient = useQueryClient();
+  const { user } = appRouteApi.useRouteContext();
   const { hasCapability } = useCapabilities();
   const canManageConfig = hasCapability(SystemCapabilities.MANAGE_CONFIGS);
   const canAssignConfigs = hasCapability(SystemCapabilities.ASSIGN_CONFIGS) || canManageConfig;
@@ -120,18 +153,91 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
     return perms;
   }, [schemaTree, hasCapability]);
 
-  const { data: baseConfigData } = useQuery(baseConfigOptions);
+  const [baseTenantScope, setBaseTenantScope] = useState(user?.tenantId ?? '');
+  const currentBaseQueryKey = useMemo(() => baseConfigQueryKey(baseTenantScope), [baseTenantScope]);
+  const { data: baseConfigData } = useQuery({
+    ...baseConfigOptions,
+    queryKey: currentBaseQueryKey,
+    structuralSharing: versionedStructuralSharing<Awaited<ReturnType<typeof getBaseConfigFn>>>(
+      (value) => value.dbConfigVersion,
+      (value) => value.effectiveTenantId,
+    ),
+    refetchOnMount: 'always',
+  });
+  useEffect(() => {
+    if (
+      baseConfigData?.effectiveTenantId === undefined ||
+      baseConfigData.effectiveTenantId === baseTenantScope
+    ) {
+      return;
+    }
+    const effectiveTenantId = baseConfigData.effectiveTenantId;
+    installIfNewer(
+      queryClient,
+      baseConfigQueryKey(effectiveTenantId),
+      baseConfigData,
+      (value) => value.dbConfigVersion,
+      (value) => value.effectiveTenantId,
+    );
+    queryClient.removeQueries({ queryKey: currentBaseQueryKey, exact: true });
+    setBaseTenantScope(effectiveTenantId);
+  }, [baseConfigData, baseTenantScope, currentBaseQueryKey, queryClient]);
   const configValues = baseConfigData?.config ?? null;
   const dbOverrides = baseConfigData?.dbOverrides;
   const configuredFromBase = baseConfigData?.configuredFromBase;
   const schemaDefaults = baseConfigData?.schemaDefaults ?? {};
   const flatBaseline = useMemo(() => flattenObject(configValues ?? {}), [configValues]);
-  const [editedValues, setEditedValues] = useState<t.FlatConfigMap>({});
-  const [touchedPaths, setTouchedPaths] = useState<Set<string>>(() => new Set());
+  const {
+    baseline: {
+      version: frozenBaseVersion,
+      tenantId: frozenBaseTenantId,
+      value: frozenFlatBaseline,
+    },
+    adoptBaseline,
+    draft: editedValues,
+    setDraft: setEditedValues,
+    conflictOpen: versionConflictOpen,
+    setConflictOpen: setVersionConflictOpen,
+    resolveConflict,
+    rebasing: rebasingVersion,
+    discarding: discardingConflict,
+  } = useConfigSession<t.FlatConfigMap, t.FlatConfigMap>(
+    { version: null, tenantId: user?.tenantId ?? '', value: {} },
+    {},
+  );
+  const touchedPaths = useMemo(() => new Set(Object.keys(editedValues)), [editedValues]);
   const [editSessionId, setEditSessionId] = useState(0);
+
+  /**
+   * Import, Reset, and Restore are only reachable while there are no pending
+   * field edits (touchedPaths.size === 0 the whole time their dialog is
+   * open), so the dirty-edit gate below never protects them — a background
+   * refetch (30s staleTime elapsing, a window-focus refetch, an unrelated
+   * Langfuse save invalidating the same document) while one of these dialogs
+   * is open would otherwise silently re-freeze a newer version, and the
+   * admin's eventual confirm would succeed against that newer version
+   * instead of the one they were actually looking at when they opened the
+   * dialog — exactly the stale-administrator overwrite this freezing exists
+   * to prevent.
+   */
+  const [importOpen, setImportOpen] = useState(false);
+  const [resetBaseOpen, setResetBaseOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const hasDestructiveDialogOpen = importOpen || resetBaseOpen || historyOpen;
+  useEffect(() => {
+    if (baseConfigData && touchedPaths.size === 0 && !hasDestructiveDialogOpen) {
+      adoptBaseline({
+        version: baseConfigData.dbConfigVersion,
+        tenantId: baseConfigData.effectiveTenantId,
+        value: flatBaseline,
+      });
+    }
+  }, [baseConfigData, touchedPaths.size, flatBaseline, hasDestructiveDialogOpen]);
 
   const fieldPaths = useMemo(() => collectFieldPaths(schemaTree), [schemaTree]);
   const schemaPathSet = useMemo(() => new Set(fieldPaths), [fieldPaths]);
+  const secretFieldPaths = useMemo(() => collectSecretFieldPaths(schemaTree), [schemaTree]);
+  const recordFieldPaths = useMemo(() => collectRecordFieldPaths(schemaTree), [schemaTree]);
 
   const configuredPaths = useMemo(() => {
     const paths = new Set<string>();
@@ -205,7 +311,6 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
     [navigate],
   );
 
-  const [importOpen, setImportOpen] = useState(false);
   const [importSuccess, setImportSuccess] = useState(false);
   const dismissTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => () => clearTimeout(dismissTimer.current), []);
@@ -220,7 +325,6 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
       if (Object.keys(editedValues).length > 0) {
         if (!window.confirm(localize('com_config_unsaved_leave'))) return;
         setEditedValues({});
-        setTouchedPaths(new Set());
       }
       setEditSessionId((id) => id + 1);
       setConfirmSaveOpen(false);
@@ -242,10 +346,11 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
   const savedScope = useRef(localStorage.getItem(LAST_SCOPE_KEY) ?? undefined);
   const scopeToRestore = initialScope ?? savedScope.current;
   const { data: allScopes } = useQuery({
-    ...availableScopesOptions,
-    enabled: !!scopeToRestore,
+    ...availableScopesOptions(baseConfigData?.effectiveTenantId ?? ''),
+    enabled: !!scopeToRestore && baseConfigData?.effectiveTenantId !== undefined,
   });
   const initialScopeApplied = useRef(false);
+  const activeTenantRef = useRef(user?.tenantId ?? '');
   useEffect(() => {
     if (scopeToRestore && allScopes && !initialScopeApplied.current) {
       const match =
@@ -271,14 +376,18 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
   const editingScope: t.ConfigScope | undefined =
     selectedScope.type === 'SCOPE' ? selectedScope.scope : undefined;
 
-  const { data: profileMap = {} } = useQuery(profileMapOptions(fieldPaths));
+  const { data: profileMap = {} } = useQuery(
+    profileMapOptions(fieldPaths, baseConfigData?.effectiveTenantId),
+  );
 
   const handleProfileChange = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: ['profileMap'] });
     queryClient.invalidateQueries({ queryKey: ['resolvedConfig'] });
   }, [queryClient]);
 
-  const { data: resolvedData } = useQuery(resolvedConfigOptions(selectedScope));
+  const { data: resolvedData } = useQuery(
+    resolvedConfigOptions(selectedScope, baseConfigData?.effectiveTenantId),
+  );
   const scopeChangedPaths = resolvedData?.changedPaths ?? null;
   const scopeResolvedValues = resolvedData?.resolvedConfig ?? null;
 
@@ -307,10 +416,22 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
   }, [scopeChangedPaths, schemaPathSet]);
 
   const { data: langfuseConnection } = useQuery({
-    queryKey: LANGFUSE_CONNECTION_QUERY_KEY,
-    queryFn: () => getLangfuseConnectionFn(),
+    queryKey: baseConfigData?.effectiveTenantId
+      ? [...LANGFUSE_CONNECTION_QUERY_KEY, baseConfigData.effectiveTenantId]
+      : LANGFUSE_CONNECTION_QUERY_KEY,
+    queryFn: () =>
+      getLangfuseConnectionFn({
+        data: { expectedTenantId: baseConfigData!.effectiveTenantId },
+      }),
+    structuralSharing: versionedStructuralSharing<
+      Awaited<ReturnType<typeof getLangfuseConnectionFn>>
+    >(
+      (value) => value.configVersion,
+      (value) => value.effectiveTenantId,
+    ),
     enabled:
       !isEditingScope &&
+      baseConfigData?.effectiveTenantId !== undefined &&
       schemaTree.some((section) => section.key === 'langfuse') &&
       sectionPermissions.langfuse?.canEdit === true,
     retry: false,
@@ -413,24 +534,31 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
 
   const handleFieldChange = useCallback(
     (path: string, value: t.ConfigValue) => {
-      setTouchedPaths((prev) => {
-        if (prev.has(path)) return prev;
-        const next = new Set(prev);
-        next.add(path);
-        return next;
-      });
+      if (!isEditingScope && getBlockingConfigReset(editedValues, path)) {
+        notifyError(localize('com_config_reset_before_edit'));
+        return;
+      }
       setEditedValues((prev) => {
-        return applyConfigEdit(
+        const next = applyConfigEdit(
           prev,
           path,
           value,
           scopeBaseline,
           baselineIntermediates,
           baselineContainerPaths,
+          isEditingScope,
         );
+        return next;
       });
     },
-    [scopeBaseline, baselineIntermediates, baselineContainerPaths],
+    [
+      scopeBaseline,
+      baselineIntermediates,
+      baselineContainerPaths,
+      editedValues,
+      localize,
+      isEditingScope,
+    ],
   );
 
   /**
@@ -445,12 +573,6 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
       if (!(path in prev)) return prev;
       const next = { ...prev };
       delete next[path];
-      return next;
-    });
-    setTouchedPaths((prev) => {
-      if (!prev.has(path)) return prev;
-      const next = new Set(prev);
-      next.delete(path);
       return next;
     });
   }, []);
@@ -477,15 +599,132 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
+  useEffect(() => {
+    const effectiveTenantId = baseConfigData?.effectiveTenantId;
+    if (effectiveTenantId === undefined || effectiveTenantId === activeTenantRef.current) {
+      return;
+    }
+    activeTenantRef.current = effectiveTenantId;
+    savedScope.current = undefined;
+    initialScopeApplied.current = true;
+    localStorage.removeItem(LAST_SCOPE_KEY);
+    setEditedValues({});
+    setEditSessionId((id) => id + 1);
+    setConfirmSaveOpen(false);
+    setImportOpen(false);
+    setResetBaseOpen(false);
+    setHistoryOpen(false);
+    setVersionConflictOpen(false);
+    setScopeSelectorOpen(false);
+    setSelectedScope({ type: 'BASE' });
+    adoptBaseline({
+      version: baseConfigData?.dbConfigVersion ?? null,
+      tenantId: effectiveTenantId,
+      value: flatBaseline,
+    });
+    queryClient.removeQueries({ queryKey: ['profileMap'] });
+    queryClient.removeQueries({ queryKey: ['resolvedConfig'] });
+    queryClient.removeQueries({ queryKey: ['availableScopes'] });
+    queryClient.removeQueries({ queryKey: ['fieldProfileValues'] });
+    queryClient.removeQueries({ queryKey: ['roles'] });
+    queryClient.removeQueries({ queryKey: ['groups'] });
+    navigate({ search: (prev: Record<string, unknown>) => ({ ...prev, scope: undefined }) });
+    notifyError(localize('com_config_tenant_changed'));
+  }, [baseConfigData, flatBaseline, localize, navigate, queryClient]);
+
   const handleDiscard = useCallback(() => {
     setEditedValues({});
-    setTouchedPaths(new Set());
     setEditSessionId((id) => id + 1);
   }, []);
 
+  const handleDiscardAfterConflict = useCallback(
+    () =>
+      resolveConflict('discard', async () => {
+        const fresh = await refreshBaseConfig(queryClient);
+        setBaseTenantScope(fresh.effectiveTenantId);
+        handleDiscard();
+        setImportOpen(false);
+        setResetBaseOpen(false);
+        setHistoryOpen(false);
+        adoptBaseline({
+          version: fresh.dbConfigVersion,
+          tenantId: fresh.effectiveTenantId,
+          value: flattenObject((fresh.config ?? {}) as Record<string, t.ConfigValue>),
+        });
+      }).catch((err: Error) => notifyError(err.message)),
+    [resolveConflict, adoptBaseline, handleDiscard, queryClient],
+  );
+
+  const handleRebaseAfterConflict = useCallback(
+    () =>
+      resolveConflict('rebase', async () => {
+        const fresh = await refreshBaseConfig(queryClient);
+        if (fresh.effectiveTenantId !== frozenBaseTenantId) {
+          handleDiscard();
+          setBaseTenantScope(fresh.effectiveTenantId);
+          adoptBaseline({
+            version: fresh.dbConfigVersion,
+            tenantId: fresh.effectiveTenantId,
+            value: flattenObject((fresh.config ?? {}) as Record<string, t.ConfigValue>),
+          });
+          notifyError(localize('com_config_tenant_changed'));
+          return;
+        }
+
+        // A numeric array index (endpoints.custom.2, ...) no longer safely
+        // identifies its original element once the array changed underneath
+        // the draft, and a whole-array or whole-record add/remove draft was
+        // computed from the container's old contents — all three risk silently
+        // overwriting whatever the other admin changed. Drop those specific
+        // edits instead of trusting them; everything else in the draft still
+        // replays onto the new baseline.
+        const newFlatBaseline = flattenObject(
+          (fresh.config ?? {}) as Record<string, t.ConfigValue>,
+        );
+        const staleContainerPaths = detectStaleContainerEdits(
+          touchedPaths,
+          editedValues,
+          frozenFlatBaseline,
+          newFlatBaseline,
+          secretFieldPaths,
+        );
+        if (staleContainerPaths.length > 0) {
+          setEditedValues((prev) => {
+            const next = { ...prev };
+            for (const path of staleContainerPaths) delete next[path];
+            return next;
+          });
+          const count = staleContainerPaths.length;
+          notifyError(
+            count === 1
+              ? localize('com_config_version_conflict_indexed_dropped', { count })
+              : localize('com_config_version_conflict_indexed_dropped_plural', { count }),
+          );
+        }
+
+        adoptBaseline({
+          version: fresh.dbConfigVersion,
+          tenantId: fresh.effectiveTenantId,
+          value: newFlatBaseline,
+        });
+        setEditSessionId((id) => id + 1);
+      }).catch((err: Error) => notifyError(err.message)),
+    [
+      resolveConflict,
+      adoptBaseline,
+      queryClient,
+      touchedPaths,
+      editedValues,
+      frozenFlatBaseline,
+      frozenBaseTenantId,
+      secretFieldPaths,
+      localize,
+      handleDiscard,
+    ],
+  );
+
   const clearEdits = useCallback(() => {
     setEditedValues({});
-    setTouchedPaths(new Set());
     setEditSessionId((id) => id + 1);
     setConfirmSaveOpen(false);
     setSaving(false);
@@ -493,34 +732,97 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
     notifySuccess(localize('com_config_saved'));
   }, [localize]);
 
-  const invalidateAndResetBase = useCallback(() => {
-    queryClient.invalidateQueries({ queryKey: ['baseConfig'] });
+  // Awaited (not fire-and-forget) so `baseConfigData` reflects the new
+  // version by the time `clearEdits` drops touchedPaths to 0 — otherwise the
+  // frozen-version re-sync effect fires immediately against the still-stale
+  // cached data, and an admin who starts a new edit before the background
+  // refetch lands would freeze on that stale version, 409ing on the next save.
+  const invalidateAndResetBase = useCallback(async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['baseConfig'] }),
+      queryClient.invalidateQueries({ queryKey: ['configRevisions'] }),
+    ]);
     clearEdits();
   }, [queryClient, clearEdits]);
 
-  const invalidateAndResetScope = useCallback(() => {
-    queryClient.invalidateQueries({ queryKey: ['resolvedConfig'] });
-    queryClient.invalidateQueries({ queryKey: ['profileMap'] });
-    queryClient.invalidateQueries({ queryKey: ['availableScopes'] });
+  const invalidateAndResetScope = useCallback(async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['resolvedConfig'] }),
+      queryClient.invalidateQueries({ queryKey: ['profileMap'] }),
+      queryClient.invalidateQueries({ queryKey: ['availableScopes'] }),
+    ]);
     clearEdits();
   }, [queryClient, clearEdits]);
 
   const importMutation = useMutation({
-    mutationFn: (config: Record<string, t.ConfigValue>) => importBaseConfigFn({ data: { config } }),
-    onError: (err: Error) => notifyError(err.message),
+    mutationFn: (config: Record<string, t.ConfigValue>) =>
+      importBaseConfigFn({
+        data: {
+          config,
+          expectedVersion: frozenBaseVersion,
+          expectedTenantId: frozenBaseTenantId,
+        },
+      }),
+    onError: (err: Error) => {
+      notifyError(err.message);
+      // The import never landed — any in-progress edit draft is still valid
+      // and must not be silently discarded (see VersionConflictDialog).
+      if (isVersionConflictError(err)) {
+        setVersionConflictOpen(true);
+      }
+    },
     onSuccess: invalidateAndResetBase,
   });
 
-  const [resetBaseOpen, setResetBaseOpen] = useState(false);
   const [resettingBase, setResettingBase] = useState(false);
+  const [activatingBase, setActivatingBase] = useState(false);
   const [resetBaseError, setResetBaseError] = useState<string | null>(null);
+  const [restoringRevision, setRestoringRevision] = useState(false);
+  const [restoreError, setRestoreError] = useState<string | null>(null);
+
+  const revisionsQuery = useQuery({
+    ...configRevisionsOptions(user?.id ?? '', baseConfigData?.effectiveTenantId),
+    enabled: historyOpen && canManageConfig && !isEditingScope,
+  });
+
+  const handleActivateBaseConfig = useCallback(async () => {
+    if (activatingBase || isDirty) return;
+    setActivatingBase(true);
+    try {
+      await setBaseConfigActiveFn({
+        data: {
+          isActive: true,
+          expectedVersion: frozenBaseVersion,
+          expectedTenantId: frozenBaseTenantId,
+        },
+      });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['baseConfig'] }),
+        queryClient.invalidateQueries({ queryKey: ['configRevisions'] }),
+      ]);
+      notifySuccess(localize('com_config_reactivate_success'));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      notifyError(message);
+      if (isVersionConflictError(err)) {
+        setVersionConflictOpen(true);
+      }
+    } finally {
+      setActivatingBase(false);
+    }
+  }, [activatingBase, frozenBaseTenantId, frozenBaseVersion, isDirty, localize, queryClient]);
 
   const handleResetBaseConfig = useCallback(async () => {
     if (resettingBase) return;
     setResettingBase(true);
     setResetBaseError(null);
     try {
-      await resetBaseConfigFn();
+      await resetBaseConfigFn({
+        data: {
+          expectedVersion: frozenBaseVersion,
+          expectedTenantId: frozenBaseTenantId,
+        },
+      });
       /** resolvedConfig holds each scope's own overrides (not a base merge), so a
        *  base reset doesn't make it stale on its own — but base-derived data
        *  (schemaDefaults, base values used for MCP inheritance) feeds scope mode,
@@ -528,9 +830,9 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['baseConfig'] }),
         queryClient.invalidateQueries({ queryKey: ['resolvedConfig'] }),
+        queryClient.invalidateQueries({ queryKey: ['configRevisions'] }),
       ]);
       setEditedValues({});
-      setTouchedPaths(new Set());
       setEditSessionId((id) => id + 1);
       setResettingBase(false);
       setResetBaseOpen(false);
@@ -540,24 +842,69 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
       setResettingBase(false);
       setResetBaseError(message);
       notifyError(message);
+      // The reset never landed — any in-progress edit draft is still valid
+      // and must not be silently discarded (see VersionConflictDialog).
+      if (isVersionConflictError(err)) {
+        setVersionConflictOpen(true);
+      }
     }
-  }, [resettingBase, queryClient, localize]);
+  }, [resettingBase, queryClient, localize, frozenBaseVersion, frozenBaseTenantId]);
+
+  const handleRestoreRevision = useCallback(
+    async (id: string) => {
+      if (restoringRevision) return;
+      setRestoringRevision(true);
+      setRestoreError(null);
+      try {
+        await restoreConfigRevisionFn({
+          data: {
+            id,
+            expectedVersion: frozenBaseVersion,
+            expectedTenantId: frozenBaseTenantId,
+          },
+        });
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: ['baseConfig'] }),
+          queryClient.invalidateQueries({ queryKey: ['resolvedConfig'] }),
+          queryClient.invalidateQueries({ queryKey: ['configRevisions'] }),
+        ]);
+        setEditedValues({});
+        setEditSessionId((n) => n + 1);
+        setRestoringRevision(false);
+        setHistoryOpen(false);
+        notifySuccess(localize('com_config_revision_success'));
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        setRestoringRevision(false);
+        setRestoreError(message);
+        notifyError(message);
+        // The restore never landed — any in-progress edit draft is still
+        // valid and must not be silently discarded (see VersionConflictDialog).
+        if (isVersionConflictError(err)) {
+          setVersionConflictOpen(true);
+        }
+      }
+    },
+    [restoringRevision, queryClient, localize, frozenBaseVersion, frozenBaseTenantId],
+  );
 
   const handleResetField = useCallback((fieldPath: string) => {
     startTransition(() => {
-      setTouchedPaths((prev) => {
-        if (prev.has(fieldPath)) return prev;
-        const next = new Set(prev);
-        next.add(fieldPath);
+      setEditedValues((prev) => {
+        const next = applyConfigReset(prev, fieldPath);
         return next;
       });
-      setEditedValues((prev) => ({ ...prev, [fieldPath]: undefined }));
     });
   }, []);
 
   const handleConfirmSave = useCallback(async () => {
     if (saving) return;
-    const { touched, saves, resets } = buildSavePayload(touchedPaths, editedValues, schemaPathSet);
+    const { touched, saves, resets } = buildSavePayload(
+      touchedPaths,
+      editedValues,
+      schemaPathSet,
+      recordFieldPaths,
+    );
     if (touched.length === 0) return;
 
     /** Per-leaf saves can land an MCP entry in a transport state whose required siblings are missing (e.g. type=stdio with no command/args). Server-side per-field validation only sees one path at a time, so do the cross-field check here against the merged effective entry before any PATCH fires. Use baseActiveConfigValues so scope-mode edits validate against the scope-resolved baseline (where prior scope overrides supply some required fields) instead of the base config alone. */
@@ -605,75 +952,89 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
     setSaveError(null);
 
     try {
-      /** Resets must land before saves so a delete-then-recreate at the same path (e.g. MCP entry replaced with different fields) wipes stale fields first and the new leaf PATCHes don't race against the DELETE. */
-      if (resets.length > 0) {
-        const resetPromises = isEditingScope
-          ? (() => {
-              const { resetPaths, tombstonePaths } = partitionScopeResetPaths(
-                resets,
-                inheritedMcpKeys,
-              );
-              return [
-                ...resetPaths.map((fieldPath) =>
-                  removeFieldProfileValueFn({
-                    data: {
-                      fieldPath,
-                      principalType: editingScope!.principalType,
-                      principalId: editingScope!.principalId,
-                    },
-                  }),
-                ),
-                ...tombstonePaths.map((fieldPath) =>
-                  tombstoneFieldProfileValueFn({
-                    data: {
-                      fieldPath,
-                      principalType: editingScope!.principalType,
-                      principalId: editingScope!.principalId,
-                    },
-                  }),
-                ),
-              ];
-            })()
-          : resets.map((fieldPath) => resetBaseConfigFieldFn({ data: { fieldPath } }));
-        if (resetPromises.length > 0) {
-          await Promise.all(resetPromises);
+      /** Resets must land before saves so a delete-then-recreate at the same path (e.g. MCP entry replaced with different fields) wipes stale fields first and the new leaf PATCHes don't race against the DELETE. Base mode sends both in one server call so a single snapshot is taken before either DELETE or PATCH. */
+      if (isEditingScope) {
+        if (resets.length > 0) {
+          const { resetPaths, tombstonePaths } = partitionScopeResetPaths(resets, inheritedMcpKeys);
+          const resetPromises = [
+            ...resetPaths.map((fieldPath) =>
+              removeFieldProfileValueFn({
+                data: {
+                  fieldPath,
+                  principalType: editingScope!.principalType,
+                  principalId: editingScope!.principalId,
+                  expectedTenantId: frozenBaseTenantId,
+                },
+              }),
+            ),
+            ...tombstonePaths.map((fieldPath) =>
+              tombstoneFieldProfileValueFn({
+                data: {
+                  fieldPath,
+                  principalType: editingScope!.principalType,
+                  principalId: editingScope!.principalId,
+                  expectedTenantId: frozenBaseTenantId,
+                },
+              }),
+            ),
+          ];
+          if (resetPromises.length > 0) {
+            await Promise.all(resetPromises);
+          }
         }
-      }
-
-      if (saves.length > 0) {
-        if (isEditingScope) {
+        if (saves.length > 0) {
           await bulkSaveProfileValuesFn({
             data: {
               principalType: editingScope!.principalType,
               principalId: editingScope!.principalId,
+              expectedTenantId: frozenBaseTenantId,
               entries: saves,
             },
           });
-        } else {
-          await saveBaseConfigFn({ data: { entries: saves } });
         }
+      } else {
+        await saveBaseConfigFn({
+          data: {
+            entries: saves,
+            resetPaths: resets,
+            expectedVersion: frozenBaseVersion,
+            expectedTenantId: frozenBaseTenantId,
+          },
+        });
       }
 
       if (isEditingScope) {
-        invalidateAndResetScope();
+        await invalidateAndResetScope();
       } else {
-        invalidateAndResetBase();
+        await invalidateAndResetBase();
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       setSaving(false);
       setSaveError(message);
       notifyError(message);
+      /** A version conflict can never succeed by retrying with the same frozen
+       * version, but a long edit session's draft must not be silently thrown
+       * away the moment CAS detects concurrent work — hand the admin an
+       * explicit choice instead (VersionConflictDialog): rebase onto the
+       * latest version and keep editing, or discard and start fresh. */
+      if (!isEditingScope && isVersionConflictError(err)) {
+        setConfirmSaveOpen(false);
+        setVersionConflictOpen(true);
+      }
     }
   }, [
     touchedPaths,
     editedValues,
     schemaPathSet,
+    recordFieldPaths,
     saving,
     isEditingScope,
     baseActiveConfigValues,
     configValues,
     baseConfigData,
+    frozenBaseVersion,
+    frozenBaseTenantId,
     localize,
     editingScope,
     invalidateAndResetScope,
@@ -683,10 +1044,14 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
   const serializedEditedValues = useMemo(() => {
     const result: t.FlatConfigMap = {};
     for (const [k, v] of Object.entries(editedValues)) {
-      result[k] = stripSecretPreviewValues(deepSerializeKVPairs(v), k, schemaPathSet);
+      result[k] = stripSecretPreviewValues(
+        deepSerializeKVPairs(v, k, recordFieldPaths),
+        k,
+        schemaPathSet,
+      );
     }
     return result;
-  }, [editedValues, schemaPathSet]);
+  }, [editedValues, schemaPathSet, recordFieldPaths]);
 
   const originalValuesForDialog = useMemo(() => {
     const baseline = isEditingScope ? scopeBaseline : flatBaseline;
@@ -739,6 +1104,7 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
         data: {
           principalType: scope.principalType,
           principalId: scope.principalId,
+          expectedTenantId: frozenBaseTenantId,
           entries,
         },
       });
@@ -754,7 +1120,7 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
         }),
       );
     },
-    [queryClient, localize, showImportSuccess, schemaPathSet],
+    [queryClient, localize, showImportSuccess, schemaPathSet, frozenBaseTenantId],
   );
 
   const handleImport = useCallback(
@@ -952,10 +1318,36 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
     return undefined;
   })();
 
+  const historyTitle = (() => {
+    if (!canManageConfig) {
+      return localize('com_cap_no_permission', { cap: SystemCapabilities.MANAGE_CONFIGS });
+    }
+    if (isDirty) return localize('com_config_revision_dirty');
+    return undefined;
+  })();
+
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden pt-2">
       <div className="shrink-0 px-4">
         {banner && <div className="pt-4 pb-2">{banner}</div>}
+        {!isEditingScope && baseConfigData?.dbIsActive === false && (
+          <div
+            className="mt-4 mb-2 flex items-center gap-3 rounded-md border border-(--cui-color-accent-warning) px-3 py-2 text-sm"
+            role="alert"
+          >
+            <span className="flex-1">{localize('com_config_base_inactive')}</span>
+            <button
+              type="button"
+              onClick={() => void handleActivateBaseConfig()}
+              disabled={activatingBase || isDirty || !canManageConfig}
+              className="shrink-0 cursor-pointer rounded-md border border-(--cui-color-stroke-default) bg-transparent px-2.5 py-1 text-xs font-medium transition-colors hover:bg-(--cui-color-background-hover) disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {activatingBase
+                ? localize('com_config_reactivating')
+                : localize('com_config_reactivate')}
+            </button>
+          </div>
+        )}
         <HeaderActions
           showImport
           importDisabled={isDirty || !canManageConfig}
@@ -971,6 +1363,13 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
           onResetClick={() => {
             setResetBaseError(null);
             setResetBaseOpen(true);
+          }}
+          showHistory={!isEditingScope}
+          historyDisabled={isDirty || !canManageConfig}
+          historyTitle={historyTitle}
+          onHistoryClick={() => {
+            setRestoreError(null);
+            setHistoryOpen(true);
           }}
           showScope={permissions.canView}
           scopeSelection={selectedScope}
@@ -1024,6 +1423,7 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
               schemaDefaults={schemaDefaults}
               showConfiguredOnly={showConfiguredOnly}
               isEditingScope={isEditingScope}
+              effectiveTenantId={baseConfigData?.effectiveTenantId}
               baseRecordKeys={baseRecordKeys}
               onValidationError={(message) => notifyError(message)}
               editSessionId={editSessionId}
@@ -1060,8 +1460,17 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
         onCancel={() => setConfirmSaveOpen(false)}
       />
 
+      <VersionConflictDialog
+        open={versionConflictOpen}
+        rebasing={rebasingVersion}
+        discarding={discardingConflict}
+        onRebase={handleRebaseAfterConflict}
+        onDiscard={handleDiscardAfterConflict}
+      />
+
       <ScopeSelector
         open={scopeSelectorOpen}
+        expectedTenantId={baseConfigData?.effectiveTenantId ?? frozenBaseTenantId}
         onOpenChange={setScopeSelectorOpen}
         currentSelection={selectedScope}
         onSelect={handleScopeChange}
@@ -1071,6 +1480,7 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
 
       <ImportYamlDialog
         open={importOpen}
+        expectedTenantId={frozenBaseTenantId}
         onClose={() => setImportOpen(false)}
         onImport={handleImport}
         onImportAsProfile={handleImportAsProfile}
@@ -1087,6 +1497,23 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
           setResetBaseError(null);
         }}
       />
+
+      <RevisionHistoryDialog
+        open={historyOpen}
+        loading={revisionsQuery.isLoading}
+        restoring={restoringRevision}
+        error={
+          restoreError ??
+          (revisionsQuery.error instanceof Error ? revisionsQuery.error.message : null)
+        }
+        revisions={revisionsQuery.data?.revisions ?? []}
+        onRestore={handleRestoreRevision}
+        onCancel={() => {
+          if (restoringRevision) return;
+          setHistoryOpen(false);
+          setRestoreError(null);
+        }}
+      />
     </div>
   );
 }
@@ -1100,6 +1527,10 @@ function HeaderActions({
   resetDisabled,
   resetTitle,
   onResetClick,
+  showHistory,
+  historyDisabled,
+  historyTitle,
+  onHistoryClick,
   showScope,
   scopeSelection,
   onScopeClick,
@@ -1112,6 +1543,10 @@ function HeaderActions({
   resetDisabled: boolean;
   resetTitle?: string;
   onResetClick: () => void;
+  showHistory: boolean;
+  historyDisabled: boolean;
+  historyTitle?: string;
+  onHistoryClick: () => void;
   showScope: boolean;
   scopeSelection: t.ScopeSelection;
   onScopeClick: () => void;
@@ -1153,6 +1588,21 @@ function HeaderActions({
             <Icon name="refresh" size="xs" />
           </span>
           {localize('com_config_reset_base')}
+        </button>
+      )}
+      {showHistory && (
+        <button
+          type="button"
+          onClick={onHistoryClick}
+          disabled={historyDisabled}
+          aria-disabled={historyDisabled || undefined}
+          title={historyTitle}
+          className="flex shrink-0 cursor-pointer items-center gap-1.5 rounded-lg border border-(--cui-color-stroke-default) bg-transparent px-3 py-1.5 text-sm text-(--cui-color-text-default) transition-colors hover:bg-(--cui-color-background-hover) disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <span aria-hidden="true">
+            <Icon name="clock" size="xs" />
+          </span>
+          {localize('com_config_revision_history')}
         </button>
       )}
       {showScope && <ScopeTriggerButton currentSelection={scopeSelection} onClick={onScopeClick} />}

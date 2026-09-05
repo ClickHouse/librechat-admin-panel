@@ -4,7 +4,12 @@ import { Button, Dialog, Icon } from '@clickhouse/click-ui';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { AdminSystemGrant } from '@librechat/data-schemas';
 import type * as t from '@/types';
-import { grantCapabilityFn, principalGrantsQueryOptions, revokeCapabilityFn } from '@/server';
+import {
+  grantCapabilityFn,
+  principalGrantsQueryOptions,
+  revokeCapabilityFn,
+  tenantQueryKeys,
+} from '@/server';
 import { getScopeTypeConfig, SystemCapabilities } from '@/constants';
 import { cn, notifySuccess, notifyError } from '@/utils';
 import { CapabilityPanel } from './CapabilityPanel';
@@ -26,6 +31,7 @@ export function EditCapabilitiesDialog({
   principalType,
   principalId,
   principalName,
+  expectedTenantId,
   onClose,
 }: t.EditCapabilitiesDialogProps) {
   const localize = useLocalize();
@@ -33,7 +39,11 @@ export function EditCapabilitiesDialog({
   const open = principalType != null && principalId != null;
 
   const { data: grants = [], isLoading } = useQuery({
-    ...principalGrantsQueryOptions(principalType ?? PrincipalType.ROLE, principalId ?? ''),
+    ...principalGrantsQueryOptions(
+      principalType ?? PrincipalType.ROLE,
+      principalId ?? '',
+      expectedTenantId,
+    ),
     enabled: open,
   });
 
@@ -61,7 +71,7 @@ export function EditCapabilitiesDialog({
         if (enabled && !baseline[cap]) toGrant.push(cap);
         if (!enabled && baseline[cap]) toRevoke.push(cap);
       }
-      const shared = { principalType, principalId };
+      const shared = { principalType, principalId, expectedTenantId };
       for (const cap of toGrant) {
         await grantCapabilityFn({ data: { ...shared, capability: cap } });
       }
@@ -71,9 +81,11 @@ export function EditCapabilitiesDialog({
       return vars;
     },
     onSuccess: (_data, vars) => {
-      queryClient.invalidateQueries({ queryKey: ['systemGrants'] });
-      queryClient.invalidateQueries({ queryKey: ['effectiveCapabilities'] });
-      queryClient.invalidateQueries({ queryKey: ['auditLog'] });
+      queryClient.invalidateQueries({ queryKey: tenantQueryKeys.grants(expectedTenantId) });
+      queryClient.invalidateQueries({
+        queryKey: tenantQueryKeys.effectiveCapabilitiesForTenant(expectedTenantId),
+      });
+      queryClient.invalidateQueries({ queryKey: tenantQueryKeys.auditLog(expectedTenantId) });
       notifySuccess(localize('com_toast_capabilities_saved', { name: vars.name }));
       onClose();
     },

@@ -3,14 +3,14 @@ import { Button, Dialog, Tabs } from '@clickhouse/click-ui';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import type { AdminUserSearchResult } from '@librechat/data-schemas';
 import type * as t from '@/types';
-import { addRoleMemberFn, createRoleFn, updateRolePermissionsFn } from '@/server';
+import { addRoleMemberFn, createRoleFn, tenantQueryKeys, updateRolePermissionsFn } from '@/server';
 import { SelectedMemberList, UserSearchInline } from '@/components/shared';
 import { RolePermissionsPanel } from './RolePermissionsPanel';
 import { cn, notifySuccess, notifyError } from '@/utils';
 import { defaultPermissions } from '@/constants';
 import { useLocalize } from '@/hooks';
 
-export function CreateRoleDialog({ open, onClose }: t.CreateRoleDialogProps) {
+export function CreateRoleDialog({ open, expectedTenantId, onClose }: t.CreateRoleDialogProps) {
   const localize = useLocalize();
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<t.CreateRoleTab>('details');
@@ -32,18 +32,26 @@ export function CreateRoleDialog({ open, onClose }: t.CreateRoleDialogProps) {
 
   const mutation = useMutation({
     mutationFn: async ({ name: submittedName }: { name: string }) => {
-      const { role } = await createRoleFn({ data: { name: submittedName, description } });
-      await updateRolePermissionsFn({ data: { id: role.id, permissions } });
+      const { role } = await createRoleFn({
+        data: { name: submittedName, description, expectedTenantId },
+      });
+      await updateRolePermissionsFn({ data: { id: role.id, permissions, expectedTenantId } });
       for (const user of selectedUsers) {
-        await addRoleMemberFn({ data: { roleId: role.id, userId: user.id } });
+        await addRoleMemberFn({
+          data: { roleId: role.id, userId: user.id, expectedTenantId },
+        });
       }
       return { name: submittedName };
     },
     onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ['roles'] });
-      queryClient.invalidateQueries({ queryKey: ['roleMembers'] });
-      queryClient.invalidateQueries({ queryKey: ['availableScopes'] });
-      queryClient.invalidateQueries({ queryKey: ['roleAssignments'] });
+      queryClient.invalidateQueries({ queryKey: tenantQueryKeys.roles(expectedTenantId) });
+      queryClient.invalidateQueries({ queryKey: tenantQueryKeys.roleMembers(expectedTenantId) });
+      queryClient.invalidateQueries({
+        queryKey: tenantQueryKeys.availableScopes(expectedTenantId),
+      });
+      queryClient.invalidateQueries({
+        queryKey: tenantQueryKeys.roleAssignments(expectedTenantId),
+      });
       notifySuccess(localize('com_toast_role_created', { name: data.name }));
       resetAndClose();
     },
@@ -168,6 +176,7 @@ export function CreateRoleDialog({ open, onClose }: t.CreateRoleDialogProps) {
                 <UserSearchInline
                   existingIds={selectedUsers.map((u) => u.id)}
                   onAdd={addUser}
+                  expectedTenantId={expectedTenantId}
                   listboxId="create-role-member-results"
                   disabled={mutation.isPending}
                 />

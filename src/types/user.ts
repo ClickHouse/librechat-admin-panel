@@ -13,6 +13,7 @@ export interface UserAssignment {
 
 export interface CreateUserDialogProps {
   open: boolean;
+  expectedTenantId: string;
   onClose: () => void;
 }
 
@@ -36,6 +37,7 @@ export type RemoveTarget =
 
 export interface UserDetailDialogProps {
   user: TUser | null;
+  expectedTenantId: string;
   onClose: () => void;
   canManageRoles?: boolean;
   canManageGroups?: boolean;

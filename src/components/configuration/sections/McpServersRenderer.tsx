@@ -2,6 +2,7 @@ import { Icon } from '@clickhouse/click-ui';
 import { memo, useRef, useMemo, useState, useEffect, useCallback } from 'react';
 import type { ReactNode } from 'react';
 import type * as t from '@/types';
+import { cn, PREVIOUS_IDENTITY_HINT_KEY, withPreviousIdentityHint } from '@/utils';
 import { YAML_LOCKED_FIELDS, INSPECTOR_DERIVED } from './mcpFieldMeta';
 import { useCollapsibleSection } from '../useCollapsibleSection';
 import { ObjectEntryCard } from '../fields/ObjectEntryCard';
@@ -10,7 +11,6 @@ import { renderInlineField } from '../FieldRenderer';
 import { SelectField } from '../fields/SelectField';
 import { FormDialog } from '@/components/shared';
 import { useLocalize } from '@/hooks';
-import { cn } from '@/utils';
 
 const TRANSPORT_FIELDS: Record<string, string[]> = {
   stdio: ['command', 'args', 'env', 'stderr'],
@@ -19,6 +19,42 @@ const TRANSPORT_FIELDS: Record<string, string[]> = {
   http: ['url', 'headers'],
   websocket: ['url'],
 };
+
+/**
+ * Sub-object keys carrying backend-restorable secrets keyed by the server's
+ * CURRENT name (`oauth.client_secret`, `apiKey.key`, and the `headers`/
+ * `oauth_headers` credential-record containers) — none of which a redacted
+ * read ever surfaces to the browser. A per-leaf create/rename write can't
+ * carry what it never received, so these move as whole sub-objects instead
+ * (even when empty), each stamped with the same `__previousIdentity` origin
+ * hint the array-entry protocol uses (`withPreviousIdentityHint`), so the
+ * backend can locate the pre-rename entry despite the name change, or refuse
+ * to inherit anything for a brand-new entry that happens to reuse a freed
+ * name. Must match `MCP_SERVER_SECRET_SUBPATHS`/`RECORD_SECRET_CONTAINER_KEYS`
+ * in the backend's `secrets.ts`.
+ */
+const MCP_SECRET_SUBOBJECT_KEYS = ['oauth', 'apiKey', 'headers', 'oauth_headers'] as const;
+
+/**
+ * Resolves the origin hint to stamp on a moved sub-object: an already-embedded
+ * hint (from an earlier rename this same session) takes precedence over
+ * `fallbackOrigin` so a second rename in one session still points all the way
+ * back to the true pre-session identity — the in-between name was never
+ * persisted, so hinting it would send the backend looking for an entry that
+ * never existed in storage. An explicit `null` hint ("no origin," stamped at
+ * creation) is preserved rather than replaced.
+ */
+function resolvedMcpOrigin(
+  subValue: Record<string, t.ConfigValue>,
+  fallbackOrigin: string | null,
+): string | null {
+  if (PREVIOUS_IDENTITY_HINT_KEY in subValue) {
+    const existing = subValue[PREVIOUS_IDENTITY_HINT_KEY];
+    if (existing === null) return null;
+    if (typeof existing === 'string' && existing !== '') return existing;
+  }
+  return fallbackOrigin;
+}
 
 const ALL_TRANSPORT_KEYS = new Set(Object.values(TRANSPORT_FIELDS).flat());
 const REMOTE_ONLY_FIELDS = new Set(['requiresOAuth', 'apiKey', 'oauth', 'oauth_headers']);
@@ -804,6 +840,7 @@ export function McpServersRenderer(props: t.FieldRendererProps) {
       for (const [fieldKey, fieldValue] of Object.entries(entry)) {
         if (fieldValue === undefined || fieldValue === null) continue;
         if (fieldValue === '') continue;
+        if ((MCP_SECRET_SUBOBJECT_KEYS as readonly string[]).includes(fieldKey)) continue;
         if (isPlainObject(fieldValue)) {
           for (const { segments, value } of enumerateLeafPaths(fieldValue, [fieldKey])) {
             if (value === undefined || value === null || value === '') continue;
@@ -812,6 +849,15 @@ export function McpServersRenderer(props: t.FieldRendererProps) {
         } else {
           onChange(`${path}.${serverName}.${fieldKey}`, fieldValue);
         }
+      }
+      /** Same object-vs-array distinction as `handleRename` — see that block's doc comment. */
+      for (const subKey of MCP_SECRET_SUBOBJECT_KEYS) {
+        const subValue = entry[subKey];
+        if (subValue === undefined) continue;
+        const withHint = isPlainObject(subValue)
+          ? withPreviousIdentityHint(subValue, null)
+          : subValue;
+        onChange(`${path}.${serverName}.${subKey}`, withHint);
       }
       setJustAddedKey(serverName);
     },
@@ -885,6 +931,29 @@ export function McpServersRenderer(props: t.FieldRendererProps) {
       const baseEntry = baseRecord[oldKey];
       const overlayEntry = record[oldKey];
 
+      /**
+       * Move oauth/apiKey/headers/oauth_headers as whole sub-objects, stamped
+       * with the rename-origin hint — see `MCP_SECRET_SUBOBJECT_KEYS`'s doc
+       * comment. Must run before the generic leaf move below skips these same
+       * keys. `headers`/`oauth_headers` can be either shape here: still the
+       * redacted plain object from a read (untouched — hint it so the backend
+       * can restore it), or the KV-pairs array `KeyValueField` produces when
+       * the admin actually edited it this session (nothing to restore, so no
+       * hint is attached — `withPreviousIdentityHint` leaves an array as-is).
+       */
+      for (const subKey of MCP_SECRET_SUBOBJECT_KEYS) {
+        const overlaySub = isPlainObject(overlayEntry) ? overlayEntry[subKey] : undefined;
+        const baseSub = isPlainObject(baseEntry) ? baseEntry[subKey] : undefined;
+        const subValue = overlaySub !== undefined ? overlaySub : baseSub;
+        if (subValue !== undefined) {
+          const withHint = isPlainObject(subValue)
+            ? withPreviousIdentityHint(subValue, resolvedMcpOrigin(subValue, oldKey))
+            : subValue;
+          onChange(`${newPrefix}${subKey}`, withHint);
+        }
+        onChange(`${oldPrefix}${subKey}`, undefined);
+      }
+
       /** Walk overlay AND base: overlay holds in-flight edits, base catches leaves the overlay has already deleted so their old paths still get undefined-cleanup writes. */
       const baseLeaves = isPlainObject(baseEntry) ? enumerateLeafPaths(baseEntry) : [];
       const overlayLeaves = isPlainObject(overlayEntry) ? enumerateLeafPaths(overlayEntry) : [];
@@ -900,6 +969,7 @@ export function McpServersRenderer(props: t.FieldRendererProps) {
 
       for (const segKey of allSegKeys) {
         const segments = segKey.split('.');
+        if ((MCP_SECRET_SUBOBJECT_KEYS as readonly string[]).includes(segments[0])) continue;
         if (overlayBySeg.has(segKey)) {
           onChange(`${newPrefix}${segments.join('.')}`, overlayBySeg.get(segKey));
         }
@@ -1010,6 +1080,21 @@ const McpEntryRow = memo(function McpEntryRowImpl({
   const isDottedLegacy = entryKey.includes('.');
   const isReadOnly = !!disabled || isDottedLegacy;
   const isLockedIdentity = (!isEditingScope && isYamlSource) || isDottedLegacy;
+  /**
+   * Rename specifically (not delete) is locked in scope mode, regardless of
+   * YAML source, on top of `isLockedIdentity`. A scope save sends the
+   * rename's source-entry reset as a separate DELETE request before the
+   * destination's hinted PATCH, so `preserveConfigSecrets` reads the scope
+   * document AFTER the source has already been removed — the origin no
+   * longer exists to restore from, deterministically losing any hidden
+   * oauth/apiKey/headers/oauth_headers secret, not just under a race. A
+   * redacted read can never tell the admin whether an entry actually has one
+   * (an empty-looking `headers: {}` is indistinguishable from a real hidden
+   * secret), so this can't be conditioned on "does this entry have secrets" —
+   * it has to be unconditional. Delete alone doesn't need this: removing an
+   * entry doesn't try to preserve anything from elsewhere.
+   */
+  const isRenameLocked = isLockedIdentity || isEditingScope;
   const lockedKeys = isYamlSource && !isDottedLegacy ? YAML_LOCKED_FIELDS : undefined;
 
   const entryOnChange = useCallback(
@@ -1051,9 +1136,7 @@ const McpEntryRow = memo(function McpEntryRowImpl({
       value={displayValue}
       onValueChange={handleWholeEntryChange}
       onRemove={isReadOnly || isLockedIdentity ? undefined : () => onRemove(entryKey)}
-      onRename={
-        isReadOnly || isLockedIdentity ? undefined : (renamed) => onRename(entryKey, renamed)
-      }
+      onRename={isReadOnly || isRenameLocked ? undefined : (renamed) => onRename(entryKey, renamed)}
       disabled={isReadOnly}
       defaultExpanded={justAdded}
       renderFields={renderEntryFields}

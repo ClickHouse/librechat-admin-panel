@@ -7,6 +7,7 @@ import type {
   ScopePermissions,
 } from './scope';
 import type { ConfigValue, FlatConfigMap, SchemaField } from './config';
+import type { ConfigRevisionListItem } from './revision';
 
 export interface ConfigTab {
   id: string;
@@ -81,6 +82,7 @@ export interface ConfigTabContentProps {
   schemaDefaults?: FlatConfigMap;
   showConfiguredOnly?: boolean;
   isEditingScope?: boolean;
+  effectiveTenantId?: string;
   /** YAML-defined entry keys per section, keyed by parent path. */
   baseRecordKeys?: Record<string, Set<string>>;
   onValidationError?: (message: string) => void;
@@ -145,6 +147,16 @@ export interface ConfirmSaveDialogProps {
   onCancel: () => void;
 }
 
+/** Shown after the atomic endpoint rejects a save with a version conflict (409). The
+ * admin's draft is preserved either way — this only decides whether they keep it. */
+export interface VersionConflictDialogProps {
+  open: boolean;
+  rebasing: boolean;
+  discarding: boolean;
+  onRebase: () => void;
+  onDiscard: () => void;
+}
+
 export interface ContentToolbarProps {
   scrollContainer: HTMLElement | null;
   showConfiguredOnly: boolean;
@@ -168,9 +180,20 @@ export interface ResetBaseConfigDialogProps {
   onCancel: () => void;
 }
 
+export interface RevisionHistoryDialogProps {
+  open: boolean;
+  loading: boolean;
+  restoring: boolean;
+  error?: string | null;
+  revisions: ConfigRevisionListItem[];
+  onRestore: (id: string) => void;
+  onCancel: () => void;
+}
+
 export interface FieldProfilePopoverProps {
   fieldPath: string;
   fieldLabel: string;
+  expectedTenantId: string;
   fieldSchema?: SchemaField;
   profileValues: FieldProfileValue[];
   permissions: ScopePermissions;
@@ -201,15 +224,7 @@ export interface SingleFieldRendererProps {
    * whenever a scope-resolved baseline happens to also read as empty.
    */
   onDiscardField?: (path: string) => void;
-  /**
-   * Source of truth for whether a secret field currently has a queued
-   * replacement (`SecretField`'s `hasPendingEdit`). Membership in this map,
-   * not `touchedPaths`, since a replacement typed then cleared back to a
-   * baseline that itself reads as an empty string gets removed from here by
-   * `applyConfigEdit`'s baseline-match diffing, while `touchedPaths` keeps
-   * the path forever — using the latter would keep showing an open, empty
-   * replace input for a field with nothing actually queued to save.
-   */
+  /** Pending replacements and resets; touched paths are derived from these keys. */
   editedValues?: FlatConfigMap;
   disabled?: boolean;
   permissions?: ScopePermissions;
@@ -263,6 +278,7 @@ export interface FieldRendererProps {
   schemaDefaults?: FlatConfigMap;
   showConfiguredOnly?: boolean;
   isEditingScope?: boolean;
+  effectiveTenantId?: string;
   /** YAML-defined entry keys for the section being rendered. */
   yamlBaseKeys?: Set<string>;
   onValidationError?: (message: string) => void;
@@ -272,6 +288,7 @@ export interface FieldRendererProps {
 
 export interface ImportYamlDialogProps {
   open: boolean;
+  expectedTenantId: string;
   onClose: () => void;
   onImport: (appConfig: Record<string, ConfigValue>) => void;
   onImportAsProfile: (appConfig: Record<string, ConfigValue>, scope: ConfigScope) => Promise<void>;
@@ -297,6 +314,7 @@ export interface InfoBannerProps {
 export interface PreviewProfileActionsProps {
   fieldPath: string;
   fieldLabel: string;
+  expectedTenantId: string;
   fieldSchema?: SchemaField;
   scope: ConfigScope;
   currentValue: ConfigValue;
@@ -306,6 +324,7 @@ export interface PreviewProfileActionsProps {
 export interface ProfileIndicatorProps {
   fieldPath: string;
   fieldLabel: string;
+  expectedTenantId: string;
   fieldSchema?: SchemaField;
   profileTypes?: string[];
   permissions: ScopePermissions;
@@ -338,6 +357,7 @@ export interface ModalValueControlProps {
 
 export interface ScopeSelectorProps {
   open: boolean;
+  expectedTenantId: string;
   onOpenChange: (open: boolean) => void;
   currentSelection: ScopeSelection;
   onSelect: (selection: ScopeSelection) => void;

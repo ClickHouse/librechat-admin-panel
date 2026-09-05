@@ -9,6 +9,7 @@ import {
   deleteUserFn,
   groupAssignmentsQueryOptions,
   roleAssignmentsQueryOptions,
+  tenantQueryKeys,
   usersQueryOptions,
 } from '@/server';
 import {
@@ -35,7 +36,7 @@ const ROLE_FILTER_LABELS: Record<t.RoleFilter, string> = {
 export function UsersPage() {
   const localize = useLocalize();
   const queryClient = useQueryClient();
-  const { hasCapability } = useCapabilities();
+  const { hasCapability, effectiveTenantId } = useCapabilities();
   const canManage = hasCapability(SystemCapabilities.MANAGE_USERS);
   const canManageRoles = hasCapability(SystemCapabilities.MANAGE_ROLES);
   const canManageGroups = hasCapability(SystemCapabilities.MANAGE_GROUPS);
@@ -47,10 +48,10 @@ export function UsersPage() {
   const [detailUser, setDetailUser] = useState<TUser | null>(null);
   const { message: announcement, announce } = useAnnouncement();
 
-  const { data: users = [], isLoading } = useQuery(usersQueryOptions);
-  const { data: roleAssignments = {} } = useQuery(roleAssignmentsQueryOptions);
-  const { data: groupAssignments = {} } = useQuery(groupAssignmentsQueryOptions);
-  const { data: allScopes = [] } = useQuery(availableScopesOptions);
+  const { data: users = [], isLoading } = useQuery(usersQueryOptions(effectiveTenantId));
+  const { data: roleAssignments = {} } = useQuery(roleAssignmentsQueryOptions(effectiveTenantId));
+  const { data: groupAssignments = {} } = useQuery(groupAssignmentsQueryOptions(effectiveTenantId));
+  const { data: allScopes = [] } = useQuery(availableScopesOptions(effectiveTenantId));
 
   const userProfileSet = useMemo(() => {
     const set = new Set<string>();
@@ -61,14 +62,25 @@ export function UsersPage() {
   }, [allScopes]);
 
   const deleteMutation = useMutation({
-    mutationFn: (user: TUser) => deleteUserFn({ data: { id: user.id } }),
+    mutationFn: (user: TUser) =>
+      deleteUserFn({ data: { id: user.id, expectedTenantId: effectiveTenantId } }),
     onSuccess: (_data, user) => {
-      queryClient.invalidateQueries({ queryKey: ['users'] });
-      queryClient.invalidateQueries({ queryKey: ['roleAssignments'] });
-      queryClient.invalidateQueries({ queryKey: ['groupAssignments'] });
-      queryClient.invalidateQueries({ queryKey: ['roleMembers'] });
-      queryClient.invalidateQueries({ queryKey: ['groupMembers'] });
-      queryClient.invalidateQueries({ queryKey: ['availableScopes'] });
+      queryClient.invalidateQueries({ queryKey: tenantQueryKeys.users(effectiveTenantId) });
+      queryClient.invalidateQueries({
+        queryKey: tenantQueryKeys.roleAssignments(effectiveTenantId),
+      });
+      queryClient.invalidateQueries({
+        queryKey: tenantQueryKeys.groupAssignments(effectiveTenantId),
+      });
+      queryClient.invalidateQueries({
+        queryKey: tenantQueryKeys.roleMembers(effectiveTenantId),
+      });
+      queryClient.invalidateQueries({
+        queryKey: tenantQueryKeys.groupMembers(effectiveTenantId),
+      });
+      queryClient.invalidateQueries({
+        queryKey: tenantQueryKeys.availableScopes(effectiveTenantId),
+      });
       notifySuccess(localize('com_toast_user_deleted', { name: user.name }));
       setDeleteTarget(null);
     },
@@ -206,10 +218,15 @@ export function UsersPage() {
         </p>
       </section>
 
-      <CreateUserDialog open={createOpen} onClose={() => setCreateOpen(false)} />
+      <CreateUserDialog
+        open={createOpen}
+        expectedTenantId={effectiveTenantId}
+        onClose={() => setCreateOpen(false)}
+      />
 
       <UserDetailDialog
         user={detailUser}
+        expectedTenantId={effectiveTenantId}
         onClose={() => setDetailUser(null)}
         canManageRoles={canManageRoles}
         canManageGroups={canManageGroups}

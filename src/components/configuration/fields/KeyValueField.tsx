@@ -2,6 +2,7 @@ import { Select } from '@clickhouse/click-ui';
 import TextareaAutosize from 'react-textarea-autosize';
 import { useState, useEffect, useRef, useLayoutEffect } from 'react';
 import type * as t from '@/types';
+import { cn, isMcpServerHeadersContainerPath, PREVIOUS_IDENTITY_HINT_KEY } from '@/utils';
 import { AddItemButton, TrashButton } from '@/components/shared';
 import { useLocalize } from '@/hooks';
 
@@ -115,11 +116,21 @@ export function KeyValueField({
   keyPlaceholder,
   valuePlaceholder,
   'aria-label': ariaLabel,
+  fieldPath,
 }: t.KeyValueFieldProps) {
   const localize = useLocalize();
   const availableTypes = valueTypes ?? DEFAULT_TYPES;
   const listRef = useRef<HTMLDivElement>(null);
   const focusLastKeyRef = useRef(false);
+  /**
+   * `__previousIdentity` is the mcpServers rename/create origin-hint key
+   * (see `withPreviousIdentityHint`) — it only collides with an admin-typed
+   * key on the exact headers/oauth_headers container that hint protocol
+   * rides on; every other KeyValueField-backed record field has no such
+   * collision, so the reserved name is only flagged here.
+   */
+  const isReservedKeyScope = fieldPath != null && isMcpServerHeadersContainerPath(fieldPath);
+  const isReservedKey = (key: string) => isReservedKeyScope && key === PREVIOUS_IDENTITY_HINT_KEY;
 
   useLayoutEffect(() => {
     if (focusLastKeyRef.current) {
@@ -153,65 +164,75 @@ export function KeyValueField({
 
   const renderPrimitiveRow = (vType: t.KVValueType, pair: t.KeyValuePair, index: number) => {
     const valueLabel = `${localize('com_ui_value')} ${index + 1}`;
+    const reserved = isReservedKey(pair.key);
     return (
-      <div className="flex items-center gap-2" role="listitem">
-        <LocalInput
-          value={pair.key}
-          onCommit={(v) => handleChange(index, 'key', v)}
-          placeholder={keyPlaceholder ?? localize('com_ui_key')}
-          disabled={disabled}
-          aria-label={`${localize('com_ui_key')} ${index + 1}`}
-          className="config-input max-w-37.5 flex-1"
-        />
-        {vType === 'boolean' ? (
-          <div className="select-field-a11y flex-2">
-            <Select
-              value={pair.value === 'true' ? 'true' : 'false'}
-              onSelect={(v) => handleChange(index, 'value', v)}
+      <div className="flex flex-col gap-1" role="listitem">
+        <div className="flex items-center gap-2">
+          <LocalInput
+            value={pair.key}
+            onCommit={(v) => handleChange(index, 'key', v)}
+            placeholder={keyPlaceholder ?? localize('com_ui_key')}
+            disabled={disabled}
+            aria-label={`${localize('com_ui_key')} ${index + 1}`}
+            className={cn('config-input max-w-37.5 flex-1', reserved && 'config-input-error')}
+          />
+          {vType === 'boolean' ? (
+            <div className="select-field-a11y flex-2">
+              <Select
+                value={pair.value === 'true' ? 'true' : 'false'}
+                onSelect={(v) => handleChange(index, 'value', v)}
+                disabled={disabled}
+                aria-label={valueLabel}
+              >
+                <Select.Item value="true">{localize('com_ui_true')}</Select.Item>
+                <Select.Item value="false">{localize('com_ui_false')}</Select.Item>
+              </Select>
+            </div>
+          ) : (
+            <LocalInput
+              type={vType === 'number' ? 'number' : 'text'}
+              value={pair.value}
+              onCommit={(v) => handleChange(index, 'value', v)}
+              placeholder={valuePlaceholder ?? localize('com_ui_value')}
               disabled={disabled}
               aria-label={valueLabel}
-            >
-              <Select.Item value="true">{localize('com_ui_true')}</Select.Item>
-              <Select.Item value="false">{localize('com_ui_false')}</Select.Item>
-            </Select>
-          </div>
-        ) : (
-          <LocalInput
-            type={vType === 'number' ? 'number' : 'text'}
-            value={pair.value}
-            onCommit={(v) => handleChange(index, 'value', v)}
-            placeholder={valuePlaceholder ?? localize('com_ui_value')}
-            disabled={disabled}
-            aria-label={valueLabel}
-            className="config-input flex-2"
-          />
-        )}
-        {!disabled && availableTypes.length > 1 && (
-          <div className="select-field-a11y w-20 shrink-0">
-            <Select
-              value={vType}
-              onSelect={(v) => handleTypeChange(index, v as t.KVValueType)}
-              aria-label={`${localize('com_config_field_type')} ${index + 1}`}
-            >
-              {availableTypes.map((vt) => (
-                <Select.Item key={vt} value={vt}>
-                  {localize(TYPE_LABEL_KEYS[vt])}
-                </Select.Item>
-              ))}
-            </Select>
-          </div>
-        )}
-        {!disabled && (
-          <TrashButton
-            onClick={() => handleRemove(index)}
-            ariaLabel={`${localize('com_ui_delete')} ${localize('com_ui_entry')} ${index + 1}`}
-          />
+              className="config-input flex-2"
+            />
+          )}
+          {!disabled && availableTypes.length > 1 && (
+            <div className="select-field-a11y w-20 shrink-0">
+              <Select
+                value={vType}
+                onSelect={(v) => handleTypeChange(index, v as t.KVValueType)}
+                aria-label={`${localize('com_config_field_type')} ${index + 1}`}
+              >
+                {availableTypes.map((vt) => (
+                  <Select.Item key={vt} value={vt}>
+                    {localize(TYPE_LABEL_KEYS[vt])}
+                  </Select.Item>
+                ))}
+              </Select>
+            </div>
+          )}
+          {!disabled && (
+            <TrashButton
+              onClick={() => handleRemove(index)}
+              ariaLabel={`${localize('com_ui_delete')} ${localize('com_ui_entry')} ${index + 1}`}
+            />
+          )}
+        </div>
+        {reserved && (
+          <span className="text-xs text-(--cui-color-text-danger)">
+            {localize('com_config_header_key_reserved')}
+          </span>
         )}
       </div>
     );
   };
 
-  const renderJsonRow = (pair: t.KeyValuePair, index: number) => (
+  const renderJsonRow = (pair: t.KeyValuePair, index: number) => {
+    const reserved = isReservedKey(pair.key);
+    return (
     <div className="flex flex-col gap-1" role="listitem">
       <div className="flex items-center gap-2">
         <LocalInput
@@ -220,7 +241,7 @@ export function KeyValueField({
           placeholder={keyPlaceholder ?? localize('com_ui_key')}
           disabled={disabled}
           aria-label={`${localize('com_ui_key')} ${index + 1}`}
-          className="config-input min-w-0 flex-1"
+          className={cn('config-input min-w-0 flex-1', reserved && 'config-input-error')}
         />
         {!disabled && availableTypes.length > 1 && (
           <div className="select-field-a11y w-20 shrink-0">
@@ -251,8 +272,14 @@ export function KeyValueField({
         disabled={disabled}
         aria-label={`${localize('com_ui_value')} ${index + 1}`}
       />
+      {reserved && (
+        <span className="text-xs text-(--cui-color-text-danger)">
+          {localize('com_config_header_key_reserved')}
+        </span>
+      )}
     </div>
-  );
+    );
+  };
 
   return (
     <div

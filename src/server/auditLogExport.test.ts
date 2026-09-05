@@ -12,21 +12,27 @@ import { READ_AUDIT_LOG_CAPABILITY } from '@/constants';
  */
 let heldCaps: string[] = [];
 
-const apiFetchMock = vi.fn(async (path: string, _init?: RequestInit) => {
-  if (path.includes('/grants/effective')) {
-    return { ok: true, json: async () => ({ capabilities: heldCaps }) } as unknown as Response;
-  }
-  if (path.includes('/audit-log/export.csv')) {
-    return new Response('Timestamp,Action\n2025-01-01T00:00:00Z,grant.assigned\n', {
-      status: 200,
-      headers: { 'Content-Type': 'text/csv' },
-    });
-  }
-  throw new Error(`unexpected apiFetch path: ${path}`);
-});
+const apiFetchMock = vi.fn(
+  async (path: string, _init?: RequestInit, _expectedTenantId?: string) => {
+    if (path.includes('/grants/effective')) {
+      return {
+        ok: true,
+        json: async () => ({ capabilities: heldCaps, effectiveTenantId: 'tenant-a' }),
+      } as unknown as Response;
+    }
+    if (path.includes('/audit-log/export.csv')) {
+      return new Response('Timestamp,Action\n2025-01-01T00:00:00Z,grant.assigned\n', {
+        status: 200,
+        headers: { 'Content-Type': 'text/csv' },
+      });
+    }
+    throw new Error(`unexpected apiFetch path: ${path}`);
+  },
+);
 
 vi.mock('./utils/api', () => ({
-  apiFetch: (path: string, init?: RequestInit) => apiFetchMock(path, init),
+  apiFetch: (path: string, init?: RequestInit, expectedTenantId?: string) =>
+    apiFetchMock(path, init, expectedTenantId),
   extractApiError: vi.fn(async (_res: unknown, msg: string) => {
     throw new Error(msg);
   }),
@@ -39,6 +45,7 @@ vi.mock('@tanstack/react-start', () => ({
       handler: (fn: (...args: unknown[]) => unknown) => fn,
     }),
   }),
+  createServerOnlyFn: <T extends (...args: never[]) => unknown>(fn: T) => fn,
 }));
 
 vi.mock('@tanstack/react-query', () => ({
@@ -56,7 +63,7 @@ describe('exportAuditLogServerFn', () => {
   it('streams a grant-scoped text/csv attachment when authorized', async () => {
     heldCaps = [READ_AUDIT_LOG_CAPABILITY];
 
-    const res = await exportAuditLogServerFn({ data: {} });
+    const res = await exportAuditLogServerFn({ data: { expectedTenantId: 'tenant-a' } });
 
     expect(res).toBeInstanceOf(Response);
     expect(res.headers.get('Content-Type')).toMatch(/text\/csv/);
@@ -64,6 +71,7 @@ describe('exportAuditLogServerFn', () => {
 
     const exportCall = apiFetchMock.mock.calls.find((c) => String(c[0]).includes('export.csv'));
     expect(exportCall?.[0]).toMatch(/category=grant/);
+    expect(exportCall?.[2]).toBe('tenant-a');
 
     // Body is piped through verbatim rather than buffered/re-serialized.
     expect(await res.text()).toContain('grant.assigned');
@@ -71,7 +79,9 @@ describe('exportAuditLogServerFn', () => {
 
   it('rejects when READ_AUDIT_LOG is not held', async () => {
     heldCaps = [];
-    await expect(exportAuditLogServerFn({ data: {} })).rejects.toThrow();
+    await expect(
+      exportAuditLogServerFn({ data: { expectedTenantId: 'tenant-a' } }),
+    ).rejects.toThrow();
     expect(apiFetchMock.mock.calls.some((c) => String(c[0]).includes('export.csv'))).toBe(false);
   });
 });

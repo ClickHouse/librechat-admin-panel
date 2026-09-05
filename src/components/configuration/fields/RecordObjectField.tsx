@@ -1,6 +1,7 @@
 import { Button } from '@clickhouse/click-ui';
 import { useState, useCallback, useEffect, memo } from 'react';
 import type * as t from '@/types';
+import { stripUntouchedSecretRecordContainers } from '@/utils';
 import { ObjectEntryCard } from './ObjectEntryCard';
 import { AddItemButton } from '@/components/shared';
 import { useLocalize } from '@/hooks';
@@ -39,27 +40,33 @@ export function RecordObjectField({
   const handleAdd = useCallback(
     (key: string) => {
       if (key in record) return;
-      // Prepend: new key first, then existing entries
+      // Prepend: new key first, then existing entries. Surviving entries are
+      // copied forward verbatim here — strip any redacted credential-record
+      // placeholder left on them by a read, or resubmitting it would erase
+      // that entry's real secret.
       const next: Record<string, t.ConfigValue> = {
         [key]: allowPrimitiveValues ? true : {},
       };
       for (const [k, v] of Object.entries(record)) {
-        next[k] = v;
+        next[k] = stripUntouchedSecretRecordContainers(v, fields);
       }
       onChange(next);
       setJustAddedKey(key);
       setShowAddInput(false);
     },
-    [record, onChange, allowPrimitiveValues],
+    [record, onChange, allowPrimitiveValues, fields],
   );
 
   const handleRemove = useCallback(
     (key: string) => {
-      const next = { ...record };
-      delete next[key];
+      const next: Record<string, t.ConfigValue> = {};
+      for (const [k, v] of Object.entries(record)) {
+        if (k === key) continue;
+        next[k] = stripUntouchedSecretRecordContainers(v, fields);
+      }
       onChange(next);
     },
-    [record, onChange],
+    [record, onChange, fields],
   );
 
   const handleEntryChange = useCallback(
@@ -74,11 +81,11 @@ export function RecordObjectField({
       if (renamed === oldKey || renamed in record) return;
       const next: Record<string, t.ConfigValue> = {};
       for (const [k, v] of Object.entries(record)) {
-        next[k === oldKey ? renamed : k] = v;
+        next[k === oldKey ? renamed : k] = stripUntouchedSecretRecordContainers(v, fields);
       }
       onChange(next);
     },
-    [record, onChange],
+    [record, onChange, fields],
   );
 
   return (

@@ -1,18 +1,23 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Select, TextField } from '@clickhouse/click-ui';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type * as t from '@/types';
 import type { LangfuseConnectionStatus } from '@/server';
+import type * as t from '@/types';
 import {
+  baseConfigOptions,
   getLangfuseConnectionFn,
   LANGFUSE_CONNECTION_QUERY_KEY,
   testLangfuseConnectionFn,
   updateLangfuseConnectionFn,
 } from '@/server';
+import { installIfNewer, versionedStructuralSharing } from '../utils';
+import { VersionConflictDialog } from '../VersionConflictDialog';
+import { isVersionConflictError } from '@/server/utils/errors';
 import { notifyError, notifySuccess } from '@/utils';
-import { useLocalize } from '@/hooks';
+import { useLocalize, useConfigSession } from '@/hooks';
+import { refreshBaseConfig } from '../queries';
 
-type VerificationState = 'idle' | 'unverified' | 'checking' | 'verified' | 'failed';
+type VerificationState = 'idle' | 'inactive' | 'unverified' | 'checking' | 'verified' | 'failed';
 
 function getConnectionKey(status?: LangfuseConnectionStatus): string | undefined {
   if (!status?.configured || !status.destination || !status.publicKey) return undefined;
@@ -37,6 +42,8 @@ function getVerificationLabel(
       return localize('com_config_langfuse_verified');
     case 'failed':
       return message || localize('com_config_langfuse_test_fail');
+    case 'inactive':
+      return localize('com_config_langfuse_inactive');
     case 'unverified':
       return localize('com_config_langfuse_not_verified');
     default:
@@ -57,58 +64,188 @@ function getVerificationDotClass(state: VerificationState): string {
   }
 }
 
-export function LangfuseRenderer({ disabled, isEditingScope }: t.FieldRendererProps) {
+export function LangfuseRenderer({
+  disabled,
+  isEditingScope,
+  effectiveTenantId,
+}: t.FieldRendererProps) {
   const localize = useLocalize();
   const queryClient = useQueryClient();
   const [status, setStatus] = useState<LangfuseConnectionStatus>();
-  const [destination, setDestination] = useState('');
-  const [publicKey, setPublicKey] = useState('');
-  const [secretKey, setSecretKey] = useState('');
+  const {
+    baseline: { version: expectedVersion, tenantId: expectedTenantId },
+    adoptBaseline,
+    draft: { destination, publicKey, secretKey },
+    setDraft,
+    conflictOpen: versionConflictOpen,
+    setConflictOpen: setVersionConflictOpen,
+    resolveConflict,
+    rebasing: rebasingVersion,
+    discarding: discardingConflict,
+  } = useConfigSession<LangfuseConnectionStatus | undefined, t.LangfuseConnectionDraft>(
+    { version: null, tenantId: effectiveTenantId ?? '', value: undefined },
+    { destination: '', publicKey: '', secretKey: '' },
+  );
+  const setDestination = useCallback(
+    (value: string) => setDraft((draft) => ({ ...draft, destination: value })),
+    [setDraft],
+  );
+  const setPublicKey = useCallback(
+    (value: string) => setDraft((draft) => ({ ...draft, publicKey: value })),
+    [setDraft],
+  );
+  const setSecretKey = useCallback(
+    (value: string) => setDraft((draft) => ({ ...draft, secretKey: value })),
+    [setDraft],
+  );
   const [editingPublicKey, setEditingPublicKey] = useState(false);
   const [editingSecretKey, setEditingSecretKey] = useState(false);
   const [verificationState, setVerificationState] = useState<VerificationState>('idle');
   const [verificationMessage, setVerificationMessage] = useState('');
   const testedConnectionRef = useRef<string | undefined>(undefined);
   const requestRef = useRef(0);
-  const hasDraftRef = useRef(false);
+  /**
+   * Whether this field's current value differs from `status` right now —
+   * tracked per field, not as one combined flag, so editing only the secret
+   * doesn't also freeze destination/public key against a concurrent change to
+   * them. A background sync (the effect below) or a conflict rebase must not
+   * clobber a real divergence with the refetched value; only fields that
+   * still match get the fresh baseline.
+   */
+  const destinationTouchedRef = useRef(false);
+  const publicKeyTouchedRef = useRef(false);
+  /** Same "current dirtiness" role as the refs above, but for the secret key
+   *  draft — tracked via a ref instead of reading `secretKey` state directly
+   *  inside the sync effect below, so that effect stays free of a dependency
+   *  that would otherwise fire it on every keystroke. There's no baseline to
+   *  compare against (the server never sends back a real secret), so any
+   *  non-empty draft counts as dirty. */
+  const secretKeyDraftRef = useRef(false);
+  const [tenantScope, setTenantScope] = useState(effectiveTenantId ?? '');
+  /**
+   * The highest `configVersion` this component has adopted so far, from any
+   * source. The query cache now rejects older tracked results through
+   * `versionedStructuralSharing`; this local guard is still required at the
+   * component boundary so a pre-existing/dehydrated cache entry or another
+   * caller without that policy cannot regress displayed fields while a draft
+   * keeps `expectedVersion` frozen at the newer version.
+   */
+  const latestVersionRef = useRef<number | null>(null);
+  const latestTenantRef = useRef(effectiveTenantId ?? '');
+  const hasAdoptedStatusRef = useRef(false);
+  const connectionQueryKey = useMemo(
+    () =>
+      tenantScope
+        ? ([...LANGFUSE_CONNECTION_QUERY_KEY, tenantScope] as const)
+        : LANGFUSE_CONNECTION_QUERY_KEY,
+    [tenantScope],
+  );
 
   const connectionQuery = useQuery({
-    queryKey: LANGFUSE_CONNECTION_QUERY_KEY,
-    queryFn: () => getLangfuseConnectionFn(),
-    enabled: !isEditingScope,
+    queryKey: connectionQueryKey,
+    queryFn: () => getLangfuseConnectionFn({ data: { expectedTenantId: tenantScope } }),
+    structuralSharing: versionedStructuralSharing<LangfuseConnectionStatus>(
+      (value) => value.configVersion,
+      (value) => value.effectiveTenantId ?? tenantScope,
+    ),
+    enabled: !isEditingScope && effectiveTenantId !== undefined,
     retry: false,
+    refetchOnMount: 'always',
     refetchOnWindowFocus: false,
   });
+
+  useEffect(() => {
+    if (effectiveTenantId === undefined || effectiveTenantId === tenantScope) return;
+    setTenantScope(effectiveTenantId);
+  }, [effectiveTenantId, tenantScope]);
   const updateMutation = useMutation({
     mutationFn: (data: {
       enabled: boolean;
       destination: string;
       publicKey: string;
       secretKey?: string;
+      expectedVersion: number | null;
+      expectedTenantId: string;
     }) => updateLangfuseConnectionFn({ data }),
   });
   const testMutation = useMutation({
-    mutationFn: (data: { destination: string; publicKey: string; secretKey?: string }) =>
-      testLangfuseConnectionFn({ data }),
+    mutationFn: (data: {
+      destination: string;
+      publicKey: string;
+      secretKey?: string;
+      expectedTenantId: string;
+    }) => testLangfuseConnectionFn({ data }),
   });
 
+  /**
+   * Whether `candidate` is older than the highest version this component has
+   * already adopted — see `latestVersionRef`'s doc comment. A numeric ref
+   * always outranks a null candidate version: once a real version has been
+   * adopted, a candidate with no version at all is older by definition.
+   */
+  const isStaleStatus = (candidate: LangfuseConnectionStatus): boolean =>
+    (candidate.effectiveTenantId ?? latestTenantRef.current) === latestTenantRef.current &&
+    latestVersionRef.current != null &&
+    (candidate.configVersion == null || candidate.configVersion < latestVersionRef.current);
+
   useEffect(() => {
-    if (!connectionQuery.data) return;
-    if (hasDraftRef.current) return;
+    if (!connectionQuery.data || isStaleStatus(connectionQuery.data)) return;
     const nextStatus = connectionQuery.data;
+    const nextTenantId = nextStatus.effectiveTenantId ?? latestTenantRef.current;
+    const tenantChanged = hasAdoptedStatusRef.current && nextTenantId !== latestTenantRef.current;
+    if (tenantChanged) {
+      destinationTouchedRef.current = false;
+      publicKeyTouchedRef.current = false;
+      secretKeyDraftRef.current = false;
+      setSecretKey('');
+      setEditingPublicKey(false);
+      setEditingSecretKey(false);
+      setVersionConflictOpen(false);
+      notifyError(localize('com_config_tenant_changed'));
+    }
+    latestTenantRef.current = nextTenantId;
+    hasAdoptedStatusRef.current = true;
+    latestVersionRef.current = nextStatus.configVersion;
+    setTenantScope(nextTenantId);
     setStatus(nextStatus);
     // Preserve the stored destination for display even when the server dropped it from the
     // allowlist. Blanking it made destinationChanged true, forcing edit mode and leaving an
     // enabled connection impossible to disable until a replacement was picked; a de-allowlisted
     // destination now simply shows as unselected in the picker while disable stays available.
-    setDestination(nextStatus.destination ?? '');
-    setPublicKey(nextStatus.publicKey ?? '');
+    if (!destinationTouchedRef.current) {
+      setDestination(nextStatus.destination ?? '');
+    } else if (destination === (nextStatus.destination ?? '')) {
+      destinationTouchedRef.current = false;
+    }
+    if (!publicKeyTouchedRef.current) {
+      setPublicKey(nextStatus.publicKey ?? '');
+    } else if (publicKey.trim() === (nextStatus.publicKey ?? '')) {
+      publicKeyTouchedRef.current = false;
+    }
+    // A passive sync must not advance the CAS token while a draft survives —
+    // see the `expectedVersion` docstring above.
+    const hasLocalDraft =
+      destinationTouchedRef.current || publicKeyTouchedRef.current || secretKeyDraftRef.current;
+    if (!hasLocalDraft) {
+      adoptBaseline({
+        version: nextStatus.configVersion ?? null,
+        tenantId: nextTenantId,
+        value: nextStatus,
+      });
+    }
   }, [connectionQuery.data]);
 
   useEffect(() => {
     const connectionKey = getConnectionKey(status);
     if (!connectionKey) {
       setVerificationState('idle');
+      setVerificationMessage('');
+      return;
+    }
+    if (status?.configActive === false) {
+      requestRef.current += 1;
+      testedConnectionRef.current = undefined;
+      setVerificationState('inactive');
       setVerificationMessage('');
       return;
     }
@@ -129,7 +266,11 @@ export function LangfuseRenderer({ disabled, isEditingScope }: t.FieldRendererPr
     setVerificationState('checking');
     setVerificationMessage('');
     testMutation.mutate(
-      { destination: status?.destination ?? '', publicKey: status?.publicKey ?? '' },
+      {
+        destination: status?.destination ?? '',
+        publicKey: status?.publicKey ?? '',
+        expectedTenantId: status?.effectiveTenantId ?? expectedTenantId,
+      },
       {
         onSuccess: (result) => {
           if (requestId !== requestRef.current) return;
@@ -170,6 +311,8 @@ export function LangfuseRenderer({ disabled, isEditingScope }: t.FieldRendererPr
   }
 
   const configured = status?.configured === true;
+  const configActive = status?.configActive !== false;
+  const controlsDisabled = disabled || !configActive;
   const trimmedPublicKey = publicKey.trim();
   const trimmedSecretKey = secretKey.trim();
   const destinationChanged = destination !== (status?.destination ?? '');
@@ -182,14 +325,13 @@ export function LangfuseRenderer({ disabled, isEditingScope }: t.FieldRendererPr
     publicKeyChanged ||
     trimmedSecretKey !== '';
   const canSave =
-    !disabled &&
+    !controlsDisabled &&
     destination !== '' &&
     trimmedPublicKey !== '' &&
     (configured || trimmedSecretKey !== '');
   const busy = updateMutation.isPending || testMutation.isPending;
 
   const markDraftUnverified = () => {
-    hasDraftRef.current = true;
     requestRef.current += 1;
     setVerificationState('unverified');
     setVerificationMessage('');
@@ -214,6 +356,7 @@ export function LangfuseRenderer({ disabled, isEditingScope }: t.FieldRendererPr
       {
         destination: nextDestination,
         publicKey: nextPublicKey,
+        expectedTenantId,
         ...(nextSecretKey ? { secretKey: nextSecretKey } : {}),
       },
       {
@@ -232,6 +375,108 @@ export function LangfuseRenderer({ disabled, isEditingScope }: t.FieldRendererPr
     );
   };
 
+  /**
+   * The one place an *explicit* action (save success, conflict rebase)
+   * adopts a fresh record. Sets `expectedVersion` directly and
+   * unconditionally instead of leaving it to the passive sync effect above,
+   * since that effect intentionally freezes the version while a draft
+   * survives — exactly what an explicit action must NOT do. Guarded by the
+   * same `isStaleStatus` check as the passive sync effect: an explicit
+   * action's own read can itself be superseded by a different action that
+   * already landed a higher version while this one was in flight.
+   */
+  const applyFreshStatus = (fresh: LangfuseConnectionStatus) => {
+    if (isStaleStatus(fresh)) {
+      return;
+    }
+    const freshTenantId = fresh.effectiveTenantId ?? latestTenantRef.current;
+    latestTenantRef.current = freshTenantId;
+    hasAdoptedStatusRef.current = true;
+    latestVersionRef.current = fresh.configVersion;
+    setTenantScope(freshTenantId);
+    setStatus(fresh);
+    if (!destinationTouchedRef.current) {
+      setDestination(fresh.destination ?? '');
+    } else if (destination === (fresh.destination ?? '')) {
+      // The surviving draft happens to already match the fresh baseline (e.g.
+      // a rebase reveals another admin's change that coincides with this
+      // one) — recompute rather than leave it stuck "touched", or passive
+      // refreshes would keep freezing expectedVersion for a divergence that
+      // no longer exists, causing unnecessary 409s.
+      destinationTouchedRef.current = false;
+    }
+    if (!publicKeyTouchedRef.current) {
+      setPublicKey(fresh.publicKey ?? '');
+    } else if (publicKey.trim() === (fresh.publicKey ?? '')) {
+      publicKeyTouchedRef.current = false;
+    }
+    adoptBaseline({ version: fresh.configVersion ?? null, tenantId: freshTenantId, value: fresh });
+  };
+
+  /** Direct reads are version-ordered even when they race outside React Query. */
+  const installFreshConnection = (fresh: LangfuseConnectionStatus): LangfuseConnectionStatus => {
+    return installIfNewer(
+      queryClient,
+      (fresh.effectiveTenantId ?? latestTenantRef.current)
+        ? [...LANGFUSE_CONNECTION_QUERY_KEY, fresh.effectiveTenantId ?? latestTenantRef.current]
+        : LANGFUSE_CONNECTION_QUERY_KEY,
+      fresh,
+      (value) => value.configVersion,
+      (value) => value.effectiveTenantId,
+    );
+  };
+
+  const handleUpdateError = (error: Error) => {
+    if (isVersionConflictError(error)) {
+      // Do NOT touch the touched refs/destination/publicKey/secretKey here —
+      // the sync effect above overwrites an untouched destination/publicKey
+      // from fresh query data, but never touches secretKey or the editing
+      // flags. Resetting those on conflict left secretKey and the editing
+      // flags stale against a destination/publicKey the admin never typed.
+      // Offer an explicit rebase/discard choice instead, same as the generic
+      // configuration editor.
+      setVersionConflictOpen(true);
+      return;
+    }
+    notifyError(error.message);
+  };
+
+  const handleDiscardAfterConflict = () =>
+    resolveConflict('discard', async () => {
+      await queryClient.cancelQueries({ queryKey: LANGFUSE_CONNECTION_QUERY_KEY });
+      const fetched = await getLangfuseConnectionFn({ data: { expectedTenantId: tenantScope } });
+      const fresh = installFreshConnection(fetched);
+      destinationTouchedRef.current = false;
+      publicKeyTouchedRef.current = false;
+      secretKeyDraftRef.current = false;
+      setSecretKey('');
+      setEditingPublicKey(false);
+      setEditingSecretKey(false);
+      applyFreshStatus(fresh);
+      await refreshBaseConfig(queryClient);
+    }).catch((err: Error) => notifyError(err.message));
+
+  const handleRebaseAfterConflict = () =>
+    resolveConflict('rebase', async () => {
+      await queryClient.cancelQueries({ queryKey: LANGFUSE_CONNECTION_QUERY_KEY });
+      const fetched = await getLangfuseConnectionFn({ data: { expectedTenantId: tenantScope } });
+      const fresh = installFreshConnection(fetched);
+      if ((fresh.effectiveTenantId ?? latestTenantRef.current) !== expectedTenantId) {
+        destinationTouchedRef.current = false;
+        publicKeyTouchedRef.current = false;
+        secretKeyDraftRef.current = false;
+        setSecretKey('');
+        setEditingPublicKey(false);
+        setEditingSecretKey(false);
+        applyFreshStatus(fresh);
+        await refreshBaseConfig(queryClient);
+        notifyError(localize('com_config_tenant_changed'));
+        return;
+      }
+      applyFreshStatus(fresh);
+      await refreshBaseConfig(queryClient);
+    }).catch((err: Error) => notifyError(err.message));
+
   const saveConnection = () => {
     const payload = {
       // Credential edits are committed through the explicit "Save & enable" action.
@@ -239,21 +484,32 @@ export function LangfuseRenderer({ disabled, isEditingScope }: t.FieldRendererPr
       destination,
       publicKey: trimmedPublicKey,
       ...(trimmedSecretKey ? { secretKey: trimmedSecretKey } : {}),
+      expectedVersion,
+      expectedTenantId,
     };
     updateMutation.mutate(payload, {
-      onSuccess: (nextStatus) => {
-        hasDraftRef.current = false;
-        queryClient.setQueryData(LANGFUSE_CONNECTION_QUERY_KEY, nextStatus);
-        testedConnectionRef.current = getConnectionKey(nextStatus);
-        setStatus(nextStatus);
-        setDestination(nextStatus.destination ?? '');
-        setPublicKey(nextStatus.publicKey ?? '');
+      onSuccess: async (nextStatus) => {
+        destinationTouchedRef.current = false;
+        publicKeyTouchedRef.current = false;
+        secretKeyDraftRef.current = false;
+        await queryClient.cancelQueries({ queryKey: LANGFUSE_CONNECTION_QUERY_KEY });
+        const fresh = installFreshConnection(nextStatus);
+        testedConnectionRef.current = getConnectionKey(fresh);
+        applyFreshStatus(fresh);
         setSecretKey('');
         setEditingPublicKey(false);
         setEditingSecretKey(false);
         notifySuccess(localize('com_config_langfuse_saved'));
+        // This save itself succeeded regardless of what happens next, so a
+        // failure here falls back to eventual consistency via invalidation
+        // instead of surfacing as an error against an action that worked.
+        try {
+          await refreshBaseConfig(queryClient);
+        } catch {
+          void queryClient.invalidateQueries({ queryKey: baseConfigOptions.queryKey });
+        }
       },
-      onError: (error: Error) => notifyError(error.message),
+      onError: handleUpdateError,
     });
   };
 
@@ -262,13 +518,16 @@ export function LangfuseRenderer({ disabled, isEditingScope }: t.FieldRendererPr
   };
 
   const handleCancel = () => {
-    hasDraftRef.current = false;
+    destinationTouchedRef.current = false;
+    publicKeyTouchedRef.current = false;
+    secretKeyDraftRef.current = false;
+    const cachedStatus = queryClient.getQueryData<LangfuseConnectionStatus>(connectionQueryKey);
     const latestStatus =
-      queryClient.getQueryData<LangfuseConnectionStatus>(LANGFUSE_CONNECTION_QUERY_KEY) ?? status;
-    setStatus(latestStatus);
+      cachedStatus == null || isStaleStatus(cachedStatus) ? status : cachedStatus;
+    if (latestStatus) {
+      applyFreshStatus(latestStatus);
+    }
     const storedDestination = latestStatus?.destination;
-    setDestination(storedDestination ?? '');
-    setPublicKey(latestStatus?.publicKey ?? '');
     setSecretKey('');
     setEditingPublicKey(false);
     setEditingSecretKey(false);
@@ -281,7 +540,7 @@ export function LangfuseRenderer({ disabled, isEditingScope }: t.FieldRendererPr
   };
 
   const handleEnabledChange = () => {
-    if (!configured || !status?.destination || !status.publicKey) return;
+    if (!configActive || !configured || !status?.destination || !status.publicKey) return;
 
     const nextEnabled = status.enabled !== true;
     updateMutation.mutate(
@@ -289,15 +548,26 @@ export function LangfuseRenderer({ disabled, isEditingScope }: t.FieldRendererPr
         enabled: nextEnabled,
         destination: status.destination,
         publicKey: status.publicKey,
+        expectedVersion,
+        expectedTenantId,
       },
       {
-        onSuccess: (nextStatus) => {
-          queryClient.setQueryData(LANGFUSE_CONNECTION_QUERY_KEY, nextStatus);
-          testedConnectionRef.current = getConnectionKey(nextStatus);
-          setStatus(nextStatus);
+        onSuccess: async (nextStatus) => {
+          await queryClient.cancelQueries({ queryKey: LANGFUSE_CONNECTION_QUERY_KEY });
+          const fresh = installFreshConnection(nextStatus);
+          testedConnectionRef.current = getConnectionKey(fresh);
+          applyFreshStatus(fresh);
           notifySuccess(localize('com_config_langfuse_saved'));
+          // This save itself succeeded regardless of what happens next, so a
+          // failure here falls back to eventual consistency via invalidation
+          // instead of surfacing as an error against an action that worked.
+          try {
+            await refreshBaseConfig(queryClient);
+          } catch {
+            void queryClient.invalidateQueries({ queryKey: baseConfigOptions.queryKey });
+          }
         },
-        onError: (error: Error) => notifyError(error.message),
+        onError: handleUpdateError,
       },
     );
   };
@@ -327,13 +597,22 @@ export function LangfuseRenderer({ disabled, isEditingScope }: t.FieldRendererPr
         <span>{statusLabel}</span>
       </div>
 
+      {!configActive && (
+        <p
+          role="status"
+          className="rounded-md border border-(--cui-color-stroke-default) bg-(--cui-color-background-muted) px-3 py-2 text-sm text-(--cui-color-text-muted)"
+        >
+          {localize('com_config_langfuse_config_inactive')}
+        </p>
+      )}
+
       <Select
         label={localize('com_config_langfuse_destination')}
         value={destination || undefined}
         placeholder={localize('com_config_langfuse_select_destination')}
-        disabled={disabled || busy || (status?.destinations.length ?? 0) === 0}
+        disabled={controlsDisabled || busy || (status?.destinations.length ?? 0) === 0}
         onSelect={(value) => {
-          hasDraftRef.current = true;
+          destinationTouchedRef.current = value !== (status?.destination ?? '');
           setDestination(value);
           verify(value, trimmedPublicKey, trimmedSecretKey);
         }}
@@ -351,11 +630,8 @@ export function LangfuseRenderer({ disabled, isEditingScope }: t.FieldRendererPr
           <button
             type="button"
             className="rounded-md border border-(--cui-color-stroke-default) px-3 py-2 text-left hover:border-(--cui-color-stroke-emphasis) focus-visible:outline-2 focus-visible:outline-(--cui-color-stroke-emphasis)"
-            disabled={disabled || busy}
-            onClick={() => {
-              hasDraftRef.current = true;
-              setEditingPublicKey(true);
-            }}
+            disabled={controlsDisabled || busy}
+            onClick={() => setEditingPublicKey(true)}
             aria-label={`${localize('com_ui_edit')} ${localize('com_config_langfuse_public_key')}`}
           >
             <code className="text-sm">{maskPublicKey(publicKey)}</code>
@@ -372,9 +648,10 @@ export function LangfuseRenderer({ disabled, isEditingScope }: t.FieldRendererPr
             data-bwignore="true"
             data-form-type="other"
             value={publicKey}
-            disabled={disabled || busy}
+            disabled={controlsDisabled || busy}
             placeholder="pk-lf-..."
             onChange={(value) => {
+              publicKeyTouchedRef.current = value.trim() !== (status?.publicKey ?? '');
               setPublicKey(value);
               markDraftUnverified();
             }}
@@ -388,14 +665,11 @@ export function LangfuseRenderer({ disabled, isEditingScope }: t.FieldRendererPr
           <button
             type="button"
             className="rounded-md border border-(--cui-color-stroke-default) px-3 py-2 text-left hover:border-(--cui-color-stroke-emphasis) focus-visible:outline-2 focus-visible:outline-(--cui-color-stroke-emphasis)"
-            disabled={disabled || busy}
-            onClick={() => {
-              hasDraftRef.current = true;
-              setEditingSecretKey(true);
-            }}
+            disabled={controlsDisabled || busy}
+            onClick={() => setEditingSecretKey(true)}
             aria-label={`${localize('com_ui_edit')} ${localize('com_config_langfuse_secret_key')}`}
           >
-            <code className="text-sm">{status?.displaySecretKey}</code>
+            <code className="text-sm">{status?.secretKeyPreview ?? status?.displaySecretKey}</code>
           </button>
         ) : (
           <TextField
@@ -409,9 +683,10 @@ export function LangfuseRenderer({ disabled, isEditingScope }: t.FieldRendererPr
             data-bwignore="true"
             data-form-type="other"
             value={secretKey}
-            disabled={disabled || busy}
+            disabled={controlsDisabled || busy}
             placeholder="sk-lf-..."
             onChange={(value) => {
+              secretKeyDraftRef.current = value.trim() !== '';
               setSecretKey(value);
               markDraftUnverified();
             }}
@@ -448,12 +723,20 @@ export function LangfuseRenderer({ disabled, isEditingScope }: t.FieldRendererPr
                 ? 'com_config_langfuse_disable'
                 : 'com_config_langfuse_enable',
             )}
-            disabled={disabled || busy}
+            disabled={controlsDisabled || busy}
             loading={updateMutation.isPending}
             onClick={handleEnabledChange}
           />
         )}
       </div>
+
+      <VersionConflictDialog
+        open={versionConflictOpen}
+        rebasing={rebasingVersion}
+        discarding={discardingConflict}
+        onRebase={handleRebaseAfterConflict}
+        onDiscard={handleDiscardAfterConflict}
+      />
     </div>
   );
 }

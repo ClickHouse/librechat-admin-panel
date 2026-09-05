@@ -11,6 +11,7 @@ import { createServerFn } from '@tanstack/react-start';
 import type { AdminGroup, AdminMember } from '@librechat/data-schemas';
 import type * as t from '@/types';
 import { apiFetch, extractApiError } from './utils/api';
+import { tenantQueryKeys } from './keys';
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
@@ -55,20 +56,25 @@ export const getGroupsFn = createServerFn({ method: 'GET' })
       search: z.string().optional(),
       limit: z.number().optional(),
       offset: z.number().optional(),
+      expectedTenantId: z.string(),
     }),
   )
   .handler(
     async ({
       data,
     }: {
-      data: { search?: string; limit?: number; offset?: number };
+      data: { search?: string; limit?: number; offset?: number; expectedTenantId: string };
     }): Promise<{ groups: AdminGroup[]; total: number }> => {
       const params = new URLSearchParams();
       if (data.search) params.set('search', data.search);
       if (data.limit != null) params.set('limit', String(data.limit));
       if (data.offset != null) params.set('offset', String(data.offset));
       const qs = params.toString();
-      const response = await apiFetch(`/api/admin/groups${qs ? `?${qs}` : ''}`);
+      const response = await apiFetch(
+        `/api/admin/groups${qs ? `?${qs}` : ''}`,
+        undefined,
+        data.expectedTenantId,
+      );
       if (!response.ok) {
         throw new Error(`Failed to fetch groups: ${response.status}`);
       }
@@ -77,58 +83,73 @@ export const getGroupsFn = createServerFn({ method: 'GET' })
     },
   );
 
-export const groupsQueryOptions = (page = 1, search = '') =>
+export const groupsQueryOptions = (expectedTenantId: string, page = 1, search = '') =>
   queryOptions<{ groups: AdminGroup[]; total: number }>({
-    queryKey: ['groups', page, search],
+    queryKey: [...tenantQueryKeys.groups(expectedTenantId), page, search],
     queryFn: () =>
       getGroupsFn({
         data: {
           search: search || undefined,
           limit: GROUPS_PAGE_SIZE,
           offset: (page - 1) * GROUPS_PAGE_SIZE,
+          expectedTenantId,
         },
       }),
     staleTime: 30_000,
   });
 
-export const allGroupsQueryOptions = queryOptions<AdminGroup[]>({
-  queryKey: ['groups', 'all'],
-  queryFn: () => getGroupsFn({ data: { limit: ALL_GROUPS_LIMIT } }).then((r) => r.groups),
-  staleTime: 30_000,
-});
+export const allGroupsQueryOptions = (expectedTenantId: string) =>
+  queryOptions<AdminGroup[]>({
+    queryKey: tenantQueryKeys.allGroups(expectedTenantId),
+    queryFn: () =>
+      getGroupsFn({ data: { limit: ALL_GROUPS_LIMIT, expectedTenantId } }).then((r) => r.groups),
+    staleTime: 30_000,
+  });
 
-export const getGroupAssignmentsFn = createServerFn({ method: 'GET' }).handler(
-  async (): Promise<{ assignments: Record<string, t.AssignmentRef[]> }> => ({ assignments: {} }),
-);
+export const allGroupsForTenantQueryOptions = allGroupsQueryOptions;
 
-export const groupAssignmentsQueryOptions = queryOptions({
-  queryKey: ['groupAssignments'],
-  queryFn: () => getGroupAssignmentsFn().then((r) => r.assignments),
-  staleTime: 30_000,
-});
+export const getGroupAssignmentsFn = createServerFn({ method: 'GET' })
+  .inputValidator(z.object({ expectedTenantId: z.string() }))
+  .handler(
+    async (): Promise<{ assignments: Record<string, t.AssignmentRef[]> }> => ({ assignments: {} }),
+  );
+
+export const groupAssignmentsQueryOptions = (expectedTenantId: string) =>
+  queryOptions({
+    queryKey: tenantQueryKeys.groupAssignments(expectedTenantId),
+    queryFn: () => getGroupAssignmentsFn({ data: { expectedTenantId } }).then((r) => r.assignments),
+    staleTime: 30_000,
+  });
 
 export const createGroupFn = createServerFn({ method: 'POST' })
   .inputValidator(
     z.object({
       name: z.string().min(1),
       description: z.string().default(''),
+      expectedTenantId: z.string(),
     }),
   )
-  .handler(async ({ data }: { data: { name: string; description: string } }) => {
-    const response = await apiFetch('/api/admin/groups', {
-      method: 'POST',
-      body: JSON.stringify({
-        name: data.name,
-        description: data.description,
-        source: GROUP_SOURCE_LOCAL,
-      }),
-    });
-    if (!response.ok) {
-      await extractApiError(response, 'Failed to create group');
-    }
-    const { group } = (await response.json()) as { group: RawGroup };
-    return { group: toAdminGroup(group) };
-  });
+  .handler(
+    async ({ data }: { data: { name: string; description: string; expectedTenantId: string } }) => {
+      const response = await apiFetch(
+        '/api/admin/groups',
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            name: data.name,
+            description: data.description,
+            source: GROUP_SOURCE_LOCAL,
+          }),
+        },
+        data.expectedTenantId,
+      );
+      if (!response.ok) {
+        await extractApiError(response, 'Failed to create group');
+      }
+      const { group } = (await response.json()) as { group: RawGroup };
+      return { group: toAdminGroup(group) };
+    },
+  );
 
 export const updateGroupFn = createServerFn({ method: 'POST' })
   .inputValidator(
@@ -136,14 +157,19 @@ export const updateGroupFn = createServerFn({ method: 'POST' })
       id: z.string(),
       name: z.string().min(1).optional(),
       description: z.string().optional(),
+      expectedTenantId: z.string(),
     }),
   )
-  .handler(async ({ data }: { data: { id: string; name?: string; description?: string } }) => {
-    const { id, ...body } = data;
-    const response = await apiFetch(`/api/admin/groups/${encodeURIComponent(id)}`, {
-      method: 'PATCH',
-      body: JSON.stringify(body),
-    });
+  .handler(async ({ data }) => {
+    const { id, expectedTenantId, ...body } = data;
+    const response = await apiFetch(
+      `/api/admin/groups/${encodeURIComponent(id)}`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify(body),
+      },
+      expectedTenantId,
+    );
     if (!response.ok) {
       await extractApiError(response, 'Failed to update group');
     }
@@ -152,11 +178,13 @@ export const updateGroupFn = createServerFn({ method: 'POST' })
   });
 
 export const deleteGroupFn = createServerFn({ method: 'POST' })
-  .inputValidator(z.object({ id: z.string() }))
-  .handler(async ({ data }: { data: { id: string } }) => {
-    const response = await apiFetch(`/api/admin/groups/${encodeURIComponent(data.id)}`, {
-      method: 'DELETE',
-    });
+  .inputValidator(z.object({ id: z.string(), expectedTenantId: z.string() }))
+  .handler(async ({ data }) => {
+    const response = await apiFetch(
+      `/api/admin/groups/${encodeURIComponent(data.id)}`,
+      { method: 'DELETE' },
+      data.expectedTenantId,
+    );
     if (!response.ok && response.status !== 404) {
       await extractApiError(response, 'Failed to delete group');
     }
@@ -169,20 +197,21 @@ export const getGroupMembersFn = createServerFn({ method: 'GET' })
       groupId: z.string(),
       limit: z.number().optional(),
       offset: z.number().optional(),
+      expectedTenantId: z.string(),
     }),
   )
   .handler(
     async ({
       data,
     }: {
-      data: { groupId: string; limit?: number; offset?: number };
+      data: { groupId: string; limit?: number; offset?: number; expectedTenantId: string };
     }): Promise<{ members: AdminMember[]; total: number }> => {
       const params = new URLSearchParams();
       if (data.limit != null) params.set('limit', String(data.limit));
       if (data.offset != null) params.set('offset', String(data.offset));
       const qs = params.toString();
       const url = `/api/admin/groups/${encodeURIComponent(data.groupId)}/members${qs ? `?${qs}` : ''}`;
-      const response = await apiFetch(url);
+      const response = await apiFetch(url, undefined, data.expectedTenantId);
       if (!response.ok) {
         throw new Error(`Failed to fetch group members: ${response.status}`);
       }
@@ -191,29 +220,33 @@ export const getGroupMembersFn = createServerFn({ method: 'GET' })
     },
   );
 
-export const groupMembersQueryOptions = (groupId: string, page = 1) =>
+export const groupMembersQueryOptions = (groupId: string, expectedTenantId: string, page = 1) =>
   queryOptions<{ members: AdminMember[]; total: number }>({
-    queryKey: ['groupMembers', groupId, page],
+    queryKey: tenantQueryKeys.groupMemberPage(expectedTenantId, groupId, page),
     queryFn: () =>
       getGroupMembersFn({
         data: {
           groupId,
           limit: MEMBERS_PAGE_SIZE,
           offset: (page - 1) * MEMBERS_PAGE_SIZE,
+          expectedTenantId,
         },
       }),
     staleTime: 30_000,
   });
 
 export const addGroupMemberFn = createServerFn({ method: 'POST' })
-  .inputValidator(z.object({ groupId: z.string(), userId: z.string() }))
-  .handler(async ({ data }: { data: { groupId: string; userId: string } }) => {
+  .inputValidator(
+    z.object({ groupId: z.string(), userId: z.string(), expectedTenantId: z.string() }),
+  )
+  .handler(async ({ data }) => {
     const response = await apiFetch(
       `/api/admin/groups/${encodeURIComponent(data.groupId)}/members`,
       {
         method: 'POST',
         body: JSON.stringify({ userId: data.userId }),
       },
+      data.expectedTenantId,
     );
     if (!response.ok) {
       await extractApiError(response, 'Failed to add member');
@@ -222,11 +255,14 @@ export const addGroupMemberFn = createServerFn({ method: 'POST' })
   });
 
 export const removeGroupMemberFn = createServerFn({ method: 'POST' })
-  .inputValidator(z.object({ groupId: z.string(), userId: z.string() }))
-  .handler(async ({ data }: { data: { groupId: string; userId: string } }) => {
+  .inputValidator(
+    z.object({ groupId: z.string(), userId: z.string(), expectedTenantId: z.string() }),
+  )
+  .handler(async ({ data }) => {
     const response = await apiFetch(
       `/api/admin/groups/${encodeURIComponent(data.groupId)}/members/${encodeURIComponent(data.userId)}`,
       { method: 'DELETE' },
+      data.expectedTenantId,
     );
     if (!response.ok && response.status !== 404) {
       await extractApiError(response, 'Failed to remove member');

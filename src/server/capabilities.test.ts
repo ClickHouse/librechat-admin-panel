@@ -16,7 +16,7 @@ let heldCaps: string[] = [];
 vi.mock('./utils/api', () => ({
   apiFetch: vi.fn(async () => ({
     ok: true,
-    json: async () => ({ capabilities: heldCaps }),
+    json: async () => ({ capabilities: heldCaps, effectiveTenantId: 'tenant-a' }),
   })),
   extractApiError: vi.fn(async (_res: unknown, msg: string) => {
     throw new Error(msg);
@@ -30,6 +30,7 @@ vi.mock('@tanstack/react-start', () => ({
       handler: (fn: (...args: unknown[]) => unknown) => fn,
     }),
   }),
+  createServerOnlyFn: <T extends (...args: never[]) => unknown>(fn: T) => fn,
 }));
 
 vi.mock('@tanstack/react-query', () => ({

@@ -3,14 +3,15 @@ import { Icon, Dialog } from '@clickhouse/click-ui';
 import { PrincipalType } from 'librechat-data-provider';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type * as t from '@/types';
+import { fieldProfileValuesOptions, tenantQueryKeys } from '@/server';
 import { FieldProfilePopover } from './FieldProfilePopover';
-import { fieldProfileValuesOptions } from '@/server';
 import { getScopeTypeConfig } from '@/constants';
 import { useLocalize } from '@/hooks';
 
 export function ProfileIndicator({
   fieldPath,
   fieldLabel,
+  expectedTenantId,
   fieldSchema,
   profileTypes,
   permissions,
@@ -25,7 +26,7 @@ export function ProfileIndicator({
   const hasProfiles = profileTypes && profileTypes.length > 0;
 
   const { data: profileValues = [] } = useQuery({
-    ...fieldProfileValuesOptions(fieldPath),
+    ...fieldProfileValuesOptions(fieldPath, expectedTenantId),
     enabled: dialogOpen,
   }) as { data: t.FieldProfileValue[] };
 
@@ -34,9 +35,11 @@ export function ProfileIndicator({
   }, []);
 
   const handleProfileChange = useCallback(() => {
-    queryClient.invalidateQueries({ queryKey: ['fieldProfileValues', fieldPath] });
+    queryClient.invalidateQueries({
+      queryKey: tenantQueryKeys.fieldProfileValues(expectedTenantId, fieldPath),
+    });
     onProfileChange?.();
-  }, [queryClient, fieldPath, onProfileChange]);
+  }, [queryClient, expectedTenantId, fieldPath, onProfileChange]);
 
   if (!hasProfiles) return null;
 
@@ -94,6 +97,7 @@ export function ProfileIndicator({
           <FieldProfilePopover
             fieldPath={fieldPath}
             fieldLabel={fieldLabel}
+            expectedTenantId={expectedTenantId}
             fieldSchema={fieldSchema}
             profileValues={profileValues}
             permissions={permissions}

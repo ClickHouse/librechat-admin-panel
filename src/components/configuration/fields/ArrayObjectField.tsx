@@ -1,5 +1,10 @@
 import { useCallback, useState, useRef, useEffect } from 'react';
 import type * as t from '@/types';
+import {
+  PREVIOUS_IDENTITY_HINT_KEY,
+  withPreviousIdentityHint,
+  stripUntouchedSecretRecordContainers,
+} from '@/utils';
 import { ObjectEntryCard } from './ObjectEntryCard';
 import { AddItemButton } from '@/components/shared';
 import { useLocalize } from '@/hooks';
@@ -14,6 +19,10 @@ function getEntryLabel(item: t.ConfigValue): string | null {
   return null;
 }
 
+function nonEmptyString(value: t.ConfigValue): string | undefined {
+  return typeof value === 'string' && value !== '' ? value : undefined;
+}
+
 export function ArrayObjectField({
   id,
   value,
@@ -26,6 +35,7 @@ export function ArrayObjectField({
   renderFields,
   entryIdPrefix,
   editSessionId,
+  identityKey,
 }: t.ArrayObjectFieldProps) {
   const localize = useLocalize();
   const items = Array.isArray(value) ? (value as t.ConfigValue[]) : [];
@@ -42,6 +52,30 @@ export function ArrayObjectField({
   // Guard: when true, skip the sync effect for one cycle (handleAdd
   // already prepended the key; we wait for the parent's items to catch up).
   const addingRef = useRef(false);
+
+  // Records each entry's identity value (`name`/`group`) the first time it is
+  // edited this session, so a later rename in the same edit can still be
+  // traced back to it. `null` is a distinct, explicit value here — see
+  // `withPreviousIdentityHint`'s doc comment. Captured lazily inside
+  // `handleEntryChange` rather than unconditionally during render: a plain
+  // object (not React state) mutated during render is read by React
+  // internals across the current and work-in-progress trees, so a render
+  // that gets interrupted or retried with different props could leave it
+  // holding a value from a render that never committed. An event handler has
+  // no such race — it only ever runs against the props/state that actually
+  // committed.
+  //
+  // A save, reset, restore, discard, scope change, or conflict rebase all
+  // bump `editSessionId` — the array below it is now a fresh baseline, not a
+  // continuation of what was open before, so this cache (keyed by a stable
+  // key that itself resets on remount) must not survive across the boundary.
+  // Rather than clear it with a render-time ref write — safe for the
+  // documented `setState`-during-render pattern, but refs have no such
+  // guarantee under an interrupted/retried render — the call sites key
+  // `<ArrayObjectField key={editSessionId}>` on this same id, so React fully
+  // remounts the component (fresh refs and state, no manual reset needed)
+  // exactly when a session boundary is crossed.
+  const originalIdentityRef = useRef<Map<number, string | null>>(new Map());
 
   // Sync keys array length with items (handles external changes like
   // save/re-fetch). Skipped right after handleAdd since keys were already
@@ -62,8 +96,20 @@ export function ArrayObjectField({
     addingRef.current = true;
     setKeys((prev) => [newKey, ...prev]);
     expandedKeyRef.current = newKey;
-    onChange([{}, ...items]);
-  }, [items, onChange]);
+    // Stamped explicitly, not left absent: an absent hint falls back to
+    // bare-identity matching, which would let this new entry inherit an
+    // existing entry's credentials merely by being given the same name
+    // later in this same session (e.g. reusing a name just freed by
+    // deleting that other entry) — see `withPreviousIdentityHint`.
+    const blank: t.ConfigValue = identityKey ? { [PREVIOUS_IDENTITY_HINT_KEY]: null } : {};
+    // Surviving entries are copied forward verbatim by this structural add —
+    // strip any redacted credential-record placeholder left on them by a
+    // read, or resubmitting it here would erase that entry's real secret.
+    onChange([
+      blank,
+      ...items.map((item) => stripUntouchedSecretRecordContainers(item, fields)),
+    ]);
+  }, [items, onChange, identityKey, fields]);
 
   // Expose add trigger to parent (e.g. NestedGroup / section header button)
   useEffect(() => {
@@ -78,22 +124,68 @@ export function ArrayObjectField({
   const handleRemove = useCallback(
     (index: number) => {
       setKeys((prev) => prev.filter((_, i) => i !== index));
-      onChange(items.filter((_, i) => i !== index));
+      onChange(
+        items
+          .filter((_, i) => i !== index)
+          .map((item) => stripUntouchedSecretRecordContainers(item, fields)),
+      );
     },
-    [items, onChange],
+    [items, onChange, fields],
   );
 
   const handleEntryChange = useCallback(
     (index: number, newValue: t.ConfigValue) => {
+      let hinted = newValue;
+      if (identityKey) {
+        const stableKey = keys[index];
+        if (stableKey != null && !originalIdentityRef.current.has(stableKey)) {
+          const currentItem = items[index];
+          const currentRecord =
+            currentItem && typeof currentItem === 'object' && !Array.isArray(currentItem)
+              ? (currentItem as Record<string, t.ConfigValue>)
+              : undefined;
+          // A remount (e.g. switching tabs and back) within the same edit
+          // session throws away this component instance's origin map, but
+          // `editedValues` — and so `currentItem` — is unaffected: if an
+          // earlier edit already attached a hint (a rename's real origin, or
+          // the explicit "no origin" marker from creation), it's still
+          // sitting right there on the entry. Prefer it over the entry's
+          // current identity, or a fresh mount would "recapture" the
+          // already-renamed value (or manufacture an origin for a brand-new
+          // entry) as if it were the true origin, permanently losing the
+          // real signal.
+          //
+          // An entry with neither an embedded hint nor an existing identity
+          // (a pre-existing stored row saved blank, or a row edited before
+          // ever being named) caches `null`, not "leave uncached": once this
+          // entry IS given a name later in the same edit, an uncached slot
+          // would fall through to treating that brand-new name as if it were
+          // this entry's own long-standing identity — the same ambiguity a
+          // stamped-null brand-new entry closes, just reached by editing an
+          // existing identity-less row instead of adding a new one. `get`
+          // returning `undefined` after this point means only "capture
+          // hasn't run yet," never "there's genuinely nothing to restore."
+          const embeddedHint = currentRecord?.[PREVIOUS_IDENTITY_HINT_KEY];
+          const origin =
+            embeddedHint === null
+              ? null
+              : nonEmptyString(embeddedHint) ?? nonEmptyString(currentRecord?.[identityKey]) ?? null;
+          originalIdentityRef.current.set(stableKey, origin);
+        }
+        hinted = withPreviousIdentityHint(
+          newValue,
+          stableKey != null ? originalIdentityRef.current.get(stableKey) : undefined,
+        );
+      }
       if (onEntryChange) {
-        onEntryChange(index, newValue);
+        onEntryChange(index, hinted);
         return;
       }
       const next = [...items];
-      next[index] = newValue;
+      next[index] = hinted;
       onChange(next);
     },
-    [items, onChange, onEntryChange],
+    [items, onChange, onEntryChange, identityKey, keys],
   );
 
   return (

@@ -1,10 +1,10 @@
 import { Icon } from '@clickhouse/click-ui';
 import { useState, useCallback, useRef, useEffect } from 'react';
 import type * as t from '@/types';
+import { cn, stripUntouchedSecretRecordContainers } from '@/utils';
 import { TrashButton } from '@/components/shared';
 import { CodeField } from './CodeField';
 import { useLocalize } from '@/hooks';
-import { cn } from '@/utils';
 
 export function ObjectEntryCard({
   id,
@@ -69,9 +69,10 @@ export function ObjectEntryCard({
           : {};
       const segments = fieldPath.split('.');
       const leafKey = segments[segments.length - 1];
-      onValueChange({ ...current, [leafKey]: fieldValue });
+      const next: Record<string, t.ConfigValue> = { ...current, [leafKey]: fieldValue };
+      onValueChange(stripUntouchedSecretRecordContainers(next, fields));
     },
-    [value, onValueChange],
+    [value, onValueChange, fields],
   );
 
   const commitRename = useCallback(() => {

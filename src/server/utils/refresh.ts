@@ -9,12 +9,14 @@ const refreshResponseSchema = z.object({
   token: z.string(),
   refreshToken: z.string().optional(),
   expiresAt: z.number().optional(),
+  user: z.object({ tenantId: z.string().optional() }).passthrough().optional(),
 });
 
 export interface RefreshedTokenset {
   token: string;
   refreshToken?: string;
   expiresAt?: number;
+  user?: { tenantId?: string };
 }
 
 /**
@@ -27,12 +29,18 @@ export interface RefreshedTokenset {
  * even though every actual caller here is server-only, so the bundler can't
  * otherwise prove `getRequestHeader` is safe to keep out of the client build.
  */
-const readTenantHeader = createServerOnlyFn((): string | undefined => {
+export const readTenantHeader = createServerOnlyFn((): string | undefined => {
   const raw = getRequestHeader('x-tenant-id');
   if (typeof raw !== 'string') return undefined;
   const trimmed = raw.trim();
   return trimmed.length > 0 ? trimmed : undefined;
 });
+
+/** Add the authoritative request tenant without allowing callers to override it. */
+export function withTenantHeader(headers: Record<string, string> = {}): Record<string, string> {
+  const tenantId = readTenantHeader();
+  return tenantId ? { ...headers, 'X-Tenant-Id': tenantId } : headers;
+}
 
 function extractRefreshTokenCookie(response: Response): string | undefined {
   const setCookies = response.headers.getSetCookie();
@@ -46,9 +54,9 @@ function extractRefreshTokenCookie(response: Response): string | undefined {
 /**
  * Calls the LibreChat refresh endpoint matching the session's token provider.
  *
- * - `openid` sessions hit `/api/admin/oauth/refresh` (body-based) and forward
- *   the deployment's `X-Tenant-Id` header so the backend's
- *   `preAuthTenantMiddleware` scopes the user lookup correctly.
+ * Both paths forward the deployment's `X-Tenant-Id` header so the backend's
+ * `preAuthTenantMiddleware` scopes the user lookup correctly:
+ * - `openid` sessions hit `/api/admin/oauth/refresh` (body-based).
  * - `librechat` sessions hit the cookie-based `/api/auth/refresh`.
  *
  * Returns `undefined` on any network or schema failure — callers decide
@@ -65,11 +73,7 @@ export async function refreshAdminToken(
         console.warn('[refreshAdminToken] openid refresh requires user id; aborting');
         return undefined;
       }
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      const tenantId = readTenantHeader();
-      if (tenantId) {
-        headers['X-Tenant-Id'] = tenantId;
-      }
+      const headers = withTenantHeader({ 'Content-Type': 'application/json' });
       const response = await fetch(`${getServerApiUrl()}/api/admin/oauth/refresh`, {
         method: 'POST',
         headers,
@@ -82,12 +86,13 @@ export async function refreshAdminToken(
         token: parsed.data.token,
         refreshToken: parsed.data.refreshToken,
         expiresAt: parsed.data.expiresAt,
+        user: parsed.data.user,
       };
     }
 
     const response = await fetch(`${getServerApiUrl()}/api/auth/refresh`, {
       method: 'POST',
-      headers: { Cookie: `refreshToken=${refreshToken}` },
+      headers: withTenantHeader({ Cookie: `refreshToken=${refreshToken}` }),
     });
     if (!response.ok) return undefined;
     const parsed = refreshResponseSchema.safeParse(await response.json());
@@ -95,6 +100,8 @@ export async function refreshAdminToken(
     return {
       token: parsed.data.token,
       refreshToken: extractRefreshTokenCookie(response),
+      expiresAt: parsed.data.expiresAt,
+      user: parsed.data.user,
     };
   } catch (error) {
     console.warn('[refreshAdminToken] Token refresh request failed:', error);
@@ -170,6 +177,14 @@ export async function ensureFreshBearer(skewMs: number): Promise<string | undefi
     token: refreshed.token,
     refreshToken: refreshed.refreshToken ?? refreshToken,
     expiresAt: refreshed.expiresAt,
+    ...(refreshed.user && user
+      ? {
+          user: {
+            ...user,
+            ...(refreshed.user.tenantId !== undefined ? { tenantId: refreshed.user.tenantId } : {}),
+          },
+        }
+      : {}),
     lastVerified: now,
     lastActivity: now,
   });
@@ -193,6 +208,14 @@ export async function refreshOn401(): Promise<string | undefined> {
     token: refreshed.token,
     refreshToken: refreshed.refreshToken ?? refreshToken,
     expiresAt: refreshed.expiresAt,
+    ...(refreshed.user && user
+      ? {
+          user: {
+            ...user,
+            ...(refreshed.user.tenantId !== undefined ? { tenantId: refreshed.user.tenantId } : {}),
+          },
+        }
+      : {}),
     lastVerified: now,
     lastActivity: now,
   });

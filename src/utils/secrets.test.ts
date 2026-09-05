@@ -5,7 +5,14 @@ import {
   secretPathForPreviewPath,
   mapSecretPreviewPaths,
   stripSecretPreviewValues,
+  mergeUntouchedSecrets,
+  retainSnapshotSecretsOnly,
+  collectSecretFieldPaths,
+  isSecretFieldPath,
+  isSecretRecordSchemaField,
   filterSecretPreviewFields,
+  withPreviousIdentityHint,
+  PREVIOUS_IDENTITY_HINT_KEY,
 } from './secrets';
 import { createField } from '@/test/fixtures';
 
@@ -33,6 +40,51 @@ describe('getSecretPreviewValue', () => {
     expect(getSecretPreviewValue('sk-real', 'apiKey')).toBeUndefined();
     expect(getSecretPreviewValue(null, 'apiKey')).toBeUndefined();
     expect(getSecretPreviewValue(['apiKeyPreview'], 'apiKey')).toBeUndefined();
+  });
+});
+
+describe('isSecretRecordSchemaField', () => {
+  it('recognizes a registered credential-record container field', () => {
+    const field = createField({ key: 'headers', type: 'record', recordValueType: 'primitive' });
+    expect(isSecretRecordSchemaField(field)).toBe(true);
+  });
+
+  it('rejects a record field with an unregistered key', () => {
+    const field = createField({ key: 'metadata', type: 'record', recordValueType: 'primitive' });
+    expect(isSecretRecordSchemaField(field)).toBe(false);
+  });
+
+  it('rejects a registered key when the field is not a primitive record', () => {
+    const complexRecord = createField({ key: 'headers', type: 'record', recordValueType: 'complex' });
+    expect(isSecretRecordSchemaField(complexRecord)).toBe(false);
+
+    const nonRecord = createField({ key: 'headers', type: 'string' });
+    expect(isSecretRecordSchemaField(nonRecord)).toBe(false);
+  });
+});
+
+describe('withPreviousIdentityHint', () => {
+  it('leaves the value unchanged when origin is undefined', () => {
+    expect(withPreviousIdentityHint({ name: 'A' }, undefined)).toEqual({ name: 'A' });
+  });
+
+  it('stamps a string origin as the rename hint', () => {
+    expect(withPreviousIdentityHint({ name: 'A EU' }, 'A')).toEqual({
+      name: 'A EU',
+      [PREVIOUS_IDENTITY_HINT_KEY]: 'A',
+    });
+  });
+
+  it('stamps an explicit null origin, distinct from leaving the hint absent', () => {
+    const stamped = withPreviousIdentityHint({ name: 'A' }, null);
+    expect(stamped).toEqual({ name: 'A', [PREVIOUS_IDENTITY_HINT_KEY]: null });
+    expect(Object.hasOwn(stamped as object, PREVIOUS_IDENTITY_HINT_KEY)).toBe(true);
+  });
+
+  it('returns non-object values unchanged', () => {
+    expect(withPreviousIdentityHint('A', 'B')).toBe('A');
+    expect(withPreviousIdentityHint(null, 'B')).toBe(null);
+    expect(withPreviousIdentityHint(['A'], 'B')).toEqual(['A']);
   });
 });
 
@@ -118,6 +170,281 @@ describe('stripSecretPreviewValues', () => {
     expect(stripSecretPreviewValues('sk-typed', 'ocr.apiKey', schemaPaths)).toBe('sk-typed');
     expect(stripSecretPreviewValues(7, 'ocr.apiKey', schemaPaths)).toBe(7);
     expect(stripSecretPreviewValues(null, 'ocr.apiKey', schemaPaths)).toBeNull();
+  });
+});
+
+describe('mergeUntouchedSecrets', () => {
+  const secretFieldPaths = collectSecretFieldPaths([
+    createField({
+      key: 'custom',
+      path: 'endpoints.custom',
+      isArray: true,
+      children: [
+        createField({ key: 'name', type: 'string', path: 'endpoints.custom.name' }),
+        createField({ key: 'baseURL', type: 'string', path: 'endpoints.custom.baseURL' }),
+        createField({ key: 'apiKey', type: 'string', path: 'endpoints.custom.apiKey' }),
+        createField({
+          key: 'headers',
+          type: 'record',
+          path: 'endpoints.custom.headers',
+          recordValueType: 'primitive',
+        }),
+      ],
+    }),
+  ]);
+
+  it('copies omitted snapshot secrets into the edited object', () => {
+    expect(
+      mergeUntouchedSecrets(
+        { name: 'b', baseURL: 'https://edited.example.com', apiKeyPreview: 'sk-...bbbb' },
+        { name: 'b', apiKey: 'mongo-key' },
+        'endpoints.custom',
+        secretFieldPaths,
+      ),
+    ).toEqual({
+      name: 'b',
+      baseURL: 'https://edited.example.com',
+      apiKeyPreview: 'sk-...bbbb',
+      apiKey: 'mongo-key',
+    });
+  });
+
+  it('keeps an explicitly supplied secret including an empty string', () => {
+    expect(
+      mergeUntouchedSecrets(
+        { name: 'b', apiKey: '' },
+        { name: 'b', apiKey: 'mongo-key' },
+        'endpoints.custom',
+        secretFieldPaths,
+      ),
+    ).toEqual({ name: 'b', apiKey: '' });
+    expect(
+      mergeUntouchedSecrets(
+        { name: 'b', apiKey: 'new-key' },
+        { name: 'b', apiKey: 'mongo-key' },
+        'endpoints.custom',
+        secretFieldPaths,
+      ),
+    ).toEqual({ name: 'b', apiKey: 'new-key' });
+  });
+
+  it('does not copy non-secret snapshot fields', () => {
+    expect(
+      mergeUntouchedSecrets(
+        { name: 'b', baseURL: 'https://edited.example.com' },
+        { name: 'b', baseURL: 'https://mongo.example.com', apiKey: 'mongo-key' },
+        'endpoints.custom',
+        secretFieldPaths,
+      ),
+    ).toEqual({
+      name: 'b',
+      baseURL: 'https://edited.example.com',
+      apiKey: 'mongo-key',
+    });
+  });
+
+  it('does not treat non-secret fields as secrets when the schema includes them', () => {
+    expect(isSecretFieldPath('endpoints.custom.baseURL', secretFieldPaths)).toBe(false);
+    expect(isSecretFieldPath('endpoints.custom.name', secretFieldPaths)).toBe(false);
+    expect(isSecretFieldPath('endpoints.custom.apiKey', secretFieldPaths)).toBe(true);
+    expect(isSecretFieldPath('endpoints.custom.headers.Authorization', secretFieldPaths)).toBe(
+      true,
+    );
+    expect(isSecretFieldPath('endpoints.custom.headers', secretFieldPaths)).toBe(false);
+    expect(
+      mergeUntouchedSecrets(
+        { name: 'b', baseURL: 'https://edited.example.com' },
+        { name: 'b', baseURL: 'https://mongo.example.com', apiKey: 'mongo-key' },
+        'endpoints.custom',
+        secretFieldPaths,
+      ),
+    ).toEqual({
+      name: 'b',
+      baseURL: 'https://edited.example.com',
+      apiKey: 'mongo-key',
+    });
+  });
+
+  it('restores an omitted headers container from the snapshot wholesale', () => {
+    expect(
+      mergeUntouchedSecrets(
+        {
+          name: 'b',
+          baseURL: 'https://edited.example.com',
+        },
+        {
+          name: 'b',
+          headers: { Authorization: 'Bearer mongo', 'X-Custom': 'old' },
+        },
+        'endpoints.custom',
+        secretFieldPaths,
+      ),
+    ).toEqual({
+      name: 'b',
+      baseURL: 'https://edited.example.com',
+      headers: { Authorization: 'Bearer mongo', 'X-Custom': 'old' },
+    });
+  });
+
+  it('treats an explicit empty headers object as clearing all credentials', () => {
+    expect(
+      mergeUntouchedSecrets(
+        {
+          name: 'b',
+          baseURL: 'https://edited.example.com',
+          headers: {},
+        },
+        {
+          name: 'b',
+          headers: { Authorization: 'Bearer mongo', 'X-Custom': 'old' },
+        },
+        'endpoints.custom',
+        secretFieldPaths,
+      ),
+    ).toEqual({
+      name: 'b',
+      baseURL: 'https://edited.example.com',
+      headers: {},
+    });
+  });
+
+  it('does not restore a deleted header when another header is retained', () => {
+    expect(
+      mergeUntouchedSecrets(
+        {
+          name: 'b',
+          baseURL: 'https://edited.example.com',
+          headers: { 'X-Custom': 'edited' },
+        },
+        {
+          name: 'b',
+          headers: { Authorization: 'Bearer mongo', 'X-Custom': 'old' },
+        },
+        'endpoints.custom',
+        secretFieldPaths,
+      ),
+    ).toEqual({
+      name: 'b',
+      baseURL: 'https://edited.example.com',
+      headers: { 'X-Custom': 'edited' },
+    });
+  });
+});
+
+describe('retainSnapshotSecretsOnly', () => {
+  const secretFieldPaths = new Set(['endpoints.custom.apiKey', 'endpoints.custom.headers.*']);
+
+  it('drops YAML-only secrets from untouched entries', () => {
+    expect(
+      retainSnapshotSecretsOnly(
+        { name: 'a', baseURL: 'https://a.example.com', apiKey: 'yaml-a' },
+        undefined,
+        'endpoints.custom',
+        secretFieldPaths,
+      ),
+    ).toEqual({ name: 'a', baseURL: 'https://a.example.com' });
+  });
+
+  it('keeps secrets sourced from the Mongo snapshot', () => {
+    expect(
+      retainSnapshotSecretsOnly(
+        { name: 'd', baseURL: 'https://d.example.com', apiKey: 'yaml-only' },
+        { name: 'd', apiKey: 'mongo-d' },
+        'endpoints.custom',
+        secretFieldPaths,
+      ),
+    ).toEqual({ name: 'd', baseURL: 'https://d.example.com', apiKey: 'mongo-d' });
+  });
+
+  it('drops YAML-only dynamic header credentials recursively', () => {
+    expect(
+      retainSnapshotSecretsOnly(
+        {
+          name: 'a',
+          headers: { Authorization: 'Bearer yaml', 'X-Custom': 'yaml' },
+        },
+        undefined,
+        'endpoints.custom',
+        secretFieldPaths,
+      ),
+    ).toEqual({ name: 'a' });
+  });
+
+  it('keeps only snapshot-sourced header credentials', () => {
+    expect(
+      retainSnapshotSecretsOnly(
+        {
+          name: 'd',
+          headers: { Authorization: 'Bearer yaml', 'X-Custom': 'yaml' },
+        },
+        { name: 'd', headers: { Authorization: 'Bearer mongo' } },
+        'endpoints.custom',
+        secretFieldPaths,
+      ),
+    ).toEqual({
+      name: 'd',
+      headers: { Authorization: 'Bearer mongo' },
+    });
+  });
+
+  it('preserves numeric credential-record keys through array-index normalization', () => {
+    expect(isSecretFieldPath('endpoints.custom.0.headers.123', secretFieldPaths)).toBe(true);
+    expect(isSecretFieldPath('endpoints.custom.headers.123', secretFieldPaths)).toBe(true);
+
+    expect(
+      retainSnapshotSecretsOnly(
+        {
+          name: 'a',
+          headers: { 123: 'Bearer yaml', Authorization: 'Bearer yaml-auth' },
+        },
+        undefined,
+        'endpoints.custom',
+        secretFieldPaths,
+      ),
+    ).toEqual({ name: 'a' });
+
+    expect(
+      mergeUntouchedSecrets(
+        { name: 'b', baseURL: 'https://edited.example.com' },
+        { name: 'b', headers: { 123: 'Bearer mongo' } },
+        'endpoints.custom',
+        secretFieldPaths,
+      ),
+    ).toEqual({
+      name: 'b',
+      baseURL: 'https://edited.example.com',
+      headers: { 123: 'Bearer mongo' },
+    });
+  });
+
+  it('preserves dotted credential-record keys without treating dots as path segments', () => {
+    expect(isSecretFieldPath('endpoints.custom.0.headers.X.Foo', secretFieldPaths)).toBe(true);
+    expect(isSecretFieldPath('endpoints.custom.headers.X.Foo', secretFieldPaths)).toBe(true);
+
+    expect(
+      retainSnapshotSecretsOnly(
+        {
+          name: 'a',
+          headers: { 'X.Foo': 'Bearer yaml', Authorization: 'Bearer yaml-auth' },
+        },
+        undefined,
+        'endpoints.custom',
+        secretFieldPaths,
+      ),
+    ).toEqual({ name: 'a' });
+
+    expect(
+      mergeUntouchedSecrets(
+        { name: 'b', baseURL: 'https://edited.example.com' },
+        { name: 'b', headers: { 'X.Foo': 'Bearer mongo' } },
+        'endpoints.custom',
+        secretFieldPaths,
+      ),
+    ).toEqual({
+      name: 'b',
+      baseURL: 'https://edited.example.com',
+      headers: { 'X.Foo': 'Bearer mongo' },
+    });
   });
 });
 

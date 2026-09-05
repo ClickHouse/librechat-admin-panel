@@ -12,6 +12,7 @@ import { createServerFn } from '@tanstack/react-start';
 import { PrincipalType } from 'librechat-data-provider';
 import { hasImpliedCapability, SystemCapabilities } from '@librechat/data-schemas/capabilities';
 import type { AdminSystemGrant } from '@librechat/data-schemas';
+import type * as t from '@/types';
 import {
   AUDIT_ACTIONS,
   AUDIT_CATEGORIES,
@@ -22,6 +23,7 @@ import {
   isAuditEntryId,
 } from '@/constants';
 import { apiFetch, extractApiError } from './utils/api';
+import { tenantQueryKeys } from './keys';
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
@@ -50,38 +52,42 @@ function toAdminSystemGrant(raw: RawGrant): AdminSystemGrant {
 
 // ── Reads ────────────────────────────────────────────────────────────
 
-export const getAllGrantsFn = createServerFn({ method: 'GET' }).handler(
-  async (): Promise<{ grants: AdminSystemGrant[] }> => {
-    const response = await apiFetch('/api/admin/grants');
+export const getAllGrantsFn = createServerFn({ method: 'GET' })
+  .inputValidator(z.object({ expectedTenantId: z.string() }))
+  .handler(async ({ data }): Promise<{ grants: AdminSystemGrant[] }> => {
+    const response = await apiFetch('/api/admin/grants', undefined, data.expectedTenantId);
     if (!response.ok) {
       await extractApiError(response, 'Failed to fetch grants');
     }
     const json = (await response.json()) as { grants: RawGrant[] };
     return { grants: json.grants.map(toAdminSystemGrant) };
-  },
-);
+  });
 
-export const allGrantsQueryOptions = queryOptions({
-  queryKey: ['systemGrants'],
-  queryFn: () => getAllGrantsFn().then((r) => r.grants),
-  staleTime: 30_000,
-});
+export const allGrantsQueryOptions = (expectedTenantId: string) =>
+  queryOptions({
+    queryKey: tenantQueryKeys.grants(expectedTenantId),
+    queryFn: () => getAllGrantsFn({ data: { expectedTenantId } }).then((r) => r.grants),
+    staleTime: 30_000,
+  });
 
 export const getGrantsForPrincipalFn = createServerFn({ method: 'GET' })
   .inputValidator(
     z.object({
       principalType: z.nativeEnum(PrincipalType),
       principalId: z.string(),
+      expectedTenantId: z.string(),
     }),
   )
   .handler(
     async ({
       data,
     }: {
-      data: { principalType: PrincipalType; principalId: string };
+      data: { principalType: PrincipalType; principalId: string; expectedTenantId: string };
     }): Promise<{ grants: AdminSystemGrant[] }> => {
       const response = await apiFetch(
         `/api/admin/grants/${encodeURIComponent(data.principalType)}/${encodeURIComponent(data.principalId)}`,
+        undefined,
+        data.expectedTenantId,
       );
       if (!response.ok) {
         await extractApiError(response, 'Failed to fetch grants');
@@ -91,23 +97,70 @@ export const getGrantsForPrincipalFn = createServerFn({ method: 'GET' })
     },
   );
 
-export const principalGrantsQueryOptions = (principalType: PrincipalType, principalId: string) =>
+export const principalGrantsQueryOptions = (
+  principalType: PrincipalType,
+  principalId: string,
+  expectedTenantId: string,
+) =>
   queryOptions<AdminSystemGrant[]>({
-    queryKey: ['systemGrants', principalType, principalId],
+    queryKey: tenantQueryKeys.principalGrants(expectedTenantId, principalType, principalId),
     queryFn: () =>
-      getGrantsForPrincipalFn({ data: { principalType, principalId } }).then((r) => r.grants),
+      getGrantsForPrincipalFn({ data: { principalType, principalId, expectedTenantId } }).then(
+        (r) => r.grants,
+      ),
     staleTime: 30_000,
   });
 
-export const getEffectiveCapabilitiesFn = createServerFn({ method: 'GET' }).handler(
-  async (): Promise<{ capabilities: string[] }> => {
-    const response = await apiFetch('/api/admin/grants/effective');
+async function fetchEffectiveCapabilities(expectedTenantId?: string) {
+  const response = await apiFetch('/api/admin/grants/effective', undefined, expectedTenantId);
+  if (!response.ok) {
+    await extractApiError(response, 'Failed to fetch effective capabilities');
+  }
+  const payload = (await response.json()) as {
+    capabilities?: string[];
+    effectiveTenantId?: string;
+  };
+  if (!Array.isArray(payload.capabilities) || typeof payload.effectiveTenantId !== 'string') {
+    throw new Error('Effective capabilities response is missing its tenant context');
+  }
+  return {
+    capabilities: payload.capabilities,
+    effectiveTenantId: payload.effectiveTenantId,
+  };
+}
+
+export const getEffectiveCapabilitiesFn = createServerFn({ method: 'GET' }).handler(() =>
+  fetchEffectiveCapabilities(),
+);
+
+export const getTenantCapabilitiesFn = createServerFn({ method: 'GET' })
+  .inputValidator(z.object({ expectedTenantId: z.string() }))
+  .handler(async ({ data }): Promise<t.TenantCapabilitiesResponse> => {
+    const response = await apiFetch(
+      '/api/admin/grants/effective',
+      undefined,
+      data.expectedTenantId,
+    );
+    if (response.status === 409) {
+      const payload = (await response.json().catch(() => ({}))) as { currentTenantId?: string };
+      if (typeof payload.currentTenantId !== 'string') {
+        throw new Error('Tenant context changed without identifying the current tenant');
+      }
+      return { tenantChanged: true, currentTenantId: payload.currentTenantId };
+    }
     if (!response.ok) {
       await extractApiError(response, 'Failed to fetch effective capabilities');
     }
-    return (await response.json()) as { capabilities: string[] };
-  },
-);
+    const payload = (await response.json()) as Partial<t.EffectiveCapabilitiesResponse>;
+    if (!Array.isArray(payload.capabilities) || typeof payload.effectiveTenantId !== 'string') {
+      throw new Error('Effective capabilities response is missing its tenant context');
+    }
+    return {
+      tenantChanged: false,
+      capabilities: payload.capabilities,
+      effectiveTenantId: payload.effectiveTenantId,
+    };
+  });
 
 /**
  * Defense-in-depth guard for server functions.
@@ -117,8 +170,11 @@ export const getEffectiveCapabilitiesFn = createServerFn({ method: 'GET' }).hand
  * The LibreChat backend is the source of truth — this guard prevents
  * wasted round-trips for unauthorized operations.
  */
-export async function requireCapability(capability: string): Promise<void> {
-  const { capabilities } = await getEffectiveCapabilitiesFn();
+export async function requireCapability(
+  capability: string,
+  expectedTenantId?: string,
+): Promise<void> {
+  const { capabilities } = await fetchEffectiveCapabilities(expectedTenantId);
   if (!hasImpliedCapability(capabilities, capability)) {
     throw new Error(`Insufficient permissions: requires ${capability}`);
   }
@@ -163,10 +219,10 @@ export async function requireAllSectionCapabilities(sections: string[]): Promise
   }
 }
 
-export const effectiveCapabilitiesOptions = (userId: string) =>
+export const effectiveCapabilitiesOptions = (userId: string, expectedTenantId: string) =>
   queryOptions<string[]>({
-    queryKey: ['effectiveCapabilities', userId],
-    queryFn: () => getEffectiveCapabilitiesFn().then((r) => r.capabilities),
+    queryKey: tenantQueryKeys.effectiveCapabilities(expectedTenantId, userId),
+    queryFn: () => fetchEffectiveCapabilities(expectedTenantId).then((r) => r.capabilities),
     staleTime: 30_000,
   });
 
@@ -178,6 +234,7 @@ export const grantCapabilityFn = createServerFn({ method: 'POST' })
       principalType: z.nativeEnum(PrincipalType),
       principalId: z.string(),
       capability: z.string(),
+      expectedTenantId: z.string(),
     }),
   )
   .handler(
@@ -188,16 +245,21 @@ export const grantCapabilityFn = createServerFn({ method: 'POST' })
         principalType: PrincipalType;
         principalId: string;
         capability: string;
+        expectedTenantId: string;
       };
     }): Promise<{ success: boolean; grant: AdminSystemGrant }> => {
-      const response = await apiFetch('/api/admin/grants', {
-        method: 'POST',
-        body: JSON.stringify({
-          principalType: data.principalType,
-          principalId: data.principalId,
-          capability: data.capability,
-        }),
-      });
+      const response = await apiFetch(
+        '/api/admin/grants',
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            principalType: data.principalType,
+            principalId: data.principalId,
+            capability: data.capability,
+          }),
+        },
+        data.expectedTenantId,
+      );
       if (!response.ok) {
         await extractApiError(response, 'Failed to grant capability');
       }
@@ -214,6 +276,7 @@ export const revokeCapabilityFn = createServerFn({ method: 'POST' })
       principalType: z.nativeEnum(PrincipalType),
       principalId: z.string(),
       capability: z.string(),
+      expectedTenantId: z.string(),
     }),
   )
   .handler(
@@ -224,10 +287,11 @@ export const revokeCapabilityFn = createServerFn({ method: 'POST' })
         principalType: PrincipalType;
         principalId: string;
         capability: string;
+        expectedTenantId: string;
       };
     }): Promise<{ success: boolean }> => {
       const url = `/api/admin/grants/${encodeURIComponent(data.principalType)}/${encodeURIComponent(data.principalId)}/${encodeURIComponent(data.capability)}`;
-      const response = await apiFetch(url, { method: 'DELETE' });
+      const response = await apiFetch(url, { method: 'DELETE' }, data.expectedTenantId);
       if (!response.ok) {
         await extractApiError(response, 'Failed to revoke capability');
       }
@@ -269,6 +333,8 @@ const auditFilterSchema = z.object({
   limit: z.number().int().min(1).max(500).optional(),
   cursor: z.number().int().min(1).optional(),
 });
+
+const tenantAuditFilterSchema = auditFilterSchema.extend({ expectedTenantId: z.string() });
 
 export type AuditFilters = z.infer<typeof auditFilterSchema>;
 
@@ -346,17 +412,26 @@ function buildAuditLogQuery(filters: AuditFilters): string {
 }
 
 export const getAuditLogPageFn = createServerFn({ method: 'GET' })
-  .inputValidator(auditFilterSchema)
-  .handler(async ({ data }: { data: AuditFilters }): Promise<AuditLogPage> => {
-    await requireCapability(READ_AUDIT_LOG_CAPABILITY);
+  .inputValidator(tenantAuditFilterSchema)
+  .handler(async ({ data }): Promise<AuditLogPage> => {
+    await requireCapability(READ_AUDIT_LOG_CAPABILITY, data.expectedTenantId);
     /**
      * The LibreChat `/api/admin/audit-log` endpoint is a general-purpose event
      * log, but this UI only renders (and `adminAuditLogEntrySchema` only parses)
      * grant rows. Force `category=grant` so a non-grant event can never reach
      * the strict parser and error the whole tab.
      */
-    const withDefaults: AuditFilters = { limit: AUDIT_LOG_PAGE_SIZE, ...data, category: ['grant'] };
-    const response = await apiFetch(`/api/admin/audit-log${buildAuditLogQuery(withDefaults)}`);
+    const { expectedTenantId, ...filters } = data;
+    const withDefaults: AuditFilters = {
+      limit: AUDIT_LOG_PAGE_SIZE,
+      ...filters,
+      category: ['grant'],
+    };
+    const response = await apiFetch(
+      `/api/admin/audit-log${buildAuditLogQuery(withDefaults)}`,
+      undefined,
+      expectedTenantId,
+    );
     if (!response.ok) {
       await extractApiError(response, 'Failed to fetch audit log');
     }
@@ -364,17 +439,19 @@ export const getAuditLogPageFn = createServerFn({ method: 'GET' })
   });
 
 export const auditLogQueryOptions = (
+  expectedTenantId: string,
   page: number,
   filters: Omit<AuditFilters, 'offset' | 'limit'> = {},
 ) =>
   queryOptions({
-    queryKey: ['auditLog', page, filters] as const,
+    queryKey: tenantQueryKeys.auditLogPage(expectedTenantId, page, filters),
     queryFn: () =>
       getAuditLogPageFn({
         data: {
           ...filters,
           offset: (Math.max(1, page) - 1) * AUDIT_LOG_PAGE_SIZE,
           limit: AUDIT_LOG_PAGE_SIZE,
+          expectedTenantId,
         },
       }),
     staleTime: 60_000,
@@ -383,15 +460,21 @@ export const auditLogQueryOptions = (
 export const getAuditLogEntryFn = createServerFn({ method: 'GET' })
   /** Constrain to the backend's ObjectId shape so a crafted `entryId` (e.g.
    * `export.csv`) can't be proxied as a sibling audit-log sub-route. */
-  .inputValidator(z.object({ id: z.string().regex(/^[a-f0-9]{24}$/i) }))
+  .inputValidator(
+    z.object({ id: z.string().regex(/^[a-f0-9]{24}$/i), expectedTenantId: z.string() }),
+  )
   .handler(
     async ({
       data,
     }: {
-      data: { id: string };
+      data: { id: string; expectedTenantId: string };
     }): Promise<{ entry: z.infer<typeof adminAuditLogEntrySchema> | null }> => {
-      await requireCapability(READ_AUDIT_LOG_CAPABILITY);
-      const response = await apiFetch(`/api/admin/audit-log/${encodeURIComponent(data.id)}`);
+      await requireCapability(READ_AUDIT_LOG_CAPABILITY, data.expectedTenantId);
+      const response = await apiFetch(
+        `/api/admin/audit-log/${encodeURIComponent(data.id)}`,
+        undefined,
+        data.expectedTenantId,
+      );
       if (response.status === 404) return { entry: null };
       if (!response.ok) {
         await extractApiError(response, 'Failed to fetch audit log entry');
@@ -401,10 +484,10 @@ export const getAuditLogEntryFn = createServerFn({ method: 'GET' })
     },
   );
 
-export const auditLogEntryQueryOptions = (id: string | undefined) =>
+export const auditLogEntryQueryOptions = (id: string | undefined, expectedTenantId: string) =>
   queryOptions({
-    queryKey: ['auditLogEntry', id] as const,
-    queryFn: () => getAuditLogEntryFn({ data: { id: id ?? '' } }),
+    queryKey: tenantQueryKeys.auditLogEntry(expectedTenantId, id),
+    queryFn: () => getAuditLogEntryFn({ data: { id: id ?? '', expectedTenantId } }),
     /** Only fire for a well-formed id so a crafted `?entryId=` deep link can't
      * reach the server fn (which would reject it anyway). */
     enabled: isAuditEntryId(id),
@@ -412,17 +495,19 @@ export const auditLogEntryQueryOptions = (id: string | undefined) =>
   });
 
 export const exportAuditLogServerFn = createServerFn({ method: 'POST' })
-  .inputValidator(auditFilterSchema)
-  .handler(async ({ data }: { data: AuditFilters }): Promise<Response> => {
-    await requireCapability(READ_AUDIT_LOG_CAPABILITY);
+  .inputValidator(tenantAuditFilterSchema)
+  .handler(async ({ data }): Promise<Response> => {
+    await requireCapability(READ_AUDIT_LOG_CAPABILITY, data.expectedTenantId);
     /** Grant-scoped like the page fetch — this UI only deals with grant events. */
-    const scoped: AuditFilters = { ...data, category: ['grant'] };
+    const { expectedTenantId, ...filters } = data;
+    const scoped: AuditFilters = { ...filters, category: ['grant'] };
     const response = await apiFetch(
       `/api/admin/audit-log/export.csv${buildAuditLogQuery(scoped)}`,
       {
         method: 'GET',
         headers: { Accept: 'text/csv' },
       },
+      expectedTenantId,
     );
     if (!response.ok) {
       await extractApiError(response, 'Failed to export audit log');

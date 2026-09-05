@@ -8,6 +8,7 @@ const requestHeaders = new Map<string, string>();
 const sessionState: { data: Record<string, unknown> } = { data: {} };
 
 vi.mock('@tanstack/react-start', () => ({
+  createServerOnlyFn: <T extends (...args: never[]) => unknown>(fn: T) => fn,
   createServerFn: () => ({
     handler: (fn: (...args: unknown[]) => unknown) => fn,
     inputValidator: () => ({
@@ -42,6 +43,10 @@ vi.mock('./utils/url', () => ({
 
 vi.mock('./utils/refresh', () => ({
   refreshAdminTokenDeduped: vi.fn(),
+  withTenantHeader: (headers: Record<string, string> = {}) => {
+    const tenantId = requestHeaders.get('x-tenant-id')?.trim();
+    return tenantId ? { ...headers, 'X-Tenant-Id': tenantId } : headers;
+  },
 }));
 
 import {
@@ -58,6 +63,10 @@ function jsonResponse(status: number, body: unknown): Response {
     headers: { 'Content-Type': 'application/json' },
   });
 }
+
+beforeEach(() => {
+  requestHeaders.clear();
+});
 
 describe('adminLoginFn', () => {
   beforeEach(() => {
@@ -88,6 +97,22 @@ describe('adminLoginFn', () => {
         tokenProvider: 'librechat',
       }),
     );
+  });
+
+  it('forwards the authoritative tenant when performing a local login', async () => {
+    requestHeaders.set('x-tenant-id', 'tenant-b');
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(200, {
+        token: 'jwt-token',
+        user: { id: 'user-1', tenantId: 'tenant-b' },
+      }),
+    );
+
+    await adminLoginFn({ data: { email: 'admin@example.com', password: 'password' } });
+
+    expect((fetchMock.mock.calls[0][1] as RequestInit).headers).toMatchObject({
+      'X-Tenant-Id': 'tenant-b',
+    });
   });
 });
 
@@ -144,6 +169,23 @@ describe('adminVerify2FAFn', () => {
     });
     expect(updateSession).not.toHaveBeenCalled();
   });
+
+  it('forwards the authoritative tenant through 2FA and admin revalidation', async () => {
+    requestHeaders.set('x-tenant-id', 'tenant-b');
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(200, { token: 'jwt-token-2' }))
+      .mockResolvedValueOnce(jsonResponse(200, { user: { id: 'user-2', tenantId: 'tenant-b' } }));
+
+    await adminVerify2FAFn({ data: { tempToken: 'temp-token', totpCode: '123456' } });
+
+    expect((fetchMock.mock.calls[0][1] as RequestInit).headers).toMatchObject({
+      'X-Tenant-Id': 'tenant-b',
+    });
+    expect((fetchMock.mock.calls[1][1] as RequestInit).headers).toMatchObject({
+      'X-Tenant-Id': 'tenant-b',
+      Authorization: 'Bearer jwt-token-2',
+    });
+  });
 });
 
 describe('verifyAdminTokenFn', () => {
@@ -194,6 +236,24 @@ describe('verifyAdminTokenFn', () => {
       }),
     );
   });
+
+  it('forwards the authoritative tenant during periodic admin revalidation', async () => {
+    requestHeaders.set('x-tenant-id', 'tenant-b');
+    sessionState.data = {
+      user: { id: 'user-4', tenantId: 'tenant-b' },
+      token: 'jwt-token-4',
+      lastVerified: 0,
+      lastActivity: Date.now(),
+    };
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, {}));
+
+    await verifyAdminTokenFn();
+
+    expect((fetchMock.mock.calls[0][1] as RequestInit).headers).toMatchObject({
+      'X-Tenant-Id': 'tenant-b',
+      Authorization: 'Bearer jwt-token-4',
+    });
+  });
 });
 
 describe('oauthExchangeFn', () => {
@@ -209,6 +269,7 @@ describe('oauthExchangeFn', () => {
   it('exchanges the callback code with the PKCE verifier stored in the admin session', async () => {
     sessionState.data = { codeVerifier: 'verifier-123' };
     requestHeaders.set('origin', 'http://admin.test');
+    requestHeaders.set('x-tenant-id', 'tenant-b');
     fetchMock.mockResolvedValueOnce(
       jsonResponse(200, {
         token: 'jwt-token',
@@ -230,6 +291,7 @@ describe('oauthExchangeFn', () => {
       headers: {
         'Content-Type': 'application/json',
         Origin: 'http://admin.test',
+        'X-Tenant-Id': 'tenant-b',
       },
       body: JSON.stringify({ code: 'a'.repeat(64), code_verifier: 'verifier-123' }),
     });
@@ -285,7 +347,20 @@ describe('checkOpenIdFn', () => {
     const result = await checkOpenIdFn();
 
     expect(result).toEqual({ available: true, ssoOnly: false });
-    expect(fetchMock).toHaveBeenCalledWith('http://librechat.test/api/admin/oauth/openid/check');
+    expect(fetchMock).toHaveBeenCalledWith('http://librechat.test/api/admin/oauth/openid/check', {
+      headers: {},
+    });
+  });
+
+  it('forwards the authoritative tenant when checking OpenID availability', async () => {
+    requestHeaders.set('x-tenant-id', 'tenant-b');
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, {}));
+
+    await checkOpenIdFn();
+
+    expect(fetchMock).toHaveBeenCalledWith('http://librechat.test/api/admin/oauth/openid/check', {
+      headers: { 'X-Tenant-Id': 'tenant-b' },
+    });
   });
 
   it('marks the session SSO-only when ADMIN_SSO_ONLY=true', async () => {

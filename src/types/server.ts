@@ -1,6 +1,6 @@
 import type { TUser } from 'librechat-data-provider';
 
-export type SerializableUser = Pick<TUser, 'id' | 'email' | 'name' | 'role'>;
+export type SerializableUser = Pick<TUser, 'id' | 'email' | 'name' | 'role' | 'tenantId'>;
 
 export interface SessionData {
   user?: SerializableUser;
@@ -29,6 +29,20 @@ export interface TwoFAVerifyResponse {
 export interface AdminVerifyResponse {
   user: SerializableUser;
 }
+
+export interface EffectiveCapabilitiesResponse {
+  capabilities: string[];
+  effectiveTenantId: string;
+}
+
+export interface TenantChangedResponse {
+  currentTenantId: string;
+  tenantChanged: true;
+}
+
+export type TenantCapabilitiesResponse =
+  | (EffectiveCapabilitiesResponse & { tenantChanged: false })
+  | TenantChangedResponse;
 
 export interface OAuthExchangeResponse {
   token: string;

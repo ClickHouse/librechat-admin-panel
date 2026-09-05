@@ -1,4 +1,4 @@
-import { ensureFreshBearer, refreshOn401 } from './refresh';
+import { ensureFreshBearer, refreshOn401, withTenantHeader } from './refresh';
 import { getServerApiUrl } from './url';
 
 /** Skew window: refresh proactively when the bearer is within this of expiry. */
@@ -16,20 +16,29 @@ const PROACTIVE_REFRESH_SKEW_MS = 30_000;
  * @throws {Error} If no session bearer is available even after a refresh
  *   attempt.
  */
-export async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
+export async function apiFetch(
+  path: string,
+  init?: RequestInit,
+  expectedTenantId?: string,
+): Promise<Response> {
   const initialToken = await ensureFreshBearer(PROACTIVE_REFRESH_SKEW_MS);
   if (!initialToken) {
     throw new Error('No admin session token available');
   }
 
   const url = `${getServerApiUrl()}${path}`;
+  const callerHeaders = new Headers(init?.headers);
+  callerHeaders.delete('Authorization');
+  callerHeaders.delete('X-Tenant-Id');
+  callerHeaders.delete('X-Expected-Tenant-Id');
   const buildInit = (token: string): RequestInit => ({
     ...init,
-    headers: {
+    headers: withTenantHeader({
       'Content-Type': 'application/json',
-      ...init?.headers,
+      ...Object.fromEntries(callerHeaders.entries()),
+      ...(expectedTenantId !== undefined ? { 'X-Expected-Tenant-Id': expectedTenantId } : {}),
       Authorization: `Bearer ${token}`,
-    },
+    }),
   });
 
   const response = await fetch(url, buildInit(initialToken));

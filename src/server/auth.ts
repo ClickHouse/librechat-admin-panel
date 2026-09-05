@@ -5,10 +5,10 @@ import { queryOptions } from '@tanstack/react-query';
 import { createServerFn } from '@tanstack/react-start';
 import { getRequestHeader } from '@tanstack/react-start/server';
 import type * as t from '@/types';
+import { refreshAdminTokenDeduped, withTenantHeader } from './utils/refresh';
 import { getApiBaseUrl, getServerApiUrl } from './utils/url';
-import { refreshAdminTokenDeduped } from './utils/refresh';
-import { buildOAuthExchangePayload } from './utils/oauth';
 import { useAppSession, getSessionConfig } from './session';
+import { buildOAuthExchangePayload } from './utils/oauth';
 
 /** Extract a named cookie value from `set-cookie` response headers. */
 function extractCookieValue(response: Response, name: string): string | undefined {
@@ -52,7 +52,7 @@ export const adminLoginFn = createServerFn({ method: 'POST' })
     try {
       const response = await fetch(`${getServerApiUrl()}/api/admin/login/local`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: withTenantHeader({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(data),
       });
 
@@ -112,7 +112,7 @@ export const adminVerify2FAFn = createServerFn({ method: 'POST' })
     try {
       const response = await fetch(`${getServerApiUrl()}/api/auth/2fa/verify-temp`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: withTenantHeader({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ tempToken: data.tempToken, token: data.totpCode }),
       });
 
@@ -135,7 +135,7 @@ export const adminVerify2FAFn = createServerFn({ method: 'POST' })
 
       const verifyData = responseData as t.TwoFAVerifyResponse;
       const adminVerifyResponse = await fetch(`${getServerApiUrl()}/api/admin/verify`, {
-        headers: { Authorization: `Bearer ${verifyData.token}` },
+        headers: withTenantHeader({ Authorization: `Bearer ${verifyData.token}` }),
       });
 
       if (!adminVerifyResponse.ok) {
@@ -197,12 +197,13 @@ export const verifyAdminTokenFn = createServerFn({ method: 'GET' }).handler(asyn
       return { valid: false, error: 'Session expired due to inactivity' };
     }
 
-    const needsRevalidation = !lastVerified || now - lastVerified > sessionConfig.revalidationInterval;
+    const needsRevalidation =
+      !lastVerified || now - lastVerified > sessionConfig.revalidationInterval;
 
     if (needsRevalidation) {
       try {
         const response = await fetch(`${getServerApiUrl()}/api/admin/verify`, {
-          headers: { Authorization: `Bearer ${token}` },
+          headers: withTenantHeader({ Authorization: `Bearer ${token}` }),
         });
 
         if (!response.ok) {
@@ -218,24 +219,29 @@ export const verifyAdminTokenFn = createServerFn({ method: 'GET' }).handler(asyn
                 user.id,
               );
               if (refreshed) {
+                const refreshedUser =
+                  refreshed.user?.tenantId !== undefined
+                    ? { ...user, tenantId: refreshed.user.tenantId }
+                    : user;
                 const refreshedSession = {
                   token: refreshed.token,
                   refreshToken: refreshed.refreshToken ?? refreshToken,
                   expiresAt: refreshed.expiresAt,
+                  ...(refreshedUser !== user ? { user: refreshedUser } : {}),
                   lastVerified: now,
                   lastActivity: now,
                 };
                 try {
                   const reVerify = await fetch(`${getServerApiUrl()}/api/admin/verify`, {
-                    headers: { Authorization: `Bearer ${refreshed.token}` },
+                    headers: withTenantHeader({ Authorization: `Bearer ${refreshed.token}` }),
                   });
                   if (reVerify.ok) {
                     await session.update(refreshedSession);
-                    return { valid: true, user };
+                    return { valid: true, user: refreshedUser };
                   }
                 } catch {
                   await session.update(refreshedSession);
-                  return { valid: true, user };
+                  return { valid: true, user: refreshedUser };
                 }
               }
             }
@@ -300,7 +306,7 @@ export const adminLogoutFn = createServerFn({ method: 'POST' }).handler(async ()
       try {
         const response = await fetch(`${getServerApiUrl()}/api/auth/logout`, {
           method: 'POST',
-          headers: { Authorization: `Bearer ${token}` },
+          headers: withTenantHeader({ Authorization: `Bearer ${token}` }),
         });
         const parsed = logoutResponseSchema.safeParse(await response.json().catch(() => ({})));
         if (parsed.success) {
@@ -346,7 +352,7 @@ export const checkOpenIdFn = createServerFn({ method: 'GET' }).handler(async () 
   }
   const checkUrl = `${getServerApiUrl()}/api/admin/oauth/openid/check`;
   try {
-    const response = await fetch(checkUrl);
+    const response = await fetch(checkUrl, { headers: withTenantHeader() });
     if (!response.ok) {
       console.warn('[checkOpenIdFn] OpenID check failed:', response.status, checkUrl);
       return { available: false, ssoOnly: false };
@@ -400,7 +406,7 @@ export const oauthExchangeFn = createServerFn({ method: 'POST' })
 
       const response = await fetch(`${getServerApiUrl()}/api/admin/oauth/exchange`, {
         method: 'POST',
-        headers,
+        headers: withTenantHeader(headers),
         body: exchangePayload.body,
       });
 
